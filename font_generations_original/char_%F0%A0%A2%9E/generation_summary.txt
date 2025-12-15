@@ -1,0 +1,39 @@
+Input Character: 𠢞
+Output Directory: ./font_generations/char_%F0%A0%A2%9E
+Total Generated: 10
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 09:26:05
+
+Generated Characters:
+  - 𠢞
+  - 𠢟
+  - 𪃲
+  - 𢄂
+  - 鹘
+  - 塄
+  - 掳
+  - 𩷈
+  - 𨗊
+  - 费
+
+All Similar Characters (from Excel):
+  ✓ 𠢟
+  ✓ 𪃲
+  ✗ 腗
+  ✗ 髊
+  ✓ 𢄂
+  ✓ 鹘
+  ✗ 葂
+  ✗ 髈
+  ✓ 塄
+  ✗ 脋
+  ✗ 堧
+  ✗ 鏬
+  ✓ 掳
+  ✓ 𩷈
+  ✓ 𨗊
+  ✗ 撽
+  ✗ 蟧
+  ✗ 踅
+  ✗ 蒧
+  ✓ 费

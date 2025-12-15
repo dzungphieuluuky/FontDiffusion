@@ -1,0 +1,44 @@
+Input Character: 𠋂
+Output Directory: ./font_generations/char_%F0%A0%8B%82
+Total Generated: 15
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 08:06:16
+
+Generated Characters:
+  - 𠋂
+  - 搀
+  - 像
+  - 傥
+  - 馋
+  - 挽
+  - 俾
+  - 悌
+  - 偀
+  - 梚
+  - 俛
+  - 侅
+  - 𧚢
+  - 俣
+  - 桷
+
+All Similar Characters (from Excel):
+  ✓ 搀
+  ✓ 像
+  ✗ 倿
+  ✓ 傥
+  ✓ 馋
+  ✓ 挽
+  ✓ 俾
+  ✗ 倇
+  ✓ 悌
+  ✗ 俤
+  ✓ 偀
+  ✓ 梚
+  ✓ 俛
+  ✓ 侅
+  ✗ 僔
+  ✓ 𧚢
+  ✓ 俣
+  ✗ 栬
+  ✗ 钑
+  ✓ 桷

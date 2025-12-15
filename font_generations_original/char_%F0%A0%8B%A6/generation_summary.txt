@@ -1,0 +1,49 @@
+Input Character: 𠋦
+Output Directory: ./font_generations/char_%F0%A0%8B%A6
+Total Generated: 20
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 08:07:39
+
+Generated Characters:
+  - 𠋦
+  - 僚
+  - 僸
+  - 𡎡
+  - 禥
+  - 堠
+  - 禖
+  - 㩒
+  - 涷
+  - 𤲂
+  - 褀
+  - 𣗓
+  - 𢵸
+  - 椑
+  - 桦
+  - 楳
+  - 𧞤
+  - 栱
+  - 橑
+  - 伎
+
+All Similar Characters (from Excel):
+  ✓ 僚
+  ✓ 僸
+  ✓ 𡎡
+  ✓ 禥
+  ✓ 堠
+  ✓ 禖
+  ✓ 㩒
+  ✓ 涷
+  ✓ 𤲂
+  ✓ 褀
+  ✓ 𣗓
+  ✓ 𢵸
+  ✓ 椑
+  ✓ 桦
+  ✓ 楳
+  ✓ 𧞤
+  ✓ 栱
+  ✓ 橑
+  ✗ 侾
+  ✓ 伎

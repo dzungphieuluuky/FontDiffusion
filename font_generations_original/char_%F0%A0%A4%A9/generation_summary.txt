@@ -1,0 +1,48 @@
+Input Character: 𠤩
+Output Directory: ./font_generations/char_%F0%A0%A4%A9
+Total Generated: 19
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 09:32:12
+
+Generated Characters:
+  - 𠤩
+  - 軄
+  - 褪
+  - 𧟀
+  - 𥐇
+  - 𦢾
+  - 𢥷
+  - 鞉
+  - 㵣
+  - 黻
+  - 溦
+  - 𢸞
+  - 戲
+  - 𠽦
+  - 職
+  - 𣡯
+  - 𨃹
+  - 𢟔
+  - 鉳
+
+All Similar Characters (from Excel):
+  ✓ 軄
+  ✓ 褪
+  ✓ 𧟀
+  ✓ 𥐇
+  ✓ 𦢾
+  ✓ 𢥷
+  ✓ 鞉
+  ✓ 㵣
+  ✓ 黻
+  ✓ 溦
+  ✓ 𢸞
+  ✓ 戲
+  ✗ 僟
+  ✗ 隟
+  ✓ 𠽦
+  ✓ 職
+  ✓ 𣡯
+  ✓ 𨃹
+  ✓ 𢟔
+  ✓ 鉳

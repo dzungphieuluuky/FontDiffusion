@@ -1,0 +1,49 @@
+Input Character: 𠀖
+Output Directory: ./font_generations/char_%F0%A0%80%96
+Total Generated: 20
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 07:13:10
+
+Generated Characters:
+  - 𠀖
+  - 共
+  - 𠀗
+  - 𠀪
+  - 其
+  - 𠀫
+  - 丑
+  - 甚
+  - 芷
+  - 苝
+  - 坩
+  - 在
+  - 昔
+  - 咋
+  - 𠰮
+  - 互
+  - 𡊳
+  - 砖
+  - 茈
+  - 击
+
+All Similar Characters (from Excel):
+  ✓ 共
+  ✓ 𠀗
+  ✓ 𠀪
+  ✓ 其
+  ✓ 𠀫
+  ✓ 丑
+  ✓ 甚
+  ✓ 芷
+  ✓ 苝
+  ✓ 坩
+  ✓ 在
+  ✓ 昔
+  ✓ 咋
+  ✓ 𠰮
+  ✓ 互
+  ✓ 𡊳
+  ✓ 砖
+  ✗ 芉
+  ✓ 茈
+  ✓ 击

@@ -1,0 +1,42 @@
+Input Character: 𠠉
+Output Directory: ./font_generations/char_%F0%A0%A0%89
+Total Generated: 13
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 09:17:18
+
+Generated Characters:
+  - 𠠉
+  - 𨡊
+  - 鰂
+  - 𣎢
+  - 𠓇
+  - 𦖇
+  - 醐
+  - 𣊿
+  - 厠
+  - 𦗽
+  - 𢴿
+  - 𣍪
+  - 颇
+
+All Similar Characters (from Excel):
+  ✓ 𨡊
+  ✗ 擫
+  ✓ 鰂
+  ✗ 磡
+  ✓ 𣎢
+  ✓ 𠓇
+  ✓ 𦖇
+  ✗ 樚
+  ✗ 剻
+  ✓ 醐
+  ✓ 𣊿
+  ✓ 厠
+  ✓ 𦗽
+  ✗ 胹
+  ✗ 膇
+  ✗ 睓
+  ✓ 𢴿
+  ✓ 𣍪
+  ✓ 颇
+  ✗ 傰

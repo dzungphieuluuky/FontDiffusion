@@ -1,0 +1,50 @@
+Input Character: 𠏳
+Output Directory: ./font_generations/char_%F0%A0%8F%B3
+Total Generated: 21
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 08:23:40
+
+Generated Characters:
+  - 𠏳
+  - 𩖫
+  - 鰔
+  - 魤
+  - 鮅
+  - 𩷊
+  - 𠔮
+  - 䃛
+  - 勦
+  - 𪀚
+  - 颟
+  - 衂
+  - 嘝
+  - 𩻀
+  - 魛
+  - 谳
+  - 颧
+  - 𩸳
+  - 軔
+  - 鯫
+  - 𨠵
+
+All Similar Characters (from Excel):
+  ✓ 𩖫
+  ✓ 鰔
+  ✓ 魤
+  ✓ 鮅
+  ✓ 𩷊
+  ✓ 𠔮
+  ✓ 䃛
+  ✓ 勦
+  ✓ 𪀚
+  ✓ 颟
+  ✓ 衂
+  ✓ 嘝
+  ✓ 𩻀
+  ✓ 魛
+  ✓ 谳
+  ✓ 颧
+  ✓ 𩸳
+  ✓ 軔
+  ✓ 鯫
+  ✓ 𨠵

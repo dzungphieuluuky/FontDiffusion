@@ -1,0 +1,49 @@
+Input Character: 𠖿
+Output Directory: ./font_generations/char_%F0%A0%96%BF
+Total Generated: 20
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 08:50:13
+
+Generated Characters:
+  - 𠖿
+  - 𣳔
+  - 𠰩
+  - 佣
+  - 𢘭
+  - 胆
+  - 明
+  - 阻
+  - 朋
+  - 則
+  - 𣍪
+  - 㳉
+  - 𥞖
+  - 肫
+  - 拥
+  - 肺
+  - 畑
+  - 脢
+  - 𦘱
+  - 𢗠
+
+All Similar Characters (from Excel):
+  ✓ 𣳔
+  ✓ 𠰩
+  ✓ 佣
+  ✓ 𢘭
+  ✓ 胆
+  ✓ 明
+  ✓ 阻
+  ✗ 眀
+  ✓ 朋
+  ✓ 則
+  ✓ 𣍪
+  ✓ 㳉
+  ✓ 𥞖
+  ✓ 肫
+  ✓ 拥
+  ✓ 肺
+  ✓ 畑
+  ✓ 脢
+  ✓ 𦘱
+  ✓ 𢗠

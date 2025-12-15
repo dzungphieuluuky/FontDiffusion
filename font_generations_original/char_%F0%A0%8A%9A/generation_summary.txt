@@ -1,0 +1,44 @@
+Input Character: 𠊚
+Output Directory: ./font_generations/char_%F0%A0%8A%9A
+Total Generated: 15
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 08:02:00
+
+Generated Characters:
+  - 𠊚
+  - 得
+  - 碍
+  - 𥇹
+  - 𤊢
+  - 侵
+  - 侱
+  - 团
+  - 椇
+  - 佷
+  - 佢
+  - 佤
+  - 偈
+  - 锝
+  - 橒
+
+All Similar Characters (from Excel):
+  ✓ 得
+  ✓ 碍
+  ✓ 𥇹
+  ✓ 𤊢
+  ✓ 侵
+  ✗ 棏
+  ✓ 侱
+  ✗ 倶
+  ✓ 团
+  ✗ 庌
+  ✓ 椇
+  ✓ 佷
+  ✗ 侸
+  ✓ 佢
+  ✓ 佤
+  ✓ 偈
+  ✓ 锝
+  ✓ 橒
+  ✗ 傝
+  ✗ 偟

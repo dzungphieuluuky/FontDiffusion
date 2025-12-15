@@ -1,0 +1,48 @@
+Input Character: 𠅼
+Output Directory: ./font_generations/char_%F0%A0%85%BC
+Total Generated: 19
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 07:49:09
+
+Generated Characters:
+  - 𠅼
+  - 裎
+  - 瘖
+  - 痷
+  - 𤸧
+  - 𧹥
+  - 蓓
+  - 㨂
+  - 薐
+  - 禖
+  - 瘠
+  - 蒨
+  - 窺
+  - 𤥑
+  - 駸
+  - 𤷰
+  - 褎
+  - 楟
+  - 堄
+
+All Similar Characters (from Excel):
+  ✓ 裎
+  ✓ 瘖
+  ✓ 痷
+  ✓ 𤸧
+  ✓ 𧹥
+  ✓ 蓓
+  ✓ 㨂
+  ✓ 薐
+  ✗ 稕
+  ✓ 禖
+  ✓ 瘠
+  ✓ 蒨
+  ✗ 痵
+  ✓ 窺
+  ✓ 𤥑
+  ✓ 駸
+  ✓ 𤷰
+  ✓ 褎
+  ✓ 楟
+  ✓ 堄

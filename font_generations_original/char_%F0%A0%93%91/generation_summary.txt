@@ -1,0 +1,49 @@
+Input Character: 𠓑
+Output Directory: ./font_generations/char_%F0%A0%93%91
+Total Generated: 20
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 08:37:50
+
+Generated Characters:
+  - 𠓑
+  - 𦩳
+  - 𪃙
+  - 輟
+  - 𢹣
+  - 鑥
+  - 橢
+  - 𥼖
+  - 赌
+  - 𡒭
+  - 𩻻
+  - 賭
+  - 俾
+  - 𧒌
+  - 媾
+  - 𧤸
+  - 䱚
+  - 𡢻
+  - 𥼲
+  - 穭
+
+All Similar Characters (from Excel):
+  ✓ 𦩳
+  ✓ 𪃙
+  ✓ 輟
+  ✓ 𢹣
+  ✓ 鑥
+  ✓ 橢
+  ✓ 𥼖
+  ✗ 躹
+  ✓ 赌
+  ✓ 𡒭
+  ✓ 𩻻
+  ✓ 賭
+  ✓ 俾
+  ✓ 𧒌
+  ✓ 媾
+  ✓ 𧤸
+  ✓ 䱚
+  ✓ 𡢻
+  ✓ 𥼲
+  ✓ 穭

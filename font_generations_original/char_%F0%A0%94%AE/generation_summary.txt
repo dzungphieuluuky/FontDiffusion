@@ -1,0 +1,50 @@
+Input Character: 𠔮
+Output Directory: ./font_generations/char_%F0%A0%94%AE
+Total Generated: 21
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 08:43:22
+
+Generated Characters:
+  - 𠔮
+  - 輗
+  - 𤍆
+  - 赚
+  - 𦑗
+  - 鰔
+  - 𡁙
+  - 𪖺
+  - 𤳆
+  - 懒
+  - 舥
+  - 觐
+  - 𧟀
+  - 鶼
+  - 嚱
+  - 𡁛
+  - 𣟪
+  - 𧞣
+  - 勦
+  - 𧋿
+  - 鹣
+
+All Similar Characters (from Excel):
+  ✓ 輗
+  ✓ 𤍆
+  ✓ 赚
+  ✓ 𦑗
+  ✓ 鰔
+  ✓ 𡁙
+  ✓ 𪖺
+  ✓ 𤳆
+  ✓ 懒
+  ✓ 舥
+  ✓ 觐
+  ✓ 𧟀
+  ✓ 鶼
+  ✓ 嚱
+  ✓ 𡁛
+  ✓ 𣟪
+  ✓ 𧞣
+  ✓ 勦
+  ✓ 𧋿
+  ✓ 鹣

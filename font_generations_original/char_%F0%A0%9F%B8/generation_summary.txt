@@ -1,0 +1,46 @@
+Input Character: 𠟸
+Output Directory: ./font_generations/char_%F0%A0%9F%B8
+Total Generated: 17
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 09:16:16
+
+Generated Characters:
+  - 𠟸
+  - 訰
+  - 謿
+  - 𠽆
+  - 蒯
+  - 諂
+  - 𠞟
+  - 謊
+  - 詵
+  - 𩠧
+  - 訶
+  - 剖
+  - 𧐾
+  - 瘌
+  - 詭
+  - 訥
+  - 𠶜
+
+All Similar Characters (from Excel):
+  ✓ 訰
+  ✓ 謿
+  ✓ 𠽆
+  ✓ 蒯
+  ✗ 訠
+  ✓ 諂
+  ✓ 𠞟
+  ✗ 訽
+  ✓ 謊
+  ✓ 詵
+  ✓ 𩠧
+  ✗ 詗
+  ✓ 訶
+  ✗ 耥
+  ✓ 剖
+  ✓ 𧐾
+  ✓ 瘌
+  ✓ 詭
+  ✓ 訥
+  ✓ 𠶜

@@ -1,0 +1,44 @@
+Input Character: 𠃝
+Output Directory: ./font_generations/char_%F0%A0%83%9D
+Total Generated: 15
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 07:33:38
+
+Generated Characters:
+  - 𠃝
+  - 𢖮
+  - 𠃣
+  - 匃
+  - 𧰦
+  - 尥
+  - 𡭜
+  - 郁
+  - 怆
+  - 𣅗
+  - 抱
+  - 起
+  - 𥄵
+  - 心
+  - 恂
+
+All Similar Characters (from Excel):
+  ✗ 氹
+  ✓ 𢖮
+  ✓ 𠃣
+  ✗ 毜
+  ✓ 匃
+  ✓ 𧰦
+  ✗ 刉
+  ✓ 尥
+  ✓ 𡭜
+  ✓ 郁
+  ✓ 怆
+  ✗ 朼
+  ✓ 𣅗
+  ✗ 匂
+  ✓ 抱
+  ✓ 起
+  ✓ 𥄵
+  ✓ 心
+  ✓ 恂
+  ✗ 怐

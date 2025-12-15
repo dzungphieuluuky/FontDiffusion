@@ -1,0 +1,45 @@
+Input Character: 𠊝
+Output Directory: ./font_generations/char_%F0%A0%8A%9D
+Total Generated: 16
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 08:03:39
+
+Generated Characters:
+  - 𠊝
+  - 岱
+  - 登
+  - 袋
+  - 咨
+  - 笞
+  - 帒
+  - 贷
+  - 墱
+  - 礬
+  - 垡
+  - 侉
+  - 𦝍
+  - 皙
+  - 鎔
+  - 瓷
+
+All Similar Characters (from Excel):
+  ✓ 岱
+  ✓ 登
+  ✓ 袋
+  ✗ 筨
+  ✓ 咨
+  ✗ 箁
+  ✓ 笞
+  ✓ 帒
+  ✓ 贷
+  ✓ 墱
+  ✓ 礬
+  ✓ 垡
+  ✓ 侉
+  ✗ 笢
+  ✗ 滘
+  ✓ 𦝍
+  ✓ 皙
+  ✗ 垸
+  ✓ 鎔
+  ✓ 瓷

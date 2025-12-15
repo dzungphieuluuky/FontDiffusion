@@ -1,0 +1,49 @@
+Input Character: 𠖈
+Output Directory: ./font_generations/char_%F0%A0%96%88
+Total Generated: 20
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 08:44:02
+
+Generated Characters:
+  - 𠖈
+  - 冠
+  - 𨑜
+  - 鸦
+  - 冦
+  - 𠅍
+  - 坑
+  - 迂
+  - 𥝽
+  - 𣮇
+  - 𤴰
+  - 疸
+  - 杭
+  - 𤴪
+  - 𣜲
+  - 跎
+  - 𥙒
+  - 疴
+  - 炕
+  - 鴉
+
+All Similar Characters (from Excel):
+  ✓ 冠
+  ✗ 尫
+  ✓ 𨑜
+  ✓ 鸦
+  ✓ 冦
+  ✓ 𠅍
+  ✓ 坑
+  ✓ 迂
+  ✓ 𥝽
+  ✓ 𣮇
+  ✓ 𤴰
+  ✓ 疸
+  ✓ 杭
+  ✓ 𤴪
+  ✓ 𣜲
+  ✓ 跎
+  ✓ 𥙒
+  ✓ 疴
+  ✓ 炕
+  ✓ 鴉

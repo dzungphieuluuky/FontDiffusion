@@ -1,0 +1,49 @@
+Input Character: 𠍣
+Output Directory: ./font_generations/char_%F0%A0%8D%A3
+Total Generated: 20
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 08:11:09
+
+Generated Characters:
+  - 𠍣
+  - 𦚕
+  - 𦛍
+  - 腓
+  - 𣍪
+  - 𣲹
+  - 胼
+  - 湖
+  - 𠼕
+  - 潮
+  - 脏
+  - 胁
+  - 𤮾
+  - 柟
+  - 𣎖
+  - 邯
+  - 拥
+  - 腘
+  - 肿
+  - 𤭸
+
+All Similar Characters (from Excel):
+  ✓ 𦚕
+  ✓ 𦛍
+  ✗ 肼
+  ✓ 腓
+  ✓ 𣍪
+  ✓ 𣲹
+  ✓ 胼
+  ✓ 湖
+  ✓ 𠼕
+  ✓ 潮
+  ✓ 脏
+  ✓ 胁
+  ✓ 𤮾
+  ✓ 柟
+  ✓ 𣎖
+  ✓ 邯
+  ✓ 拥
+  ✓ 腘
+  ✓ 肿
+  ✓ 𤭸

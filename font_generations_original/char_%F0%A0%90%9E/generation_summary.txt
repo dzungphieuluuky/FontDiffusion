@@ -1,0 +1,49 @@
+Input Character: 𠐞
+Output Directory: ./font_generations/char_%F0%A0%90%9E
+Total Generated: 20
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 08:24:56
+
+Generated Characters:
+  - 𠐞
+  - 㩡
+  - 𤂬
+  - 𠈭
+  - 裾
+  - 㰁
+  - 禘
+  - 塀
+  - 𡓃
+  - 𢹣
+  - 柄
+  - 俾
+  - 撟
+  - 催
+  - 𧛷
+  - 𤑭
+  - 権
+  - 槯
+  - 掘
+  - 慛
+
+All Similar Characters (from Excel):
+  ✓ 㩡
+  ✓ 𤂬
+  ✓ 𠈭
+  ✓ 裾
+  ✓ 㰁
+  ✓ 禘
+  ✓ 塀
+  ✓ 𡓃
+  ✓ 𢹣
+  ✗ 偙
+  ✓ 柄
+  ✓ 俾
+  ✓ 撟
+  ✓ 催
+  ✓ 𧛷
+  ✓ 𤑭
+  ✓ 権
+  ✓ 槯
+  ✓ 掘
+  ✓ 慛

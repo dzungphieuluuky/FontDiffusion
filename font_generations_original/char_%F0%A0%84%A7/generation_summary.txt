@@ -1,0 +1,48 @@
+Input Character: 𠄧
+Output Directory: ./font_generations/char_%F0%A0%84%A7
+Total Generated: 19
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 07:39:30
+
+Generated Characters:
+  - 𠄧
+  - 𠀧
+  - 叵
+  - 芑
+  - 閂
+  - 芭
+  - 𣲆
+  - 匠
+  - 笸
+  - 巴
+  - 匡
+  - 𣇙
+  - 笆
+  - 咺
+  - 巳
+  - 𣅗
+  - 呵
+  - 桓
+  - 𠇕
+
+All Similar Characters (from Excel):
+  ✓ 𠀧
+  ✓ 叵
+  ✓ 芑
+  ✓ 閂
+  ✓ 芭
+  ✗ 鸤
+  ✓ 𣲆
+  ✓ 匠
+  ✓ 笸
+  ✓ 巴
+  ✓ 匡
+  ✓ 𣇙
+  ✓ 笆
+  ✓ 咺
+  ✓ 巳
+  ✓ 𣅗
+  ✓ 呵
+  ✓ 桓
+  ✗ 訄
+  ✓ 𠇕

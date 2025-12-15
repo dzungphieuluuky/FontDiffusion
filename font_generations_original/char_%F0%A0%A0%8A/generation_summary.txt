@@ -1,0 +1,43 @@
+Input Character: 𠠊
+Output Directory: ./font_generations/char_%F0%A0%A0%8A
+Total Generated: 14
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 09:17:47
+
+Generated Characters:
+  - 𠠊
+  - 謦
+  - 鷣
+  - 𠟲
+  - 譬
+  - 騾
+  - 𨇣
+  - 䴈
+  - 𡔑
+  - 𡃖
+  - 鷌
+  - 螞
+  - 鹥
+  - 齶
+
+All Similar Characters (from Excel):
+  ✓ 謦
+  ✓ 鷣
+  ✓ 𠟲
+  ✗ 朢
+  ✗ 颱
+  ✓ 譬
+  ✓ 騾
+  ✗ 鴄
+  ✗ 龒
+  ✓ 𨇣
+  ✓ 䴈
+  ✓ 𡔑
+  ✓ 𡃖
+  ✓ 鷌
+  ✓ 螞
+  ✗ 鹯
+  ✗ 瑿
+  ✗ 皽
+  ✓ 鹥
+  ✓ 齶

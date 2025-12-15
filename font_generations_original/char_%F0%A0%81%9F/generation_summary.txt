@@ -1,0 +1,49 @@
+Input Character: 𠁟
+Output Directory: ./font_generations/char_%F0%A0%81%9F
+Total Generated: 20
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 07:25:12
+
+Generated Characters:
+  - 𠁟
+  - 𥻧
+  - 鎌
+  - 𨃰
+  - 溓
+  - 鰜
+  - 慊
+  - 稴
+  - 謙
+  - 嫌
+  - 赚
+  - 槏
+  - 尲
+  - 縑
+  - 𡄫
+  - 䁠
+  - 熑
+  - 歉
+  - 𠔮
+  - 𢟐
+
+All Similar Characters (from Excel):
+  ✓ 𥻧
+  ✓ 鎌
+  ✓ 𨃰
+  ✓ 溓
+  ✓ 鰜
+  ✓ 慊
+  ✓ 稴
+  ✓ 謙
+  ✓ 嫌
+  ✓ 赚
+  ✓ 槏
+  ✓ 尲
+  ✓ 縑
+  ✓ 𡄫
+  ✓ 䁠
+  ✓ 熑
+  ✓ 歉
+  ✗ 嵰
+  ✓ 𠔮
+  ✓ 𢟐

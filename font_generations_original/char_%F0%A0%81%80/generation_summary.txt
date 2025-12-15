@@ -1,0 +1,44 @@
+Input Character: 𠁀
+Output Directory: ./font_generations/char_%F0%A0%81%80
+Total Generated: 15
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 07:19:56
+
+Generated Characters:
+  - 𠁀
+  - 薿
+  - 𣵯
+  - 蓧
+  - 楪
+  - 葆
+  - 粜
+  - 搈
+  - 𣟮
+  - 𨧣
+  - 袈
+  - 椽
+  - 檚
+  - 聫
+  - 荞
+
+All Similar Characters (from Excel):
+  ✓ 薿
+  ✓ 𣵯
+  ✓ 蓧
+  ✓ 楪
+  ✗ 葔
+  ✓ 葆
+  ✓ 粜
+  ✗ 攐
+  ✓ 搈
+  ✓ 𣟮
+  ✗ 蒅
+  ✓ 𨧣
+  ✓ 袈
+  ✓ 椽
+  ✗ 蒮
+  ✓ 檚
+  ✓ 聫
+  ✗ 瑑
+  ✓ 荞
+  ✗ 菧

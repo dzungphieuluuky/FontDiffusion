@@ -1,0 +1,45 @@
+Input Character: 𠌇
+Output Directory: ./font_generations/char_%F0%A0%8C%87
+Total Generated: 16
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 08:08:45
+
+Generated Characters:
+  - 𠌇
+  - 僻
+  - 𢲲
+  - 榔
+  - 瑯
+  - 僩
+  - 㐻
+  - 裀
+  - 俐
+  - 偭
+  - 糋
+  - 佛
+  - 假
+  - 倔
+  - 儁
+  - 𠐅
+
+All Similar Characters (from Excel):
+  ✓ 僻
+  ✓ 𢲲
+  ✓ 榔
+  ✓ 瑯
+  ✗ 铏
+  ✓ 僩
+  ✓ 㐻
+  ✗ 椨
+  ✓ 裀
+  ✓ 俐
+  ✗ 椼
+  ✓ 偭
+  ✓ 糋
+  ✗ 阤
+  ✓ 佛
+  ✓ 假
+  ✓ 倔
+  ✓ 儁
+  ✗ 郙
+  ✓ 𠐅

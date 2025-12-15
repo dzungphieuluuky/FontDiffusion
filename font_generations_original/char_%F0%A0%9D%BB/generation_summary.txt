@@ -1,0 +1,43 @@
+Input Character: 𠝻
+Output Directory: ./font_generations/char_%F0%A0%9D%BB
+Total Generated: 14
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 09:07:28
+
+Generated Characters:
+  - 𠝻
+  - 擱
+  - 惆
+  - 搁
+  - 粡
+  - 捆
+  - 掆
+  - 制
+  - 削
+  - 澜
+  - 胊
+  - 膊
+  - 魝
+  - 𢲨
+
+All Similar Characters (from Excel):
+  ✗ 胟
+  ✓ 擱
+  ✓ 惆
+  ✓ 搁
+  ✗ 胕
+  ✓ 粡
+  ✓ 捆
+  ✓ 掆
+  ✗ 榯
+  ✓ 制
+  ✗ 閈
+  ✓ 削
+  ✓ 澜
+  ✓ 胊
+  ✗ 烔
+  ✓ 膊
+  ✗ 阤
+  ✓ 魝
+  ✓ 𢲨
+  ✗ 旽

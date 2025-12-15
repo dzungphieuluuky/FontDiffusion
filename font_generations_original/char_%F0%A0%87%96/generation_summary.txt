@@ -1,0 +1,46 @@
+Input Character: 𠇖
+Output Directory: ./font_generations/char_%F0%A0%87%96
+Total Generated: 17
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 07:52:09
+
+Generated Characters:
+  - 𠇖
+  - 𤇮
+  - 俘
+  - 柉
+  - 抸
+  - 烀
+  - 纡
+  - 对
+  - 仔
+  - 𢩪
+  - 杓
+  - 𠇼
+  - 𠖯
+  - 泛
+  - 𢫕
+  - 均
+  - 𤝑
+
+All Similar Characters (from Excel):
+  ✓ 𤇮
+  ✓ 俘
+  ✓ 柉
+  ✓ 抸
+  ✓ 烀
+  ✓ 纡
+  ✓ 对
+  ✗ 伨
+  ✓ 仔
+  ✓ 𢩪
+  ✗ 仢
+  ✓ 杓
+  ✓ 𠇼
+  ✓ 𠖯
+  ✗ 仂
+  ✗ 汮
+  ✓ 泛
+  ✓ 𢫕
+  ✓ 均
+  ✓ 𤝑

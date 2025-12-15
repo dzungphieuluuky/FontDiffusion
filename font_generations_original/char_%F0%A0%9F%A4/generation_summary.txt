@@ -1,0 +1,45 @@
+Input Character: 𠟤
+Output Directory: ./font_generations/char_%F0%A0%9F%A4
+Total Generated: 16
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 09:14:29
+
+Generated Characters:
+  - 𠟤
+  - 割
+  - 剷
+  - 刳
+  - 剖
+  - 㓤
+  - 剥
+  - 衛
+  - 尉
+  - 尅
+  - 對
+  - 𧦕
+  - 刲
+  - 劇
+  - 冠
+  - 擣
+
+All Similar Characters (from Excel):
+  ✓ 割
+  ✓ 剷
+  ✗ 菵
+  ✓ 刳
+  ✓ 剖
+  ✓ 㓤
+  ✓ 剥
+  ✓ 衛
+  ✗ 闬
+  ✓ 尉
+  ✓ 尅
+  ✗ 剨
+  ✓ 對
+  ✓ 𧦕
+  ✓ 刲
+  ✓ 劇
+  ✗ 霕
+  ✓ 冠
+  ✗ 兙
+  ✓ 擣

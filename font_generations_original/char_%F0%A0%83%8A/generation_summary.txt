@@ -1,0 +1,50 @@
+Input Character: 𠃊
+Output Directory: ./font_generations/char_%F0%A0%83%8A
+Total Generated: 21
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 07:32:27
+
+Generated Characters:
+  - 𠃊
+  - 匚
+  - 〡
+  - 丄
+  - 工
+  - 亡
+  - 上
+  - 十
+  - 匸
+  - 〢
+  - 丨
+  - 止
+  - 乚
+  - 土
+  - 叿
+  - 日
+  - 五
+  - 丁
+  - 囗
+  - 厂
+  - 叮
+
+All Similar Characters (from Excel):
+  ✓ 匚
+  ✓ 〡
+  ✓ 丄
+  ✓ 工
+  ✓ 亡
+  ✓ 上
+  ✓ 十
+  ✓ 匸
+  ✓ 〢
+  ✓ 丨
+  ✓ 止
+  ✓ 乚
+  ✓ 土
+  ✓ 叿
+  ✓ 日
+  ✓ 五
+  ✓ 丁
+  ✓ 囗
+  ✓ 厂
+  ✓ 叮

@@ -1,0 +1,47 @@
+Input Character: 𠄜
+Output Directory: ./font_generations/char_%F0%A0%84%9C
+Total Generated: 18
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 07:38:13
+
+Generated Characters:
+  - 𠄜
+  - 𥺻
+  - 镟
+  - 許
+  - 澣
+  - 𣇞
+  - 㧺
+  - 蘚
+  - 𥜡
+  - 璙
+  - 锛
+  - 䤲
+  - 錛
+  - 𢺜
+  - 衔
+  - 鋳
+  - 鯰
+  - 擛
+
+All Similar Characters (from Excel):
+  ✓ 𥺻
+  ✓ 镟
+  ✓ 許
+  ✓ 澣
+  ✗ 輇
+  ✓ 𣇞
+  ✓ 㧺
+  ✓ 蘚
+  ✓ 𥜡
+  ✓ 璙
+  ✓ 锛
+  ✗ 鵌
+  ✓ 䤲
+  ✓ 錛
+  ✓ 𢺜
+  ✓ 衔
+  ✓ 鋳
+  ✓ 鯰
+  ✓ 擛
+  ✗ 蓒

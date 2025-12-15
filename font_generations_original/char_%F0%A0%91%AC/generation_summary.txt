@@ -1,0 +1,49 @@
+Input Character: 𠑬
+Output Directory: ./font_generations/char_%F0%A0%91%AC
+Total Generated: 20
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 08:30:38
+
+Generated Characters:
+  - 𠑬
+  - 𦈂
+  - 鐡
+  - 鰁
+  - 饑
+  - 餽
+  - 𩻑
+  - 𢥅
+  - 饢
+  - 𠑈
+  - 鏹
+  - 𨮈
+  - 𦣗
+  - 𩟼
+  - 𩺦
+  - 餬
+  - 鎩
+  - 鲢
+  - 躦
+  - 𧜺
+
+All Similar Characters (from Excel):
+  ✓ 𦈂
+  ✓ 鐡
+  ✓ 鰁
+  ✓ 饑
+  ✓ 餽
+  ✓ 𩻑
+  ✓ 𢥅
+  ✓ 饢
+  ✗ 憱
+  ✓ 𠑈
+  ✓ 鏹
+  ✓ 𨮈
+  ✓ 𦣗
+  ✓ 𩟼
+  ✓ 𩺦
+  ✓ 餬
+  ✓ 鎩
+  ✓ 鲢
+  ✓ 躦
+  ✓ 𧜺

@@ -1,0 +1,43 @@
+Input Character: 𠓔
+Output Directory: ./font_generations/char_%F0%A0%93%94
+Total Generated: 14
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 08:38:19
+
+Generated Characters:
+  - 𠓔
+  - 𣟃
+  - 𤘂
+  - 𨮒
+  - 𥶱
+  - 䑅
+  - 蜺
+  - 懜
+  - 熘
+  - 𢢋
+  - 𤐜
+  - 𤑉
+  - 𨊋
+  - 𡮘
+
+All Similar Characters (from Excel):
+  ✓ 𣟃
+  ✓ 𤘂
+  ✓ 𨮒
+  ✓ 𥶱
+  ✓ 䑅
+  ✓ 蜺
+  ✗ 磱
+  ✓ 懜
+  ✓ 熘
+  ✗ 壖
+  ✗ 礣
+  ✓ 𢢋
+  ✗ 磇
+  ✓ 𤐜
+  ✓ 𤑉
+  ✗ 睗
+  ✗ 碭
+  ✗ 暥
+  ✓ 𨊋
+  ✓ 𡮘

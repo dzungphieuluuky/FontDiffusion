@@ -1,0 +1,45 @@
+Input Character: 𠎨
+Output Directory: ./font_generations/char_%F0%A0%8E%A8
+Total Generated: 16
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 08:15:44
+
+Generated Characters:
+  - 𠎨
+  - 傾
+  - 锄
+  - 𢵰
+  - 鎯
+  - 𨧠
+  - 𢷅
+  - 惟
+  - 𢸟
+  - 𧯄
+  - 餁
+  - 𠸘
+  - 𩚵
+  - 𢲠
+  - 𦁽
+  - 渔
+
+All Similar Characters (from Excel):
+  ✓ 傾
+  ✓ 锄
+  ✓ 𢵰
+  ✗ 偙
+  ✓ 鎯
+  ✓ 𨧠
+  ✗ 榊
+  ✓ 𢷅
+  ✓ 惟
+  ✓ 𢸟
+  ✓ 𧯄
+  ✓ 餁
+  ✗ 魽
+  ✗ 伳
+  ✓ 𠸘
+  ✓ 𩚵
+  ✓ 𢲠
+  ✓ 𦁽
+  ✗ 鮴
+  ✓ 渔

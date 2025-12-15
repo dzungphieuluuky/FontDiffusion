@@ -1,0 +1,44 @@
+Input Character: 𠢑
+Output Directory: ./font_generations/char_%F0%A0%A2%91
+Total Generated: 15
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 09:25:09
+
+Generated Characters:
+  - 𠢑
+  - 勁
+  - 勳
+  - 勧
+  - 劻
+  - 勐
+  - 勄
+  - 勸
+  - 勣
+  - 鳨
+  - 劸
+  - 勑
+  - 勤
+  - 劼
+  - 勌
+
+All Similar Characters (from Excel):
+  ✓ 勁
+  ✓ 勳
+  ✓ 勧
+  ✓ 劻
+  ✓ 勐
+  ✓ 勄
+  ✓ 勸
+  ✓ 勣
+  ✗ 勮
+  ✓ 鳨
+  ✗ 勴
+  ✓ 劸
+  ✗ 劺
+  ✓ 勑
+  ✗ 劶
+  ✓ 勤
+  ✓ 劼
+  ✓ 勌
+  ✗ 馾
+  ✗ 勪

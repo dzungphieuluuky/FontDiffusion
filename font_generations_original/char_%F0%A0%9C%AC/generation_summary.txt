@@ -1,0 +1,48 @@
+Input Character: 𠜬
+Output Directory: ./font_generations/char_%F0%A0%9C%AC
+Total Generated: 19
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 09:00:50
+
+Generated Characters:
+  - 𠜬
+  - 码
+  - 玛
+  - 男
+  - 员
+  - 妈
+  - 尼
+  - 𢚹
+  - 𡉖
+  - 鸡
+  - 旯
+  - 溴
+  - 纺
+  - 纪
+  - 泻
+  - 坞
+  - 坭
+  - 犸
+  - 伲
+
+All Similar Characters (from Excel):
+  ✓ 码
+  ✓ 玛
+  ✗ 肟
+  ✓ 男
+  ✓ 员
+  ✓ 妈
+  ✓ 尼
+  ✓ 𢚹
+  ✓ 𡉖
+  ✓ 鸡
+  ✓ 旯
+  ✓ 溴
+  ✓ 纺
+  ✓ 纪
+  ✓ 泻
+  ✓ 坞
+  ✓ 坭
+  ✗ 弡
+  ✓ 犸
+  ✓ 伲

@@ -1,0 +1,45 @@
+Input Character: 𠃱
+Output Directory: ./font_generations/char_%F0%A0%83%B1
+Total Generated: 16
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 07:36:19
+
+Generated Characters:
+  - 穹
+  - 𨁝
+  - 饽
+  - 摏
+  - 桲
+  - 侼
+  - 荨
+  - 谆
+  - 悬
+  - 𥑂
+  - 乹
+  - 荐
+  - 痞
+  - 裒
+  - 宵
+  - 莓
+
+All Similar Characters (from Excel):
+  ✓ 穹
+  ✓ 𨁝
+  ✓ 饽
+  ✓ 摏
+  ✓ 桲
+  ✓ 侼
+  ✗ 馞
+  ✓ 荨
+  ✓ 谆
+  ✗ 稕
+  ✓ 悬
+  ✓ 𥑂
+  ✗ 薠
+  ✓ 乹
+  ✓ 荐
+  ✗ 宯
+  ✓ 痞
+  ✓ 裒
+  ✓ 宵
+  ✓ 莓

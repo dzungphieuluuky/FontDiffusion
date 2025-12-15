@@ -1,0 +1,47 @@
+Input Character: 𠓻
+Output Directory: ./font_generations/char_%F0%A0%93%BB
+Total Generated: 18
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 08:41:34
+
+Generated Characters:
+  - 𠓻
+  - 𢀧
+  - 棆
+  - 𧛈
+  - 綸
+  - 踚
+  - 輪
+  - 𣘈
+  - 𣄇
+  - 掄
+  - 𧷺
+  - 蜦
+  - 𠗣
+  - 𥺽
+  - 埨
+  - 惀
+  - 禬
+  - 𠁄
+
+All Similar Characters (from Excel):
+  ✓ 𢀧
+  ✓ 棆
+  ✓ 𧛈
+  ✓ 綸
+  ✓ 踚
+  ✓ 輪
+  ✗ 詥
+  ✓ 𣘈
+  ✓ 𣄇
+  ✓ 掄
+  ✓ 𧷺
+  ✓ 蜦
+  ✓ 𠗣
+  ✓ 𥺽
+  ✓ 埨
+  ✓ 惀
+  ✗ 耣
+  ✓ 禬
+  ✓ 𠁄
+  ✗ 碖

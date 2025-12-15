@@ -1,0 +1,46 @@
+Input Character: 𠡺
+Output Directory: ./font_generations/char_%F0%A0%A1%BA
+Total Generated: 17
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 09:24:38
+
+Generated Characters:
+  - 𠡺
+  - 勢
+  - 劣
+  - 势
+  - 郣
+  - 艻
+  - 𥬉
+  - 売
+  - 鹁
+  - 穷
+  - 苡
+  - 挬
+  - 芍
+  - 孛
+  - 搝
+  - 旉
+  - 𠴛
+
+All Similar Characters (from Excel):
+  ✓ 勢
+  ✓ 劣
+  ✓ 势
+  ✗ 汬
+  ✓ 郣
+  ✓ 艻
+  ✓ 𥬉
+  ✓ 売
+  ✗ 芶
+  ✓ 鹁
+  ✓ 穷
+  ✓ 苡
+  ✗ 笲
+  ✓ 挬
+  ✓ 芍
+  ✓ 孛
+  ✓ 搝
+  ✗ 葝
+  ✓ 旉
+  ✓ 𠴛

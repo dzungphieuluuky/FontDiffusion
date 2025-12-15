@@ -1,0 +1,49 @@
+Input Character: 𠠩
+Output Directory: ./font_generations/char_%F0%A0%A0%A9
+Total Generated: 20
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 09:20:34
+
+Generated Characters:
+  - 𠠩
+  - 魌
+  - 鲵
+  - 艢
+  - 𨎠
+  - 𦪻
+  - 霡
+  - 麵
+  - 𩺤
+  - 颗
+  - 𪅥
+  - 𧣲
+  - 鯢
+  - 𣛨
+  - 艟
+  - 𥗽
+  - 𢠦
+  - 𩼈
+  - 𡗐
+  - 𡂯
+
+All Similar Characters (from Excel):
+  ✓ 魌
+  ✓ 鲵
+  ✓ 艢
+  ✓ 𨎠
+  ✓ 𦪻
+  ✓ 霡
+  ✓ 麵
+  ✓ 𩺤
+  ✓ 颗
+  ✗ 爄
+  ✓ 𪅥
+  ✓ 𧣲
+  ✓ 鯢
+  ✓ 𣛨
+  ✓ 艟
+  ✓ 𥗽
+  ✓ 𢠦
+  ✓ 𩼈
+  ✓ 𡗐
+  ✓ 𡂯

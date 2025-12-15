@@ -1,0 +1,49 @@
+Input Character: 𠏥
+Output Directory: ./font_generations/char_%F0%A0%8F%A5
+Total Generated: 20
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 08:21:04
+
+Generated Characters:
+  - 𠏥
+  - 僦
+  - 儳
+  - 鰍
+  - 儸
+  - 𢤢
+  - 𢱏
+  - 𣜳
+  - 𠍭
+  - 黴
+  - 覷
+  - 閾
+  - 𦆹
+  - 卧
+  - 澂
+  - 襨
+  - 徴
+  - 軄
+  - 𡚡
+  - 徵
+
+All Similar Characters (from Excel):
+  ✓ 僦
+  ✓ 儳
+  ✓ 鰍
+  ✓ 儸
+  ✓ 𢤢
+  ✗ 憱
+  ✓ 𢱏
+  ✓ 𣜳
+  ✓ 𠍭
+  ✓ 黴
+  ✓ 覷
+  ✓ 閾
+  ✓ 𦆹
+  ✓ 卧
+  ✓ 澂
+  ✓ 襨
+  ✓ 徴
+  ✓ 軄
+  ✓ 𡚡
+  ✓ 徵

@@ -1,0 +1,48 @@
+Input Character: 𠈳
+Output Directory: ./font_generations/char_%F0%A0%88%B3
+Total Generated: 19
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 07:56:13
+
+Generated Characters:
+  - 𠈳
+  - 侯
+  - 棂
+  - 玦
+  - 怃
+  - 袂
+  - 択
+  - 楝
+  - 倪
+  - 柣
+  - 怏
+  - 侼
+  - 坭
+  - 块
+  - 尿
+  - 保
+  - 挟
+  - 伎
+  - 俠
+
+All Similar Characters (from Excel):
+  ✓ 侯
+  ✓ 棂
+  ✓ 玦
+  ✗ 枿
+  ✓ 怃
+  ✓ 袂
+  ✓ 択
+  ✓ 楝
+  ✓ 倪
+  ✓ 柣
+  ✓ 怏
+  ✓ 侼
+  ✓ 坭
+  ✓ 块
+  ✓ 尿
+  ✓ 保
+  ✓ 挟
+  ✓ 伎
+  ✗ 柍
+  ✓ 俠

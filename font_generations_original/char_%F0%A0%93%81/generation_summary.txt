@@ -1,0 +1,49 @@
+Input Character: 𠓁
+Output Directory: ./font_generations/char_%F0%A0%93%81
+Total Generated: 20
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 08:35:05
+
+Generated Characters:
+  - 𠓁
+  - 𨄶
+  - 糅
+  - 鞣
+  - 鎂
+  - 𠒬
+  - 𥺑
+  - 襍
+  - 𠍵
+  - 铣
+  - 裸
+  - 𥨋
+  - 𡳝
+  - 橉
+  - 爆
+  - 樣
+  - 𧺀
+  - 𣖢
+  - 樭
+  - 镁
+
+All Similar Characters (from Excel):
+  ✓ 𨄶
+  ✓ 糅
+  ✓ 鞣
+  ✓ 鎂
+  ✓ 𠒬
+  ✓ 𥺑
+  ✓ 襍
+  ✓ 𠍵
+  ✓ 铣
+  ✓ 裸
+  ✓ 𥨋
+  ✗ 虠
+  ✓ 𡳝
+  ✓ 橉
+  ✓ 爆
+  ✓ 樣
+  ✓ 𧺀
+  ✓ 𣖢
+  ✓ 樭
+  ✓ 镁

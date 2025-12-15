@@ -1,0 +1,49 @@
+Input Character: 𠒥
+Output Directory: ./font_generations/char_%F0%A0%92%A5
+Total Generated: 20
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 08:31:19
+
+Generated Characters:
+  - 𠒥
+  - 庥
+  - 𤉜
+  - 破
+  - 柩
+  - 硃
+  - 觖
+  - 𤊣
+  - 榞
+  - 𢲬
+  - 𣔧
+  - 麻
+  - 柄
+  - 棘
+  - 𠸒
+  - 裌
+  - 碱
+  - 𤎎
+  - 焮
+  - 穊
+
+All Similar Characters (from Excel):
+  ✓ 庥
+  ✓ 𤉜
+  ✓ 破
+  ✓ 柩
+  ✓ 硃
+  ✓ 觖
+  ✓ 𤊣
+  ✓ 榞
+  ✓ 𢲬
+  ✓ 𣔧
+  ✓ 麻
+  ✓ 柄
+  ✓ 棘
+  ✗ 瓭
+  ✓ 𠸒
+  ✓ 裌
+  ✓ 碱
+  ✓ 𤎎
+  ✓ 焮
+  ✓ 穊

@@ -1,0 +1,48 @@
+Input Character: 𠉟
+Output Directory: ./font_generations/char_%F0%A0%89%9F
+Total Generated: 19
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 07:58:40
+
+Generated Characters:
+  - 𠉟
+  - 𣴜
+  - 𢭰
+  - 拰
+  - 栣
+  - 袵
+  - 秹
+  - 柘
+  - 㳝
+  - 𣖝
+  - 𣑴
+  - 种
+  - 𤞘
+  - 𠲏
+  - 枢
+  - 㳹
+  - 俰
+  - 柑
+  - 銋
+
+All Similar Characters (from Excel):
+  ✓ 𣴜
+  ✓ 𢭰
+  ✓ 拰
+  ✓ 栣
+  ✓ 袵
+  ✓ 秹
+  ✓ 柘
+  ✓ 㳝
+  ✓ 𣖝
+  ✓ 𣑴
+  ✓ 种
+  ✗ 俬
+  ✓ 𤞘
+  ✓ 𠲏
+  ✓ 枢
+  ✓ 㳹
+  ✓ 俰
+  ✗ 碄
+  ✓ 柑
+  ✓ 銋

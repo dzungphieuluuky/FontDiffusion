@@ -1,0 +1,48 @@
+Input Character: 𠓇
+Output Directory: ./font_generations/char_%F0%A0%93%87
+Total Generated: 19
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 08:36:24
+
+Generated Characters:
+  - 𠓇
+  - 𪉾
+  - 𤭸
+  - 𨋣
+  - 欄
+  - 腕
+  - 𢲬
+  - 𣎖
+  - 𤉓
+  - 椸
+  - 𣟫
+  - 瞞
+  - 懨
+  - 𢴿
+  - 軿
+  - 𣍪
+  - 𦟉
+  - 顳
+  - 𤮟
+
+All Similar Characters (from Excel):
+  ✓ 𪉾
+  ✓ 𤭸
+  ✗ 橳
+  ✓ 𨋣
+  ✓ 欄
+  ✓ 腕
+  ✓ 𢲬
+  ✗ 幈
+  ✓ 𣎖
+  ✓ 𤉓
+  ✓ 椸
+  ✓ 𣟫
+  ✓ 瞞
+  ✓ 懨
+  ✓ 𢴿
+  ✓ 軿
+  ✓ 𣍪
+  ✓ 𦟉
+  ✓ 顳
+  ✓ 𤮟

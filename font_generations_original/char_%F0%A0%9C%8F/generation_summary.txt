@@ -1,0 +1,48 @@
+Input Character: 𠜏
+Output Directory: ./font_generations/char_%F0%A0%9C%8F
+Total Generated: 19
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 09:00:11
+
+Generated Characters:
+  - 𠜏
+  - 刮
+  - 昫
+  - 呴
+  - 剀
+  - 岣
+  - 剜
+  - 媧
+  - 𠜯
+  - 弛
+  - 剐
+  - 皜
+  - 刷
+  - 洵
+  - 𠲢
+  - 惝
+  - 剮
+  - 呞
+  - 𠞡
+
+All Similar Characters (from Excel):
+  ✓ 刮
+  ✓ 昫
+  ✓ 呴
+  ✓ 剀
+  ✓ 岣
+  ✓ 剜
+  ✗ 驹
+  ✓ 媧
+  ✓ 𠜯
+  ✓ 弛
+  ✓ 剐
+  ✓ 皜
+  ✓ 刷
+  ✗ 萷
+  ✓ 洵
+  ✓ 𠲢
+  ✓ 惝
+  ✓ 剮
+  ✓ 呞
+  ✓ 𠞡

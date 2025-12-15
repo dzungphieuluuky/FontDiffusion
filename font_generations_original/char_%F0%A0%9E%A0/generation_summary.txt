@@ -1,0 +1,47 @@
+Input Character: 𠞠
+Output Directory: ./font_generations/char_%F0%A0%9E%A0
+Total Generated: 18
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 09:09:55
+
+Generated Characters:
+  - 𠞠
+  - 矫
+  - 秩
+  - 糅
+  - 𠜭
+  - 鉃
+  - 凑
+  - 𣨮
+  - 敎
+  - 𥠬
+  - 萩
+  - 校
+  - 殍
+  - 佼
+  - 柣
+  - 汞
+  - 來
+  - 矦
+
+All Similar Characters (from Excel):
+  ✓ 矫
+  ✓ 秩
+  ✓ 糅
+  ✓ 𠜭
+  ✗ 粎
+  ✓ 鉃
+  ✓ 凑
+  ✓ 𣨮
+  ✓ 敎
+  ✓ 𥠬
+  ✗ 殝
+  ✓ 萩
+  ✓ 校
+  ✓ 殍
+  ✓ 佼
+  ✓ 柣
+  ✓ 汞
+  ✓ 來
+  ✗ 羖
+  ✓ 矦

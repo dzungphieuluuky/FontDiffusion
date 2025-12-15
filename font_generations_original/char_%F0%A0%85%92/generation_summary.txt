@@ -1,0 +1,47 @@
+Input Character: 𠅒
+Output Directory: ./font_generations/char_%F0%A0%85%92
+Total Generated: 18
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 07:46:55
+
+Generated Characters:
+  - 𠅒
+  - 枺
+  - 抹
+  - 𠖾
+  - 抺
+  - 袜
+  - 𠰌
+  - 𢪮
+  - 𡉿
+  - 沫
+  - 銇
+  - 秣
+  - 缽
+  - 𠅎
+  - 味
+  - 杕
+  - 鈢
+  - 㶬
+
+All Similar Characters (from Excel):
+  ✓ 枺
+  ✓ 抹
+  ✓ 𠖾
+  ✓ 抺
+  ✓ 袜
+  ✓ 𠰌
+  ✗ 玞
+  ✓ 𢪮
+  ✓ 𡉿
+  ✓ 沫
+  ✗ 忲
+  ✓ 銇
+  ✓ 秣
+  ✓ 缽
+  ✓ 𠅎
+  ✓ 味
+  ✗ 佅
+  ✓ 杕
+  ✓ 鈢
+  ✓ 㶬

@@ -1,0 +1,46 @@
+Input Character: 𠑢
+Output Directory: ./font_generations/char_%F0%A0%91%A2
+Total Generated: 17
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 08:29:57
+
+Generated Characters:
+  - 𠑢
+  - 㰖
+  - 𣞾
+  - 饢
+  - 𦈂
+  - 鐡
+  - 鸌
+  - 𣠩
+  - 𣟂
+  - 𪓈
+  - 躦
+  - 榡
+  - 欛
+  - 㰙
+  - 檡
+  - 𦄸
+  - 檯
+
+All Similar Characters (from Excel):
+  ✓ 㰖
+  ✓ 𣞾
+  ✓ 饢
+  ✓ 𦈂
+  ✗ 禶
+  ✓ 鐡
+  ✓ 鸌
+  ✓ 𣠩
+  ✓ 𣟂
+  ✓ 𪓈
+  ✓ 躦
+  ✗ 嬼
+  ✓ 榡
+  ✓ 欛
+  ✓ 㰙
+  ✓ 檡
+  ✗ 儴
+  ✓ 𦄸
+  ✗ 襳
+  ✓ 檯

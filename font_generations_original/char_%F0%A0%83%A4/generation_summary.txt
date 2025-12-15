@@ -1,0 +1,43 @@
+Input Character: 𠃤
+Output Directory: ./font_generations/char_%F0%A0%83%A4
+Total Generated: 14
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 07:34:39
+
+Generated Characters:
+  - 忨
+  - 昃
+  - 后
+  - 定
+  - 肩
+  - 完
+  - 栀
+  - 旯
+  - 咒
+  - 近
+  - 𡥴
+  - 扃
+  - 男
+  - 昊
+
+All Similar Characters (from Excel):
+  ✓ 忨
+  ✓ 昃
+  ✓ 后
+  ✗ 凥
+  ✓ 定
+  ✓ 肩
+  ✗ 坃
+  ✓ 完
+  ✗ 氘
+  ✓ 栀
+  ✓ 旯
+  ✗ 巟
+  ✓ 咒
+  ✓ 近
+  ✓ 𡥴
+  ✓ 扃
+  ✓ 男
+  ✓ 昊
+  ✗ 笎
+  ✗ 刓

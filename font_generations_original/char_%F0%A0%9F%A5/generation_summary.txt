@@ -1,0 +1,47 @@
+Input Character: 𠟥
+Output Directory: ./font_generations/char_%F0%A0%9F%A5
+Total Generated: 18
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 09:15:06
+
+Generated Characters:
+  - 𠟥
+  - 娋
+  - 𣈛
+  - 𢯔
+  - 椖
+  - 鵴
+  - 𤈤
+  - 姁
+  - 炳
+  - 劑
+  - 鸺
+  - 娟
+  - 媒
+  - 㓟
+  - 鸻
+  - 𠝺
+  - 勅
+  - 椈
+
+All Similar Characters (from Excel):
+  ✓ 娋
+  ✓ 𣈛
+  ✓ 𢯔
+  ✓ 椖
+  ✓ 鵴
+  ✓ 𤈤
+  ✓ 姁
+  ✓ 炳
+  ✓ 劑
+  ✓ 鸺
+  ✓ 娟
+  ✓ 媒
+  ✗ 擜
+  ✓ 㓟
+  ✓ 鸻
+  ✓ 𠝺
+  ✗ 勓
+  ✗ 烔
+  ✓ 勅
+  ✓ 椈

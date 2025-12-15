@@ -1,0 +1,49 @@
+Input Character: 𠎬
+Output Directory: ./font_generations/char_%F0%A0%8E%AC
+Total Generated: 20
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 08:18:24
+
+Generated Characters:
+  - 𠎬
+  - 𠍤
+  - 𣳇
+  - 侍
+  - 𢲼
+  - 𠍵
+  - 槣
+  - 𣺽
+  - 擆
+  - 偿
+  - 倧
+  - 𠊁
+  - 俸
+  - 湜
+  - 侼
+  - 榟
+  - 摌
+  - 痒
+  - 溩
+  - 𦹻
+
+All Similar Characters (from Excel):
+  ✓ 𠍤
+  ✓ 𣳇
+  ✓ 侍
+  ✓ 𢲼
+  ✓ 𠍵
+  ✓ 槣
+  ✓ 𣺽
+  ✓ 擆
+  ✓ 偿
+  ✓ 倧
+  ✓ 𠊁
+  ✓ 俸
+  ✓ 湜
+  ✗ 仹
+  ✓ 侼
+  ✓ 榟
+  ✓ 摌
+  ✓ 痒
+  ✓ 溩
+  ✓ 𦹻

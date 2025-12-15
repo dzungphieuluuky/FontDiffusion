@@ -1,0 +1,46 @@
+Input Character: 𠔭
+Output Directory: ./font_generations/char_%F0%A0%94%AD
+Total Generated: 17
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 08:42:39
+
+Generated Characters:
+  - 𠔭
+  - 𠳹
+  - 炊
+  - 𥊀
+  - 殃
+  - 𤗲
+  - 阮
+  - 族
+  - 𥈳
+  - 㷝
+  - 𦤠
+  - 萩
+  - 煖
+  - 𥸷
+  - 畎
+  - 烣
+  - 磣
+
+All Similar Characters (from Excel):
+  ✗ 歘
+  ✓ 𠳹
+  ✓ 炊
+  ✓ 𥊀
+  ✓ 殃
+  ✓ 𤗲
+  ✓ 阮
+  ✓ 族
+  ✓ 𥈳
+  ✓ 㷝
+  ✓ 𦤠
+  ✓ 萩
+  ✗ 唊
+  ✗ 柼
+  ✓ 煖
+  ✓ 𥸷
+  ✓ 畎
+  ✓ 烣
+  ✓ 磣
+  ✗ 硖

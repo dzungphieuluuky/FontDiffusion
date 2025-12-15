@@ -1,0 +1,50 @@
+Input Character: 𠣶
+Output Directory: ./font_generations/char_%F0%A0%A3%B6
+Total Generated: 21
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 09:29:10
+
+Generated Characters:
+  - 𠣶
+  - 𧥔
+  - 刨
+  - 𠙣
+  - 𡴉
+  - 𤮑
+  - 魛
+  - 𨗛
+  - 𥇂
+  - 胞
+  - 勉
+  - 𣭜
+  - 肫
+  - 剛
+  - 鮈
+  - 𦟾
+  - 勛
+  - 胸
+  - 𢁍
+  - 遡
+  - 䏊
+
+All Similar Characters (from Excel):
+  ✓ 𧥔
+  ✓ 刨
+  ✓ 𠙣
+  ✓ 𡴉
+  ✓ 𤮑
+  ✓ 魛
+  ✓ 𨗛
+  ✓ 𥇂
+  ✓ 胞
+  ✓ 勉
+  ✓ 𣭜
+  ✓ 肫
+  ✓ 剛
+  ✓ 鮈
+  ✓ 𦟾
+  ✓ 勛
+  ✓ 胸
+  ✓ 𢁍
+  ✓ 遡
+  ✓ 䏊

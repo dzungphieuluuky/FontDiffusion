@@ -1,0 +1,43 @@
+Input Character: 𠄺
+Output Directory: ./font_generations/char_%F0%A0%84%BA
+Total Generated: 14
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 07:42:28
+
+Generated Characters:
+  - 𠄺
+  - 脱
+  - 䚀
+  - 腜
+  - 脾
+  - 𥞖
+  - 𥻡
+  - 班
+  - 甥
+  - 𦏄
+  - 㧐
+  - 㨐
+  - 䏹
+  - 𤎒
+
+All Similar Characters (from Excel):
+  ✗ 腉
+  ✓ 脱
+  ✓ 䚀
+  ✗ 肼
+  ✓ 腜
+  ✗ 胓
+  ✓ 脾
+  ✓ 𥞖
+  ✗ 胕
+  ✗ 腁
+  ✗ 胏
+  ✓ 𥻡
+  ✓ 班
+  ✗ 脡
+  ✓ 甥
+  ✓ 𦏄
+  ✓ 㧐
+  ✓ 㨐
+  ✓ 䏹
+  ✓ 𤎒

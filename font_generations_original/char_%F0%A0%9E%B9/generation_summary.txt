@@ -1,0 +1,42 @@
+Input Character: 𠞹
+Output Directory: ./font_generations/char_%F0%A0%9E%B9
+Total Generated: 13
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 09:12:42
+
+Generated Characters:
+  - 𠞹
+  - 剩
+  - 剳
+  - 剁
+  - 𣗱
+  - 剞
+  - 鸱
+  - 刴
+  - 陶
+  - 𠠍
+  - 𨄠
+  - 蜊
+  - 劇
+
+All Similar Characters (from Excel):
+  ✓ 剩
+  ✓ 剳
+  ✗ 熜
+  ✓ 剁
+  ✗ 阂
+  ✓ 𣗱
+  ✓ 剞
+  ✓ 鸱
+  ✓ 刴
+  ✗ 縨
+  ✗ 煾
+  ✗ 阈
+  ✗ 橂
+  ✓ 陶
+  ✓ 𠠍
+  ✓ 𨄠
+  ✗ 瘹
+  ✗ 刡
+  ✓ 蜊
+  ✓ 劇

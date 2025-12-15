@@ -1,0 +1,49 @@
+Input Character: 𠗤
+Output Directory: ./font_generations/char_%F0%A0%97%A4
+Total Generated: 20
+Style Image: font_diffusion/data_examples/sampling/example_style.jpg
+Generation Time: 2025-12-12 08:51:25
+
+Generated Characters:
+  - 𠗤
+  - 𢭬
+  - 准
+  - 絍
+  - 徃
+  - 往
+  - 𦁂
+  - 𤞘
+  - 泩
+  - 𥿥
+  - 缾
+  - 暀
+  - 牂
+  - 𤎛
+  - 袵
+  - 𢮪
+  - 㳝
+  - 溎
+  - 𢬩
+  - 栟
+
+All Similar Characters (from Excel):
+  ✓ 𢭬
+  ✓ 准
+  ✓ 絍
+  ✓ 徃
+  ✓ 往
+  ✓ 𦁂
+  ✓ 𤞘
+  ✓ 泩
+  ✓ 𥿥
+  ✓ 缾
+  ✓ 暀
+  ✓ 牂
+  ✓ 𤎛
+  ✓ 袵
+  ✓ 𢮪
+  ✓ 㳝
+  ✓ 溎
+  ✓ 𢬩
+  ✗ 俇
+  ✓ 栟
