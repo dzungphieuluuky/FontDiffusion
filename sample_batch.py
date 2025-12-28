@@ -50,7 +50,7 @@ except ImportError:
 
 # Import FontDiffuser modules
 from sample_optimized import (
-    load_fontdiffuser_pipeline_safe,
+    load_fontdiffuser_pipeline,
     get_content_transform,
     get_style_transform
 )
@@ -247,7 +247,7 @@ def parse_args():
                        help='Checkpoint directory')
     parser.add_argument('--ttf_path', type=str, required=True,
                        help='Path to TTF font file or directory with multiple fonts')
-    parser.add_argument('--device', type=str, default='cuda:0',
+    parser.add_argument('--device', type=str, default='cuda',
                        help='Device to use')
     
     # Generation parameters
@@ -871,7 +871,7 @@ def main():
         
         # Load pipeline
         print("\nLoading FontDiffuser pipeline...")
-        pipe = load_fontdiffuser_pipeline_safe(pipeline_args)
+        pipe = load_fontdiffuser_pipeline(pipeline_args)
         
         # Initialize evaluator
         evaluator = QualityEvaluator(device=args.device)
