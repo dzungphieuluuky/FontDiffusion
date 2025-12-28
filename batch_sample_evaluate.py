@@ -1,6 +1,7 @@
 """
 Batch sampling and evaluation for FontDiffuser
 Generates images for multiple Sino-Nom characters and evaluates quality
+Supports multiple font files automatically
 """
 
 import os
@@ -9,7 +10,7 @@ import time
 import json
 import argparse
 from pathlib import Path
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 from tqdm import tqdm
 
 import numpy as np
@@ -50,11 +51,102 @@ except ImportError:
 # Import FontDiffuser modules
 from sample_optimized import (
     load_fontdiffuser_pipeline_safe,
-    sampling_batch_optimized,
-    image_process_batch_optimized,
     get_content_transform,
     get_style_transform
 )
+from utils import load_ttf, ttf2im, is_char_in_font
+
+
+class FontManager:
+    """Manages multiple font files"""
+    
+    def __init__(self, ttf_path: str):
+        """
+        Initialize font manager
+        
+        Args:
+            ttf_path: Path to a single font file or directory containing fonts
+        """
+        self.fonts = {}
+        self.font_paths = []
+        self._load_fonts(ttf_path)
+    
+    def _load_fonts(self, ttf_path: str):
+        """Load font(s) from path"""
+        if os.path.isfile(ttf_path):
+            # Single font file
+            self.font_paths = [ttf_path]
+            font_name = os.path.splitext(os.path.basename(ttf_path))[0]
+            self.fonts[font_name] = {
+                'path': ttf_path,
+                'font': load_ttf(ttf_path),
+                'name': font_name
+            }
+            print(f"✓ Loaded font: {font_name}")
+            
+        elif os.path.isdir(ttf_path):
+            # Directory with multiple fonts
+            font_extensions = {'.ttf', '.otf', '.TTF', '.OTF'}
+            font_files = [
+                os.path.join(ttf_path, f)
+                for f in os.listdir(ttf_path)
+                if os.path.splitext(f)[1] in font_extensions
+            ]
+            
+            if not font_files:
+                raise ValueError(f"No font files found in directory: {ttf_path}")
+            
+            self.font_paths = sorted(font_files)
+            
+            print(f"\n{'='*60}")
+            print(f"Loading {len(font_files)} fonts from directory...")
+            print('='*60)
+            
+            for font_path in self.font_paths:
+                font_name = os.path.splitext(os.path.basename(font_path))[0]
+                try:
+                    self.fonts[font_name] = {
+                        'path': font_path,
+                        'font': load_ttf(font_path),
+                        'name': font_name
+                    }
+                    print(f"✓ Loaded: {font_name}")
+                except Exception as e:
+                    print(f"✗ Failed to load {font_name}: {e}")
+            
+            print('='*60)
+            print(f"Successfully loaded {len(self.fonts)} fonts\n")
+        else:
+            raise ValueError(f"Invalid ttf_path: {ttf_path}")
+    
+    def get_font_names(self) -> List[str]:
+        """Get list of loaded font names"""
+        return list(self.fonts.keys())
+    
+    def get_font(self, font_name: str):
+        """Get font object by name"""
+        if font_name not in self.fonts:
+            raise ValueError(f"Font not found: {font_name}")
+        return self.fonts[font_name]['font']
+    
+    def get_font_path(self, font_name: str) -> str:
+        """Get font file path by name"""
+        if font_name not in self.fonts:
+            raise ValueError(f"Font not found: {font_name}")
+        return self.fonts[font_name]['path']
+    
+    def is_char_in_font(self, font_name: str, char: str) -> bool:
+        """Check if character exists in font"""
+        font_path = self.get_font_path(font_name)
+        return is_char_in_font(font_path, char)
+    
+    def get_available_chars_for_font(self, font_name: str, 
+                                     characters: List[str]) -> List[str]:
+        """Get list of characters available in specific font"""
+        return [
+            char for char in characters 
+            if self.is_char_in_font(font_name, char)
+        ]
 
 
 class QualityEvaluator:
@@ -139,7 +231,7 @@ def parse_args():
     parser.add_argument('--ckpt_dir', type=str, required=True,
                        help='Checkpoint directory')
     parser.add_argument('--ttf_path', type=str, default='ttf/KaiXinSongA.ttf',
-                       help='TTF font path')
+                       help='Path to TTF font file or directory with multiple fonts')
     parser.add_argument('--device', type=str, default='cuda:0',
                        help='Device to use')
     
@@ -266,34 +358,142 @@ def create_args_namespace(args):
     return default_args
 
 
-def generate_content_images(characters: List[str], ttf_path: str, 
-                           output_dir: str, args) -> Dict[str, str]:
-    """Generate and save content character images"""
-    from utils import load_ttf, ttf2im, is_char_in_font
+def generate_content_images(characters: List[str], font_manager: FontManager,
+                           output_dir: str, args) -> Dict[str, Dict[str, str]]:
+    """
+    Generate and save content character images for all fonts
     
-    content_dir = os.path.join(output_dir, 'ContentImage')
-    os.makedirs(content_dir, exist_ok=True)
+    Returns:
+        Dict mapping font_name -> {char -> path}
+    """
+    content_base_dir = os.path.join(output_dir, 'ContentImage')
     
-    font = load_ttf(ttf_path)
-    char_paths = {}
+    all_char_paths = {}
     
-    print(f"\nGenerating content images for {len(characters)} characters...")
-    for i, char in enumerate(tqdm(characters)):
-        if not is_char_in_font(ttf_path, char):
-            print(f"Warning: '{char}' not in font, skipping...")
+    font_names = font_manager.get_font_names()
+    
+    print(f"\n{'='*60}")
+    print(f"Generating content images")
+    print(f"Fonts: {len(font_names)}, Characters: {len(characters)}")
+    print('='*60)
+    
+    for font_name in font_names:
+        font_content_dir = os.path.join(content_base_dir, font_name)
+        os.makedirs(font_content_dir, exist_ok=True)
+        
+        font = font_manager.get_font(font_name)
+        char_paths = {}
+        
+        # Get available characters for this font
+        available_chars = font_manager.get_available_chars_for_font(
+            font_name, characters
+        )
+        
+        if not available_chars:
+            print(f"⚠ Font '{font_name}': No characters available, skipping...")
             continue
         
-        content_img = ttf2im(font=font, char=char)
-        char_path = os.path.join(content_dir, f'char{i}.png')
-        content_img.save(char_path)
-        char_paths[char] = char_path
+        print(f"\n📝 Font: {font_name} ({len(available_chars)}/{len(characters)} chars)")
+        
+        for i, char in enumerate(tqdm(available_chars, desc=f"  Generating")):
+            try:
+                content_img = ttf2im(font=font, char=char)
+                char_path = os.path.join(font_content_dir, f'{char}.png')
+                content_img.save(char_path)
+                char_paths[char] = char_path
+            except Exception as e:
+                print(f"  ✗ Error generating '{char}': {e}")
+        
+        all_char_paths[font_name] = char_paths
+        print(f"  ✓ Generated {len(char_paths)} images")
     
-    return char_paths
+    print(f"\n{'='*60}")
+    print(f"✓ Content image generation complete")
+    print('='*60)
+    
+    return all_char_paths
+
+
+def sampling_batch_optimized_multi_font(args, pipe, characters: List[str], 
+                                       style_image_path: str, font_manager: FontManager,
+                                       font_name: str):
+    """Batch sampling for multiple characters with specific font"""
+    
+    # Get available characters for this font
+    available_chars = font_manager.get_available_chars_for_font(font_name, characters)
+    
+    if not available_chars:
+        return None, None, None
+    
+    # Load style image
+    style_image = Image.open(style_image_path).convert('RGB')
+    style_transform = get_style_transform(args)
+    
+    font = font_manager.get_font(font_name)
+    content_transform = get_content_transform(args)
+    
+    # Generate content images
+    content_images = []
+    content_images_pil = []
+    
+    for char in available_chars:
+        try:
+            content_image = ttf2im(font=font, char=char)
+            content_images_pil.append(content_image.copy())
+            content_images.append(content_transform(content_image))
+        except Exception as e:
+            print(f"    ✗ Error processing '{char}': {e}")
+            continue
+    
+    if not content_images:
+        return None, None, None
+    
+    # Stack into batch
+    content_batch = torch.stack(content_images)
+    style_batch = style_transform(style_image)[None, :].repeat(len(content_images), 1, 1, 1)
+    
+    with torch.no_grad():
+        dtype = torch.float16 if args.fp16 else torch.float32
+        content_batch = content_batch.to(args.device, dtype=dtype)
+        style_batch = style_batch.to(args.device, dtype=dtype)
+        
+        start = time.perf_counter()
+        
+        # Process in batches
+        all_images = []
+        batch_size = args.batch_size
+        
+        for i in range(0, len(content_batch), batch_size):
+            batch_content = content_batch[i:i+batch_size]
+            batch_style = style_batch[i:i+batch_size]
+            
+            images = pipe.generate(
+                content_images=batch_content,
+                style_images=batch_style,
+                batch_size=len(batch_content),
+                order=args.order,
+                num_inference_step=args.num_inference_steps,
+                content_encoder_downsample_size=args.content_encoder_downsample_size,
+                t_start=args.t_start,
+                t_end=args.t_end,
+                dm_size=args.content_image_size,
+                algorithm_type=args.algorithm_type,
+                skip_type=args.skip_type,
+                method=args.method,
+                correcting_x0_fn=args.correcting_x0_fn)
+            
+            all_images.extend(images)
+        
+        end = time.perf_counter()
+        total_time = end - start
+        
+        return all_images, available_chars, total_time
 
 
 def batch_generate_images(pipe, characters: List[str], style_paths: List[str],
-                          output_dir: str, args, evaluator: QualityEvaluator):
-    """Generate images in batches and evaluate"""
+                          output_dir: str, args, evaluator: QualityEvaluator,
+                          font_manager: FontManager):
+    """Generate images in batches for all fonts and evaluate"""
     
     results = {
         'generations': [],
@@ -301,87 +501,99 @@ def batch_generate_images(pipe, characters: List[str], style_paths: List[str],
             'lpips': [],
             'ssim': [],
             'inference_times': []
-        }
+        },
+        'fonts': font_manager.get_font_names(),
+        'total_chars': len(characters),
+        'total_styles': len(style_paths)
     }
     
     target_dir = os.path.join(output_dir, 'TargetImage')
     os.makedirs(target_dir, exist_ok=True)
     
-    total_chars = len(characters)
-    total_styles = len(style_paths)
+    font_names = font_manager.get_font_names()
+    total_combinations = len(font_names) * len(style_paths) * len(characters)
     
-    print(f"\nGenerating {total_chars} characters × {total_styles} styles = {total_chars * total_styles} images")
+    print(f"\n{'='*60}")
+    print(f"BATCH GENERATION")
+    print('='*60)
+    print(f"Fonts: {len(font_names)}")
+    print(f"Styles: {len(style_paths)}")
+    print(f"Characters: {len(characters)}")
+    print(f"Total combinations: {total_combinations}")
     print(f"Batch size: {args.batch_size}")
     print(f"Inference steps: {args.num_inference_steps}")
-    print("="*60)
+    print('='*60)
     
-    for style_idx, style_path in enumerate(style_paths):
-        style_name = f"style{style_idx}"
-        style_dir = os.path.join(target_dir, style_name)
-        os.makedirs(style_dir, exist_ok=True)
+    for font_idx, font_name in enumerate(font_names):
+        print(f"\n{'='*60}")
+        print(f"[Font {font_idx+1}/{len(font_names)}] {font_name}")
+        print('='*60)
         
-        print(f"\n[{style_idx+1}/{total_styles}] Processing style: {style_name}")
-        print(f"Style image: {os.path.basename(style_path)}")
+        # Get available characters for this font
+        available_chars = font_manager.get_available_chars_for_font(font_name, characters)
         
-        # Generate in batches
-        all_images = []
-        all_chars = []
-        all_times = []
+        if not available_chars:
+            print(f"⚠ No characters available for font '{font_name}', skipping...")
+            continue
         
-        for batch_start in range(0, len(characters), args.batch_size):
-            batch_chars = characters[batch_start:batch_start + args.batch_size]
+        print(f"Available characters: {len(available_chars)}/{len(characters)}")
+        
+        for style_idx, style_path in enumerate(style_paths):
+            style_name = f"style{style_idx}"
+            style_dir = os.path.join(target_dir, font_name, style_name)
+            os.makedirs(style_dir, exist_ok=True)
+            
+            print(f"\n  [{style_idx+1}/{len(style_paths)}] Style: {style_name}")
+            print(f"  Style image: {os.path.basename(style_path)}")
             
             try:
-                images, valid_chars, batch_time = sampling_batch_optimized(
-                    args, pipe, batch_chars, style_path
+                images, valid_chars, batch_time = sampling_batch_optimized_multi_font(
+                    args, pipe, characters, style_path, font_manager, font_name
                 )
                 
                 if images is None:
+                    print(f"  ⚠ No images generated")
                     continue
                 
-                all_images.extend(images)
-                all_chars.extend(valid_chars)
-                all_times.append(batch_time)
+                print(f"  Generated {len(images)} images in {batch_time:.2f}s "
+                      f"({batch_time/len(images):.3f}s/img)")
                 
-                print(f"  Batch {batch_start//args.batch_size + 1}: "
-                      f"{len(valid_chars)} images in {batch_time:.2f}s "
-                      f"({batch_time/len(valid_chars):.3f}s/img)")
+                # Save generated images
+                for char, img in zip(valid_chars, images):
+                    # Save image
+                    img_name = f"{style_name}+{char}.png"
+                    img_path = os.path.join(style_dir, img_name)
+                    evaluator.save_image(img, img_path)
+                    
+                    # Store generation info
+                    results['generations'].append({
+                        'character': char,
+                        'font': font_name,
+                        'style': style_name,
+                        'style_path': style_path,
+                        'output_path': img_path
+                    })
+                
+                # Store timing
+                results['metrics']['inference_times'].append({
+                    'font': font_name,
+                    'style': style_name,
+                    'total_time': batch_time,
+                    'num_images': len(images),
+                    'time_per_image': batch_time / len(images) if images else 0
+                })
+                
+                print(f"  ✓ Saved {len(images)} images")
                 
             except Exception as e:
-                print(f"Error in batch: {e}")
+                print(f"  ✗ Error: {e}")
+                import traceback
+                traceback.print_exc()
                 continue
-        
-        # Save generated images and compute metrics
-        print(f"  Saving and evaluating {len(all_images)} images...")
-        
-        for char_idx, (char, img) in enumerate(zip(all_chars, all_images)):
-            # Save image
-            img_name = f"{style_name}+char{characters.index(char)}.png"
-            img_path = os.path.join(style_dir, img_name)
-            evaluator.save_image(img, img_path)
-            
-            # Store generation info
-            results['generations'].append({
-                'character': char,
-                'style': style_name,
-                'style_path': style_path,
-                'output_path': img_path
-            })
-        
-        # Compute average inference time
-        if all_times:
-            avg_time = sum(all_times) / len(all_times)
-            results['metrics']['inference_times'].append({
-                'style': style_name,
-                'avg_batch_time': avg_time,
-                'total_images': len(all_images),
-                'avg_time_per_image': avg_time / args.batch_size if args.batch_size > 0 else 0
-            })
-        
-        print(f"  ✓ Style {style_name} complete: {len(all_images)} images generated")
     
     print("\n" + "="*60)
     print(f"✓ Generation complete! Total images: {len(results['generations'])}")
+    print("="*60)
     
     return results
 
@@ -401,11 +613,15 @@ def evaluate_results(results: Dict, evaluator: QualityEvaluator,
     lpips_scores = []
     ssim_scores = []
     
+    # Group by font for separate evaluation
+    font_metrics = {}
+    
     if ground_truth_dir and os.path.isdir(ground_truth_dir):
         print(f"\nComputing LPIPS and SSIM against ground truth...")
         
         for gen_info in tqdm(results['generations']):
             char = gen_info['character']
+            font = gen_info['font']
             style = gen_info['style']
             gen_path = gen_info['output_path']
             
@@ -434,20 +650,37 @@ def evaluate_results(results: Dict, evaluator: QualityEvaluator,
                 if ssim_val >= 0:
                     ssim_scores.append(ssim_val)
                 
+                # Store per-font metrics
+                if font not in font_metrics:
+                    font_metrics[font] = {'lpips': [], 'ssim': []}
+                
+                if lpips_val >= 0:
+                    font_metrics[font]['lpips'].append(lpips_val)
+                if ssim_val >= 0:
+                    font_metrics[font]['ssim'].append(ssim_val)
+                
             except Exception as e:
                 print(f"Error evaluating {char}: {e}")
     
     # Compute FID if requested
-    fid_score = -1.0
+    fid_scores = {}
     if compute_fid and ground_truth_dir and FID_AVAILABLE:
-        print("\nComputing FID score...")
+        print("\nComputing FID scores per font...")
         
-        # Get first style directory as example
-        if results['generations']:
-            gen_dir = os.path.dirname(results['generations'][0]['output_path'])
-            fid_score = evaluator.compute_fid(ground_truth_dir, gen_dir)
+        for font in results.get('fonts', []):
+            font_gen_dirs = [
+                os.path.dirname(g['output_path'])
+                for g in results['generations']
+                if g['font'] == font
+            ]
+            
+            if font_gen_dirs:
+                gen_dir = os.path.dirname(font_gen_dirs[0])
+                fid_val = evaluator.compute_fid(ground_truth_dir, gen_dir)
+                if fid_val >= 0:
+                    fid_scores[font] = fid_val
     
-    # Store metrics
+    # Store overall metrics
     if lpips_scores:
         results['metrics']['lpips'] = {
             'mean': float(np.mean(lpips_scores)),
@@ -464,8 +697,26 @@ def evaluate_results(results: Dict, evaluator: QualityEvaluator,
             'max': float(np.max(ssim_scores))
         }
     
-    if fid_score >= 0:
-        results['metrics']['fid'] = float(fid_score)
+    if fid_scores:
+        results['metrics']['fid'] = fid_scores
+    
+    # Store per-font metrics
+    if font_metrics:
+        results['metrics']['per_font'] = {}
+        for font, metrics in font_metrics.items():
+            results['metrics']['per_font'][font] = {}
+            
+            if metrics['lpips']:
+                results['metrics']['per_font'][font]['lpips'] = {
+                    'mean': float(np.mean(metrics['lpips'])),
+                    'std': float(np.std(metrics['lpips']))
+                }
+            
+            if metrics['ssim']:
+                results['metrics']['per_font'][font]['ssim'] = {
+                    'mean': float(np.mean(metrics['ssim'])),
+                    'std': float(np.std(metrics['ssim']))
+                }
     
     # Print summary
     print("\n" + "="*60)
@@ -473,13 +724,25 @@ def evaluate_results(results: Dict, evaluator: QualityEvaluator,
     print("="*60)
     
     if lpips_scores:
-        print(f"LPIPS: {results['metrics']['lpips']['mean']:.4f} ± {results['metrics']['lpips']['std']:.4f}")
+        print(f"\nOverall LPIPS: {results['metrics']['lpips']['mean']:.4f} ± {results['metrics']['lpips']['std']:.4f}")
     
     if ssim_scores:
-        print(f"SSIM:  {results['metrics']['ssim']['mean']:.4f} ± {results['metrics']['ssim']['std']:.4f}")
+        print(f"Overall SSIM:  {results['metrics']['ssim']['mean']:.4f} ± {results['metrics']['ssim']['std']:.4f}")
     
-    if fid_score >= 0:
-        print(f"FID:   {fid_score:.2f}")
+    if fid_scores:
+        print(f"\nFID Scores by Font:")
+        for font, score in fid_scores.items():
+            print(f"  {font}: {score:.2f}")
+    
+    # Print per-font metrics
+    if font_metrics:
+        print(f"\nMetrics by Font:")
+        for font in sorted(font_metrics.keys()):
+            if font in results['metrics'].get('per_font', {}):
+                metrics = results['metrics']['per_font'][font]
+                lpips_str = f"LPIPS: {metrics.get('lpips', {}).get('mean', 0):.4f}" if 'lpips' in metrics else ""
+                ssim_str = f"SSIM: {metrics.get('ssim', {}).get('mean', 0):.4f}" if 'ssim' in metrics else ""
+                print(f"  {font}: {lpips_str}  {ssim_str}")
     
     print("="*60)
     
@@ -497,8 +760,10 @@ def log_to_wandb(results: Dict, args):
         project=args.wandb_project,
         name=run_name,
         config={
-            'num_characters': len(results['generations']),
-            'num_styles': len(set(g['style'] for g in results['generations'])),
+            'num_fonts': len(results.get('fonts', [])),
+            'num_characters': results.get('total_chars', 0),
+            'num_styles': results.get('total_styles', 0),
+            'total_generations': len(results['generations']),
             'num_inference_steps': args.num_inference_steps,
             'guidance_scale': args.guidance_scale,
             'batch_size': args.batch_size,
@@ -507,41 +772,81 @@ def log_to_wandb(results: Dict, args):
         }
     )
     
-    # Log metrics
+    # Log overall metrics
     if 'lpips' in results['metrics'] and isinstance(results['metrics']['lpips'], dict):
         wandb.log({
-            'lpips_mean': results['metrics']['lpips']['mean'],
-            'lpips_std': results['metrics']['lpips']['std'],
+            'overall/lpips_mean': results['metrics']['lpips']['mean'],
+            'overall/lpips_std': results['metrics']['lpips']['std'],
         })
     
     if 'ssim' in results['metrics'] and isinstance(results['metrics']['ssim'], dict):
         wandb.log({
-            'ssim_mean': results['metrics']['ssim']['mean'],
-            'ssim_std': results['metrics']['ssim']['std'],
+            'overall/ssim_mean': results['metrics']['ssim']['mean'],
+            'overall/ssim_std': results['metrics']['ssim']['std'],
         })
     
-    if 'fid' in results['metrics']:
-        wandb.log({'fid': results['metrics']['fid']})
+    # Log per-font metrics
+    if 'per_font' in results['metrics']:
+        for font, metrics in results['metrics']['per_font'].items():
+            font_clean = font.replace('/', '_').replace(' ', '_')
+            
+            if 'lpips' in metrics:
+                wandb.log({
+                    f'font/{font_clean}/lpips_mean': metrics['lpips']['mean'],
+                    f'font/{font_clean}/lpips_std': metrics['lpips']['std'],
+                })
+            
+            if 'ssim' in metrics:
+                wandb.log({
+                    f'font/{font_clean}/ssim_mean': metrics['ssim']['mean'],
+                    f'font/{font_clean}/ssim_std': metrics['ssim']['std'],
+                })
+    
+    # Log FID scores
+    if 'fid' in results['metrics'] and isinstance(results['metrics']['fid'], dict):
+        for font, fid_val in results['metrics']['fid'].items():
+            font_clean = font.replace('/', '_').replace(' ', '_')
+            wandb.log({f'font/{font_clean}/fid': fid_val})
     
     # Log inference times
     if results['metrics']['inference_times']:
-        total_time = sum(t['avg_batch_time'] for t in results['metrics']['inference_times'])
-        total_images = sum(t['total_images'] for t in results['metrics']['inference_times'])
+        total_time = sum(t['total_time'] for t in results['metrics']['inference_times'])
+        total_images = sum(t['num_images'] for t in results['metrics']['inference_times'])
         
         wandb.log({
-            'total_inference_time': total_time,
-            'total_images': total_images,
-            'avg_time_per_image': total_time / total_images if total_images > 0 else 0
+            'performance/total_inference_time': total_time,
+            'performance/total_images': total_images,
+            'performance/avg_time_per_image': total_time / total_images if total_images > 0 else 0
         })
+        
+        # Log per-font timing
+        font_times = {}
+        for timing in results['metrics']['inference_times']:
+            font = timing['font']
+            if font not in font_times:
+                font_times[font] = []
+            font_times[font].append(timing['time_per_image'])
+        
+        for font, times in font_times.items():
+            font_clean = font.replace('/', '_').replace(' ', '_')
+            wandb.log({
+                f'performance/{font_clean}/avg_time_per_image': np.mean(times)
+            })
     
-    # Log sample images
+    # Log sample images (max 20 samples)
     sample_images = []
-    for gen_info in results['generations'][:10]:  # First 10 images
-        if os.path.exists(gen_info['output_path']):
-            sample_images.append(
-                wandb.Image(gen_info['output_path'], 
-                           caption=f"{gen_info['character']} - {gen_info['style']}")
-            )
+    samples_per_font = max(1, 20 // len(results.get('fonts', ['default'])))
+    
+    for font in results.get('fonts', []):
+        font_gens = [g for g in results['generations'] if g['font'] == font]
+        for gen_info in font_gens[:samples_per_font]:
+            if os.path.exists(gen_info['output_path']):
+                sample_images.append(
+                    wandb.Image(
+                        gen_info['output_path'],
+                        caption=f"{gen_info['font']} - {gen_info['character']} - {gen_info['style']}"
+                    )
+                )
     
     if sample_images:
         wandb.log({"sample_generations": sample_images})
@@ -555,22 +860,30 @@ def main():
     
     print("\n" + "="*60)
     print("FONTDIFFUSER BATCH GENERATION & EVALUATION")
+    print("Multi-Font Support")
     print("="*60)
     
     # Load characters and styles
     characters = load_characters(args.characters)
     style_paths = load_style_images(args.style_images)
     
-    print(f"\nCharacters: {len(characters)}")
-    print(f"Styles: {len(style_paths)}")
-    print(f"Total images to generate: {len(characters) * len(style_paths)}")
+    # Initialize font manager
+    print(f"\nInitializing font manager...")
+    font_manager = FontManager(args.ttf_path)
+    
+    print(f"\n📊 Configuration Summary:")
+    print(f"  Fonts: {len(font_manager.get_font_names())}")
+    print(f"  Characters: {len(characters)}")
+    print(f"  Styles: {len(style_paths)}")
+    print(f"  Total images: {len(font_manager.get_font_names()) * len(characters) * len(style_paths)}")
     
     # Create output directories
     os.makedirs(args.output_dir, exist_ok=True)
     
-    # Generate content images
-    char_paths = generate_content_images(characters, args.ttf_path, 
-                                         args.output_dir, args)
+    # Generate content images for all fonts
+    char_paths = generate_content_images(
+        characters, font_manager, args.output_dir, args
+    )
     
     # Create args namespace for pipeline
     pipeline_args = create_args_namespace(args)
@@ -584,8 +897,8 @@ def main():
     
     # Generate images
     results = batch_generate_images(
-        pipe, characters, style_paths, args.output_dir, 
-        pipeline_args, evaluator
+        pipe, characters, style_paths, args.output_dir,
+        pipeline_args, evaluator, font_manager
     )
     
     # Evaluate if requested
@@ -600,6 +913,33 @@ def main():
         json.dump(results, f, indent=2, ensure_ascii=False)
     print(f"\n✓ Results saved to {results_path}")
     
+    # Save summary by font
+    summary_path = os.path.join(args.output_dir, 'summary_by_font.txt')
+    with open(summary_path, 'w', encoding='utf-8') as f:
+        f.write("="*60 + "\n")
+        f.write("GENERATION SUMMARY BY FONT\n")
+        f.write("="*60 + "\n\n")
+        
+        for font_name in font_manager.get_font_names():
+            font_gens = [g for g in results['generations'] if g['font'] == font_name]
+            f.write(f"{font_name}:\n")
+            f.write(f"  Generated images: {len(font_gens)}\n")
+            
+            if 'per_font' in results['metrics'] and font_name in results['metrics']['per_font']:
+                metrics = results['metrics']['per_font'][font_name]
+                if 'lpips' in metrics:
+                    f.write(f"  LPIPS: {metrics['lpips']['mean']:.4f} ± {metrics['lpips']['std']:.4f}\n")
+                if 'ssim' in metrics:
+                    f.write(f"  SSIM:  {metrics['ssim']['mean']:.4f} ± {metrics['ssim']['std']:.4f}\n")
+            
+            if 'fid' in results['metrics'] and isinstance(results['metrics']['fid'], dict):
+                if font_name in results['metrics']['fid']:
+                    f.write(f"  FID:   {results['metrics']['fid'][font_name]:.2f}\n")
+            
+            f.write("\n")
+    
+    print(f"✓ Summary saved to {summary_path}")
+    
     # Log to wandb
     if args.use_wandb:
         log_to_wandb(results, args)
@@ -607,6 +947,18 @@ def main():
     print("\n" + "="*60)
     print("✓ ALL DONE!")
     print("="*60)
+    print(f"\nOutput structure:")
+    print(f"  {args.output_dir}/")
+    print(f"    ├── ContentImage/")
+    for font in font_manager.get_font_names():
+        print(f"    │   ├── {font}/")
+        print(f"    │   │   └── [character images]")
+    print(f"    └── TargetImage/")
+    for font in font_manager.get_font_names():
+        print(f"        ├── {font}/")
+        print(f"        │   ├── style0/")
+        print(f"        │   │   └── [generated images]")
+        print(f"        │   └── ...")
 
 
 if __name__ == "__main__":
