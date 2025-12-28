@@ -1,3 +1,4 @@
+# Original requirements
 transformers==4.33.1
 accelerate==0.23.0
 diffusers==0.22.0
@@ -7,3 +8,36 @@ pygame
 opencv-python
 info-nce-pytorch
 kornia
+
+# Added requirements
+# Core dependencies for FontDiffuser batch generation and evaluation
+
+# Deep Learning Framework
+torch>=2.0.0
+torchvision>=0.15.0
+accelerate>=0.20.0
+
+# Image Processing
+Pillow>=9.0.0
+opencv-python>=4.7.0
+
+# Evaluation Metrics
+lpips>=0.1.4
+pytorch-fid>=0.3.0
+scikit-image>=0.20.0
+
+# Experiment Tracking
+wandb>=0.15.0
+
+# Utilities
+tqdm>=4.65.0
+numpy>=1.23.0
+pyyaml>=6.0
+
+# Optional: Memory Optimization
+# Uncomment if you want to use xformers for memory-efficient attention
+xformers>=0.0.20
+
+# Optional: Advanced Features
+scipy>=1.10.0  # For additional image processing
+matplotlib>=3.7.0  # For visualization
