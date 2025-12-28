@@ -603,11 +603,13 @@ def batch_generate_images(pipe: Any,
     print(f"BATCH GENERATION")
     print('='*60)
     print(f"Fonts: {len(font_names)}")
-    print(f"Styles: {len(style_paths)}")
-    print(f"Characters: {len(characters)}")
+    print(f"Styles Path: {len(style_paths)}")
+    print(f"Number of Characters: {len(characters)}")
     print(f"Batch size: {args.batch_size}")
     print(f"Inference steps: {args.num_inference_steps}")
+    print(f"Guidance scale: {args.guidance_scale}")
     print(f"Save interval: {args.save_interval if args.save_interval > 0 else 'end only'}")
+    print(f"Output directory: {output_dir}")
     print('='*60)
     
     # Use first font for generation
