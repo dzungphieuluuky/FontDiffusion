@@ -1,0 +1,91 @@
+{
+  "total_fonts": 4,
+  "font_names": [
+    "Hanazono Mincho A Regular",
+    "Hanazono Mincho B Regular",
+    "Hanazono Mincho C Regular",
+    "Nom Na Tong"
+  ],
+  "font_paths": [
+    "HanaMinA.otf",
+    "HanaMinB.otf",
+    "HanaMinC.otf",
+    "NomNaTong-Regular.ttf"
+  ],
+  "total_glyphs_by_font": {
+    "Hanazono Mincho A Regular": 44202,
+    "Hanazono Mincho B Regular": 42934,
+    "Hanazono Mincho C Regular": 18481,
+    "Nom Na Tong": 31419
+  },
+  "sample_coverage": {
+    "Hanazono Mincho A Regular": {
+      "basic_latin": {
+        "supported": 62,
+        "total": 62,
+        "percentage": 100.0
+      },
+      "common_chinese": {
+        "supported": 20,
+        "total": 20,
+        "percentage": 100.0
+      },
+      "punctuation": {
+        "supported": 14,
+        "total": 14,
+        "percentage": 100.0
+      }
+    },
+    "Hanazono Mincho B Regular": {
+      "basic_latin": {
+        "supported": 62,
+        "total": 62,
+        "percentage": 100.0
+      },
+      "common_chinese": {
+        "supported": 0,
+        "total": 20,
+        "percentage": 0.0
+      },
+      "punctuation": {
+        "supported": 2,
+        "total": 14,
+        "percentage": 14.3
+      }
+    },
+    "Hanazono Mincho C Regular": {
+      "basic_latin": {
+        "supported": 62,
+        "total": 62,
+        "percentage": 100.0
+      },
+      "common_chinese": {
+        "supported": 0,
+        "total": 20,
+        "percentage": 0.0
+      },
+      "punctuation": {
+        "supported": 2,
+        "total": 14,
+        "percentage": 14.3
+      }
+    },
+    "Nom Na Tong": {
+      "basic_latin": {
+        "supported": 62,
+        "total": 62,
+        "percentage": 100.0
+      },
+      "common_chinese": {
+        "supported": 20,
+        "total": 20,
+        "percentage": 100.0
+      },
+      "punctuation": {
+        "supported": 14,
+        "total": 14,
+        "percentage": 100.0
+      }
+    }
+  }
+}
