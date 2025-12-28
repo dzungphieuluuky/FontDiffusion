@@ -481,10 +481,10 @@ def sampling_batch_optimized(args, pipe, characters: List[str],
     try:
         # Load style image
         style_image = Image.open(style_image_path).convert('RGB')
-        style_transform = get_style_transform(args)
+        style_transform = get_style_transform(args.style_image_size)
         
         font = font_manager.get_font(font_name)
-        content_transform = get_content_transform(args)
+        content_transform = get_content_transform(args.content_image_size)
         
         # Generate content images
         content_images = []
