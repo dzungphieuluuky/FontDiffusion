@@ -134,7 +134,7 @@ class SN(object):
         return [getattr(self, 'sv%d' % i) for i in range(self.num_svs)]
 
     def W_(self):
-        W_mat = self.weight.view(self.weight.size(0), -1)
+        W_mat = self.weight.reshape(self.weight.size(0), -1)
         if self.transpose:
             W_mat = W_mat.t()
         for _ in range(self.num_itrs):
