@@ -10,7 +10,7 @@ import time
 import json
 import argparse
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Any, Set
 from tqdm import tqdm
 
 import numpy as np
@@ -18,35 +18,36 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 import torchvision.transforms as transforms
+from argparse import Namespace, ArgumentParser
 
 # Import evaluation metrics
 try:
     import lpips
-    LPIPS_AVAILABLE = True
+    LPIPS_AVAILABLE: bool = True
 except ImportError:
     print("Warning: lpips not available. Install with: pip install lpips")
-    LPIPS_AVAILABLE = False
+    LPIPS_AVAILABLE: bool = False
 
 try:
     from pytorch_fid import fid_score
-    FID_AVAILABLE = True
+    FID_AVAILABLE: bool = True
 except ImportError:
     print("Warning: pytorch-fid not available. Install with: pip install pytorch-fid")
-    FID_AVAILABLE = False
+    FID_AVAILABLE: bool = False
 
 try:
     from skimage.metrics import structural_similarity as ssim
-    SSIM_AVAILABLE = True
+    SSIM_AVAILABLE: bool = True
 except ImportError:
     print("Warning: scikit-image not available. Install with: pip install scikit-image")
-    SSIM_AVAILABLE = False
+    SSIM_AVAILABLE: bool = False
 
 try:
     import wandb
-    WANDB_AVAILABLE = True
+    WANDB_AVAILABLE: bool = True
 except ImportError:
     print("Warning: wandb not available. Install with: pip install wandb")
-    WANDB_AVAILABLE = False
+    WANDB_AVAILABLE: bool = False
 
 # Import FontDiffuser modules
 from sample_optimized import (
@@ -60,23 +61,23 @@ from utils import load_ttf, ttf2im, is_char_in_font
 class FontManager:
     """Manages multiple font files"""
     
-    def __init__(self, ttf_path: str):
+    def __init__(self, ttf_path: str) -> None:
         """
         Initialize font manager
         
         Args:
             ttf_path: Path to a single font file or directory containing fonts
         """
-        self.fonts = {}
-        self.font_paths = []
+        self.fonts: Dict[str, Dict[str, Any]] = {}
+        self.font_paths: List[str] = []
         self._load_fonts(ttf_path)
     
-    def _load_fonts(self, ttf_path: str):
+    def _load_fonts(self, ttf_path: str) -> None:
         """Load font(s) from path"""
         if os.path.isfile(ttf_path):
             # Single font file
             self.font_paths = [ttf_path]
-            font_name = os.path.splitext(os.path.basename(ttf_path))[0]
+            font_name: str = os.path.splitext(os.path.basename(ttf_path))[0]
             self.fonts[font_name] = {
                 'path': ttf_path,
                 'font': load_ttf(ttf_path),
@@ -86,8 +87,8 @@ class FontManager:
             
         elif os.path.isdir(ttf_path):
             # Directory with multiple fonts
-            font_extensions = {'.ttf', '.otf', '.TTF', '.OTF'}
-            font_files = [
+            font_extensions: Set[str] = {'.ttf', '.otf', '.TTF', '.OTF'}
+            font_files: List[str] = [
                 os.path.join(ttf_path, f)
                 for f in os.listdir(ttf_path)
                 if os.path.splitext(f)[1] in font_extensions
@@ -103,7 +104,7 @@ class FontManager:
             print('='*60)
             
             for font_path in self.font_paths:
-                font_name = os.path.splitext(os.path.basename(font_path))[0]
+                font_name: str = os.path.splitext(os.path.basename(font_path))[0]
                 try:
                     self.fonts[font_name] = {
                         'path': font_path,
@@ -123,7 +124,7 @@ class FontManager:
         """Get list of loaded font names"""
         return list(self.fonts.keys())
     
-    def get_font(self, font_name: str):
+    def get_font(self, font_name: str) -> Any:
         """Get font object by name"""
         if font_name not in self.fonts:
             raise ValueError(f"Font not found: {font_name}")
@@ -137,7 +138,7 @@ class FontManager:
     
     def is_char_in_font(self, font_name: str, char: str) -> bool:
         """Check if character exists in font"""
-        font_path = self.get_font_path(font_name)
+        font_path: str = self.get_font_path(font_name)
         return is_char_in_font(font_path, char)
     
     def get_available_chars_for_font(self, font_name: str, 
@@ -152,17 +153,17 @@ class FontManager:
 class QualityEvaluator:
     """Evaluates generated images using LPIPS, SSIM, and FID"""
     
-    def __init__(self, device='cuda:0'):
-        self.device = device
+    def __init__(self, device: str = 'cuda:0') -> None:
+        self.device: str = device
         
         # Initialize LPIPS
         if LPIPS_AVAILABLE:
-            self.lpips_fn = lpips.LPIPS(net='alex').to(device)
+            self.lpips_fn: Optional[Any] = lpips.LPIPS(net='alex').to(device)
             self.lpips_fn.eval()
         else:
-            self.lpips_fn = None
+            self.lpips_fn: Optional[Any] = None
         
-        self.transform_to_tensor = transforms.ToTensor()
+        self.transform_to_tensor: transforms.ToTensor = transforms.ToTensor()
     
     def compute_lpips(self, img1: Image.Image, img2: Image.Image) -> float:
         """Compute LPIPS between two images"""
@@ -171,11 +172,11 @@ class QualityEvaluator:
         
         try:
             # Convert to tensors [-1, 1]
-            img1_tensor = self.transform_to_tensor(img1).unsqueeze(0).to(self.device) * 2 - 1
-            img2_tensor = self.transform_to_tensor(img2).unsqueeze(0).to(self.device) * 2 - 1
+            img1_tensor: torch.Tensor = self.transform_to_tensor(img1).unsqueeze(0).to(self.device) * 2 - 1
+            img2_tensor: torch.Tensor = self.transform_to_tensor(img2).unsqueeze(0).to(self.device) * 2 - 1
             
             with torch.no_grad():
-                lpips_value = self.lpips_fn(img1_tensor, img2_tensor).item()
+                lpips_value: float = self.lpips_fn(img1_tensor, img2_tensor).item()
             
             return lpips_value
         except Exception as e:
@@ -189,10 +190,10 @@ class QualityEvaluator:
         
         try:
             # Convert to grayscale numpy arrays
-            img1_gray = np.array(img1.convert('L'))
-            img2_gray = np.array(img2.convert('L'))
+            img1_gray: np.ndarray = np.array(img1.convert('L'))
+            img2_gray: np.ndarray = np.array(img2.convert('L'))
             
-            ssim_value = ssim(img1_gray, img2_gray, data_range=255)
+            ssim_value: float = ssim(img1_gray, img2_gray, data_range=255)
             return ssim_value
         except Exception as e:
             print(f"Error computing SSIM: {e}")
@@ -204,7 +205,7 @@ class QualityEvaluator:
             return -1.0
         
         try:
-            fid_value = fid_score.calculate_fid_given_paths(
+            fid_value: float = fid_score.calculate_fid_given_paths(
                 [real_dir, fake_dir],
                 batch_size=50,
                 device=self.device,
@@ -215,7 +216,7 @@ class QualityEvaluator:
             print(f"Error computing FID: {e}")
             return -1.0
     
-    def save_image(self, image: Image.Image, path: str):
+    def save_image(self, image: Image.Image, path: str) -> None:
         """Save PIL image to path"""
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -224,9 +225,9 @@ class QualityEvaluator:
             print(f"Error saving image to {path}: {e}")
 
 
-def parse_args():
+def parse_args() -> Namespace:
     """Parse command line arguments"""
-    parser = argparse.ArgumentParser(description='Batch sampling and evaluation')
+    parser: ArgumentParser = argparse.ArgumentParser(description='Batch sampling and evaluation')
     
     # Input/Output
     parser.add_argument('--characters', type=str, required=True,
@@ -297,21 +298,23 @@ def parse_args():
     return parser.parse_args()
 
 
-def load_characters(characters_arg: str, start_line: int = 1, end_line: Optional[int] = None) -> List[str]:
+def load_characters(characters_arg: str, 
+                   start_line: int = 1, 
+                   end_line: Optional[int] = None) -> List[str]:
     """Load characters from file or comma-separated string with line range support"""
-    chars = []
+    chars: List[str] = []
     if os.path.isfile(characters_arg):
         with open(characters_arg, 'r', encoding='utf-8') as f:
-            all_lines = f.readlines()
+            all_lines: List[str] = f.readlines()
         
         # Adjust for 1-indexed input
-        start_idx = max(0, start_line - 1)
-        end_idx = len(all_lines) if end_line is None else min(len(all_lines), end_line)
+        start_idx: int = max(0, start_line - 1)
+        end_idx: int = len(all_lines) if end_line is None else min(len(all_lines), end_line)
         
         print(f"Loading characters from lines {start_line} to {end_idx} (total: {len(all_lines)} lines)")
         
         for line_num, line in enumerate(all_lines[start_idx:end_idx], start=start_line):
-            char = line.strip()
+            char: str = line.strip()
             if not char:
                 continue
             if len(char) != 1:
@@ -332,29 +335,28 @@ def load_style_images(style_images_arg: str) -> List[str]:
     """Load style image paths from comma-separated string or directory"""
     if os.path.isdir(style_images_arg):
         # Load all images from directory
-        image_exts = {'.jpg', '.jpeg', '.png', '.bmp'}
-        style_paths = [
+        image_exts: Set[str] = {'.jpg', '.jpeg', '.png', '.bmp'}
+        style_paths: List[str] = [
             os.path.join(style_images_arg, f)
             for f in os.listdir(style_images_arg)
             if os.path.splitext(f)[1].lower() in image_exts
         ]
         style_paths.sort()
     else:
-        style_paths = [p.strip() for p in style_images_arg.split(',')]
+        style_paths: List[str] = [p.strip() for p in style_images_arg.split(',')]
     
     return style_paths
 
 
-def create_args_namespace(args):
+def create_args_namespace(args: Namespace) -> Namespace:
     """Create args namespace for FontDiffuser pipeline"""
-    from argparse import Namespace
     
     try:
         from configs.fontdiffuser import get_parser
-        parser = get_parser()
-        default_args = parser.parse_args([])
+        parser: ArgumentParser = get_parser()
+        default_args: Namespace = parser.parse_args([])
     except Exception:
-        default_args = Namespace()
+        default_args: Namespace = Namespace()
     
     # Override with user arguments
     for key, value in vars(args).items():
@@ -394,10 +396,12 @@ def create_args_namespace(args):
     return default_args
 
 
-def save_checkpoint(results: Dict, output_dir: str, checkpoint_name: str = 'results_checkpoint.json'):
+def save_checkpoint(results: Dict[str, Any], 
+                   output_dir: str, 
+                   checkpoint_name: str = 'results_checkpoint.json') -> None:
     """Save intermediate results checkpoint"""
     try:
-        checkpoint_path = os.path.join(output_dir, checkpoint_name)
+        checkpoint_path: str = os.path.join(output_dir, checkpoint_name)
         with open(checkpoint_path, 'w', encoding='utf-8') as f:
             json.dump(results, f, indent=2, ensure_ascii=False)
         print(f"  💾 Checkpoint saved: {checkpoint_path}")
@@ -405,12 +409,12 @@ def save_checkpoint(results: Dict, output_dir: str, checkpoint_name: str = 'resu
         print(f"  ⚠ Error saving checkpoint: {e}")
 
 
-def load_checkpoint(checkpoint_path: str) -> Optional[Dict]:
+def load_checkpoint(checkpoint_path: str) -> Optional[Dict[str, Any]]:
     """Load results from checkpoint"""
     try:
         if os.path.exists(checkpoint_path):
             with open(checkpoint_path, 'r', encoding='utf-8') as f:
-                results = json.load(f)
+                results: Dict[str, Any] = json.load(f)
             print(f"✓ Loaded checkpoint from {checkpoint_path}")
             return results
         return None
@@ -419,8 +423,10 @@ def load_checkpoint(checkpoint_path: str) -> Optional[Dict]:
         return None
 
 
-def generate_content_images(characters: List[str], font_manager: FontManager,
-                           output_dir: str, args) -> Dict[str, str]:
+def generate_content_images(characters: List[str], 
+                           font_manager: FontManager,
+                           output_dir: str, 
+                           args: Namespace) -> Dict[str, str]:
     """
     Generate and save content character images (single set, using first available font)
     Output: data_examples/train/ContentImage/charX.png
@@ -428,16 +434,16 @@ def generate_content_images(characters: List[str], font_manager: FontManager,
     Returns:
         Dict mapping char -> path
     """
-    content_dir = os.path.join(output_dir, 'ContentImage')
+    content_dir: str = os.path.join(output_dir, 'ContentImage')
     os.makedirs(content_dir, exist_ok=True)
     
     # Use first available font
-    font_names = font_manager.get_font_names()
+    font_names: List[str] = font_manager.get_font_names()
     if not font_names:
         raise ValueError("No fonts loaded")
     
-    font_name = font_names[0]
-    font = font_manager.get_font(font_name)
+    font_name: str = font_names[0]
+    font: Any = font_manager.get_font(font_name)
     
     print(f"\n{'='*60}")
     print(f"Generating Content Images")
@@ -445,7 +451,7 @@ def generate_content_images(characters: List[str], font_manager: FontManager,
     print(f"Characters: {len(characters)}")
     print('='*60)
     
-    char_paths = {}
+    char_paths: Dict[str, str] = {}
     
     # Add tqdm progress bar
     for idx, char in enumerate(tqdm(characters, desc="📝 Content images", ncols=80)):
@@ -454,8 +460,8 @@ def generate_content_images(characters: List[str], font_manager: FontManager,
             continue
         
         try:
-            content_img = ttf2im(font=font, char=char)
-            char_path = os.path.join(content_dir, f'char{idx}.png')
+            content_img: Image.Image = ttf2im(font=font, char=char)
+            char_path: str = os.path.join(content_dir, f'char{idx}.png')
             content_img.save(char_path)
             char_paths[char] = char_path
         except Exception as e:
@@ -467,32 +473,37 @@ def generate_content_images(characters: List[str], font_manager: FontManager,
     return char_paths
 
 
-def sampling_batch_optimized(args, pipe, characters: List[str], 
-                             style_image_path: str, font_manager: FontManager,
-                             font_name: str):
+def sampling_batch_optimized(args: Namespace, 
+                             pipe: Any, 
+                             characters: List[str], 
+                             style_image_path: str, 
+                             font_manager: FontManager,
+                             font_name: str) -> Tuple[Optional[List[Image.Image]], 
+                                                      Optional[List[str]], 
+                                                      Optional[float]]:
     """Batch sampling for multiple characters with specific font"""
     
     # Get available characters for this font
-    available_chars = font_manager.get_available_chars_for_font(font_name, characters)
+    available_chars: List[str] = font_manager.get_available_chars_for_font(font_name, characters)
     
     if not available_chars:
         return None, None, None
     
     try:
         # Load style image
-        style_image = Image.open(style_image_path).convert('RGB')
-        style_transform = get_style_transform(args.style_image_size)
+        style_image: Image.Image = Image.open(style_image_path).convert('RGB')
+        style_transform: transforms.Compose = get_style_transform(args.style_image_size)
         
-        font = font_manager.get_font(font_name)
-        content_transform = get_content_transform(args.content_image_size)
+        font: Any = font_manager.get_font(font_name)
+        content_transform: transforms.Compose = get_content_transform(args.content_image_size)
         
         # Generate content images
-        content_images = []
-        content_images_pil = []
+        content_images: List[torch.Tensor] = []
+        content_images_pil: List[Image.Image] = []
         
         for char in available_chars:
             try:
-                content_image = ttf2im(font=font, char=char)
+                content_image: Image.Image = ttf2im(font=font, char=char)
                 content_images_pil.append(content_image.copy())
                 content_images.append(content_transform(content_image))
             except Exception as e:
@@ -503,25 +514,25 @@ def sampling_batch_optimized(args, pipe, characters: List[str],
             return None, None, None
         
         # Stack into batch
-        content_batch = torch.stack(content_images)
-        style_batch = style_transform(style_image)[None, :].repeat(len(content_images), 1, 1, 1)
+        content_batch: torch.Tensor = torch.stack(content_images)
+        style_batch: torch.Tensor = style_transform(style_image)[None, :].repeat(len(content_images), 1, 1, 1)
         
         with torch.no_grad():
-            dtype = torch.float16 if args.fp16 else torch.float32
+            dtype: torch.dtype = torch.float16 if args.fp16 else torch.float32
             content_batch = content_batch.to(args.device, dtype=dtype)
             style_batch = style_batch.to(args.device, dtype=dtype)
             
-            start = time.perf_counter()
+            start: float = time.perf_counter()
             
             # Process in batches
-            all_images = []
-            batch_size = args.batch_size
+            all_images: List[Image.Image] = []
+            batch_size: int = args.batch_size
             
             for i in range(0, len(content_batch), batch_size):
-                batch_content = content_batch[i:i+batch_size]
-                batch_style = style_batch[i:i+batch_size]
+                batch_content: torch.Tensor = content_batch[i:i+batch_size]
+                batch_style: torch.Tensor = style_batch[i:i+batch_size]
                 
-                images = pipe.generate(
+                images: List[Image.Image] = pipe.generate(
                     content_images=batch_content,
                     style_images=batch_style,
                     batch_size=len(batch_content),
@@ -538,8 +549,8 @@ def sampling_batch_optimized(args, pipe, characters: List[str],
                 
                 all_images.extend(images)
             
-            end = time.perf_counter()
-            total_time = end - start
+            end: float = time.perf_counter()
+            total_time: float = end - start
             
             return all_images, available_chars, total_time
             
@@ -550,9 +561,14 @@ def sampling_batch_optimized(args, pipe, characters: List[str],
         return None, None, None
 
 
-def batch_generate_images(pipe, characters: List[str], style_paths: List[str],
-                          output_dir: str, args, evaluator: QualityEvaluator,
-                          font_manager: FontManager, resume_results: Optional[Dict] = None):
+def batch_generate_images(pipe: Any, 
+                          characters: List[str], 
+                          style_paths: List[str],
+                          output_dir: str, 
+                          args: Namespace, 
+                          evaluator: QualityEvaluator,
+                          font_manager: FontManager, 
+                          resume_results: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Generate images in batches for all fonts and styles with checkpoint support
     Output: data_examples/train/TargetImage.png/styleX/styleX+charY.png
@@ -560,11 +576,11 @@ def batch_generate_images(pipe, characters: List[str], style_paths: List[str],
     
     # Initialize or resume results
     if resume_results:
-        results = resume_results
-        processed_styles = set(g['style'] for g in results['generations'])
+        results: Dict[str, Any] = resume_results
+        processed_styles: Set[str] = set(g['style'] for g in results['generations'])
         print(f"📥 Resuming from checkpoint: {len(processed_styles)} styles already processed")
     else:
-        results = {
+        results: Dict[str, Any] = {
             'generations': [],
             'metrics': {
                 'lpips': [],
@@ -575,13 +591,13 @@ def batch_generate_images(pipe, characters: List[str], style_paths: List[str],
             'total_chars': len(characters),
             'total_styles': len(style_paths)
         }
-        processed_styles = set()
+        processed_styles: Set[str] = set()
     
     # Create TargetImage.png directory
-    target_base_dir = os.path.join(output_dir, 'TargetImage.png')
+    target_base_dir: str = os.path.join(output_dir, 'TargetImage.png')
     os.makedirs(target_base_dir, exist_ok=True)
     
-    font_names = font_manager.get_font_names()
+    font_names: List[str] = font_manager.get_font_names()
     
     print(f"\n{'='*60}")
     print(f"BATCH GENERATION")
@@ -595,28 +611,28 @@ def batch_generate_images(pipe, characters: List[str], style_paths: List[str],
     print('='*60)
     
     # Use first font for generation
-    font_name = font_names[0]
+    font_name: str = font_names[0]
     print(f"\nUsing font: {font_name}")
     
-    available_chars = font_manager.get_available_chars_for_font(font_name, characters)
+    available_chars: List[str] = font_manager.get_available_chars_for_font(font_name, characters)
     print(f"Available characters: {len(available_chars)}/{len(characters)}")
     
     # Create character index mapping
-    char_to_idx = {char: idx for idx, char in enumerate(characters)}
+    char_to_idx: Dict[str, int] = {char: idx for idx, char in enumerate(characters)}
     
     # Main generation loop with progress bar
     style_iterator = tqdm(enumerate(style_paths), total=len(style_paths), 
                          desc="🎨 Generating styles", ncols=100)
     
     for style_idx, style_path in style_iterator:
-        style_name = f"style{style_idx}"
+        style_name: str = f"style{style_idx}"
         
         # Skip if already processed
         if style_name in processed_styles:
             style_iterator.set_postfix_str(f"⏭ Skipping {style_name} (already done)")
             continue
         
-        style_dir = os.path.join(target_base_dir, style_name)
+        style_dir: str = os.path.join(target_base_dir, style_name)
         os.makedirs(style_dir, exist_ok=True)
         
         style_iterator.set_postfix_str(f"Processing {style_name}")
@@ -636,9 +652,9 @@ def batch_generate_images(pipe, characters: List[str], style_paths: List[str],
             # Save generated images
             for char, img in zip(valid_chars, images):
                 try:
-                    char_idx = char_to_idx.get(char, 0)
-                    img_name = f"{style_name}+char{char_idx}.png"
-                    img_path = os.path.join(style_dir, img_name)
+                    char_idx: int = char_to_idx.get(char, 0)
+                    img_name: str = f"{style_name}+char{char_idx}.png"
+                    img_path: str = os.path.join(style_dir, img_name)
                     evaluator.save_image(img, img_path)
                     
                     # Store generation info
@@ -678,59 +694,63 @@ def batch_generate_images(pipe, characters: List[str], style_paths: List[str],
     return results
 
 
-def evaluate_results(results: Dict, evaluator: QualityEvaluator, 
-                     ground_truth_dir: str = None, compute_fid: bool = False):
+# ...existing code...
+
+def evaluate_results(
+    results: Dict[str, Any],
+    evaluator: QualityEvaluator,
+    ground_truth_dir: Optional[str] = None,
+    compute_fid: bool = False
+) -> Dict[str, Any]:
     """Evaluate generated images against ground truth with progress bar"""
-    
     if not results['generations']:
         print("No images to evaluate")
         return results
-    
+
     print("\n" + "="*60)
     print("EVALUATING IMAGE QUALITY")
     print("="*60)
-    
-    lpips_scores = []
-    ssim_scores = []
-    
+
+    lpips_scores: List[float] = []
+    ssim_scores: List[float] = []
+
     if ground_truth_dir and os.path.isdir(ground_truth_dir):
         print(f"\nComputing LPIPS and SSIM against ground truth...")
-        
-        # Add progress bar for evaluation
+
         eval_iterator = tqdm(results['generations'], desc="📊 Evaluating", ncols=80)
-        
+
         for gen_info in eval_iterator:
-            char = gen_info['character']
-            gen_path = gen_info['output_path']
-            
+            char: str = gen_info['character']
+            gen_path: str = gen_info['output_path']
+
             # Find corresponding ground truth
-            gt_pattern = f"*{char}*.png"
-            gt_files = list(Path(ground_truth_dir).glob(gt_pattern))
-            
+            gt_pattern: str = f"*{char}*.png"
+            gt_files: List[Path] = list(Path(ground_truth_dir).glob(gt_pattern))
+
             if not gt_files:
                 continue
-            
-            gt_path = str(gt_files[0])
-            
+
+            gt_path: str = str(gt_files[0])
+
             try:
-                gen_img = Image.open(gen_path).convert('RGB')
-                gt_img = Image.open(gt_path).convert('RGB')
-                
+                gen_img: Image.Image = Image.open(gen_path).convert('RGB')
+                gt_img: Image.Image = Image.open(gt_path).convert('RGB')
+
                 # Resize to same size if needed
                 if gen_img.size != gt_img.size:
                     gt_img = gt_img.resize(gen_img.size, Image.BILINEAR)
-                
-                lpips_val = evaluator.compute_lpips(gen_img, gt_img)
-                ssim_val = evaluator.compute_ssim(gen_img, gt_img)
-                
+
+                lpips_val: float = evaluator.compute_lpips(gen_img, gt_img)
+                ssim_val: float = evaluator.compute_ssim(gen_img, gt_img)
+
                 if lpips_val >= 0:
                     lpips_scores.append(lpips_val)
                 if ssim_val >= 0:
                     ssim_scores.append(ssim_val)
-                
+
             except Exception as e:
                 tqdm.write(f"Error evaluating {char}: {e}")
-    
+
     # Store overall metrics
     if lpips_scores:
         results['metrics']['lpips'] = {
@@ -739,7 +759,7 @@ def evaluate_results(results: Dict, evaluator: QualityEvaluator,
             'min': float(np.min(lpips_scores)),
             'max': float(np.max(lpips_scores))
         }
-    
+
     if ssim_scores:
         results['metrics']['ssim'] = {
             'mean': float(np.mean(ssim_scores)),
@@ -747,31 +767,51 @@ def evaluate_results(results: Dict, evaluator: QualityEvaluator,
             'min': float(np.min(ssim_scores)),
             'max': float(np.max(ssim_scores))
         }
-    
+
+    # Optionally compute FID
+    if compute_fid and ground_truth_dir and os.path.isdir(ground_truth_dir) and FID_AVAILABLE:
+        print("\nComputing FID...")
+        fake_dirs = set(os.path.dirname(g['output_path']) for g in results['generations'])
+        fid_scores: List[float] = []
+        for fake_dir in fake_dirs:
+            fid_val: float = evaluator.compute_fid(ground_truth_dir, fake_dir)
+            if fid_val >= 0:
+                fid_scores.append(fid_val)
+        if fid_scores:
+            results['metrics']['fid'] = {
+                'mean': float(np.mean(fid_scores)),
+                'std': float(np.std(fid_scores)),
+                'min': float(np.min(fid_scores)),
+                'max': float(np.max(fid_scores))
+            }
+
     # Print summary
     print("\n" + "="*60)
     print("EVALUATION RESULTS")
     print("="*60)
-    
+
     if lpips_scores:
         print(f"\nLPIPS: {results['metrics']['lpips']['mean']:.4f} ± {results['metrics']['lpips']['std']:.4f}")
-    
+
     if ssim_scores:
         print(f"SSIM:  {results['metrics']['ssim']['mean']:.4f} ± {results['metrics']['ssim']['std']:.4f}")
-    
+
+    if 'fid' in results['metrics']:
+        print(f"FID:   {results['metrics']['fid']['mean']:.4f} ± {results['metrics']['fid']['std']:.4f}")
+
     print("="*60)
-    
+
     return results
 
 
-def log_to_wandb(results: Dict, args):
+def log_to_wandb(results: Dict[str, Any], args: Namespace) -> None:
     """Log results to Weights & Biases"""
     if not WANDB_AVAILABLE or not args.use_wandb:
         return
-    
+
     try:
-        run_name = args.wandb_run_name or f"fontdiffuser_{time.strftime('%Y%m%d_%H%M%S')}"
-        
+        run_name: str = args.wandb_run_name or f"fontdiffuser_{time.strftime('%Y%m%d_%H%M%S')}"
+
         wandb.init(
             project=args.wandb_project,
             name=run_name,
@@ -785,33 +825,39 @@ def log_to_wandb(results: Dict, args):
                 'fp16': args.fp16,
             }
         )
-        
+
         # Log overall metrics
         if 'lpips' in results['metrics'] and isinstance(results['metrics']['lpips'], dict):
             wandb.log({
                 'lpips_mean': results['metrics']['lpips']['mean'],
                 'lpips_std': results['metrics']['lpips']['std'],
             })
-        
+
         if 'ssim' in results['metrics'] and isinstance(results['metrics']['ssim'], dict):
             wandb.log({
                 'ssim_mean': results['metrics']['ssim']['mean'],
                 'ssim_std': results['metrics']['ssim']['std'],
             })
-        
+
+        if 'fid' in results['metrics'] and isinstance(results['metrics']['fid'], dict):
+            wandb.log({
+                'fid_mean': results['metrics']['fid']['mean'],
+                'fid_std': results['metrics']['fid']['std'],
+            })
+
         # Log inference times
         if results['metrics']['inference_times']:
-            total_time = sum(t['total_time'] for t in results['metrics']['inference_times'])
-            total_images = sum(t['num_images'] for t in results['metrics']['inference_times'])
-            
+            total_time: float = sum(t['total_time'] for t in results['metrics']['inference_times'])
+            total_images: int = sum(t['num_images'] for t in results['metrics']['inference_times'])
+
             wandb.log({
                 'total_inference_time': total_time,
                 'total_images': total_images,
                 'avg_time_per_image': total_time / total_images if total_images > 0 else 0
             })
-        
+
         # Log sample images
-        sample_images = []
+        sample_images: List[Any] = []
         for gen_info in results['generations'][:20]:  # Max 20 samples
             if os.path.exists(gen_info['output_path']):
                 sample_images.append(
@@ -820,84 +866,84 @@ def log_to_wandb(results: Dict, args):
                         caption=f"{gen_info['character']} - {gen_info['style']}"
                     )
                 )
-        
+
         if sample_images:
             wandb.log({"sample_generations": sample_images})
-        
+
         wandb.finish()
         print("\n✓ Results logged to W&B")
-        
+
     except Exception as e:
         print(f"\n⚠ Error logging to W&B: {e}")
 
 
-def main():
-    args = parse_args()
-    
+def main() -> None:
+    args: Namespace = parse_args()
+
     print("\n" + "="*60)
     print("FONTDIFFUSER STANDARD FORMAT GENERATION")
     print("="*60)
-    
+
     try:
         # Load characters and styles
-        characters = load_characters(args.characters, args.start_line, args.end_line)
-        style_paths = load_style_images(args.style_images)
-        
+        characters: List[str] = load_characters(args.characters, args.start_line, args.end_line)
+        style_paths: List[str] = load_style_images(args.style_images)
+
         # Initialize font manager
         print(f"\nInitializing font manager...")
-        font_manager = FontManager(args.ttf_path)
-        
+        font_manager: FontManager = FontManager(args.ttf_path)
+
         print(f"\n📊 Configuration:")
         print(f"  Characters: {len(characters)} (lines {args.start_line}-{args.end_line or 'end'})")
         print(f"  Styles: {len(style_paths)}")
         print(f"  Output: {args.output_dir}")
-        
+
         # Create output directories
         os.makedirs(args.output_dir, exist_ok=True)
-        
+
         # Check for resume
-        resume_results = None
+        resume_results: Optional[Dict[str, Any]] = None
         if args.resume_from:
             resume_results = load_checkpoint(args.resume_from)
-        
+
         # Generate content images (single set)
         if not resume_results:  # Skip if resuming
-            char_paths = generate_content_images(
+            char_paths: Dict[str, str] = generate_content_images(
                 characters, font_manager, args.output_dir, args
             )
-        
+
         # Create args namespace for pipeline
-        pipeline_args = create_args_namespace(args)
-        
+        pipeline_args: Namespace = create_args_namespace(args)
+
         # Load pipeline
         print("\nLoading FontDiffuser pipeline...")
-        pipe = load_fontdiffuser_pipeline(pipeline_args)
-        
+        pipe: Any = load_fontdiffuser_pipeline(pipeline_args)
+
         # Initialize evaluator
-        evaluator = QualityEvaluator(device=args.device)
-        
+        evaluator: QualityEvaluator = QualityEvaluator(device=args.device)
+
         # Generate target images
-        results = batch_generate_images(
+        results: Dict[str, Any] = batch_generate_images(
             pipe, characters, style_paths, args.output_dir,
             pipeline_args, evaluator, font_manager, resume_results
         )
-        
+
         # Evaluate if requested
         if args.evaluate and args.ground_truth_dir:
             results = evaluate_results(
                 results, evaluator, args.ground_truth_dir, args.compute_fid
             )
-        
+
         # Save final results
-        results_path = os.path.join(args.output_dir, 'results.json')
+        results_path: str = os.path.join(args.output_dir, 'results.json')
         with open(results_path, 'w', encoding='utf-8') as f:
             json.dump(results, f, indent=2, ensure_ascii=False)
         print(f"\n✓ Results saved to {results_path}")
-        
+
         # Log to wandb
         if args.use_wandb:
             log_to_wandb(results, args)
-        
+
         print("\n" + "="*60)
         print("✓ ALL DONE!")
         print("="*60)
@@ -917,14 +963,14 @@ def main():
         print(f"    │   └── ...")
         print(f"    ├── results.json")
         print(f"    └── results_checkpoint.json (if using --save_interval)")
-        
+
     except KeyboardInterrupt:
         print("\n\n⚠ Generation interrupted by user!")
         print("💾 Saving checkpoint before exit...")
         if 'results' in locals():
             save_checkpoint(results, args.output_dir, 'results_interrupted.json')
         sys.exit(1)
-        
+
     except Exception as e:
         print(f"\n\n✗ Fatal error: {e}")
         import traceback
@@ -934,46 +980,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-"""Example Usage:
-
-# Basic usage
-python sample_batch.py \
-    --characters "nom_tu_tao.txt" \
-    --style_images "style_images/DVSKTT_ref.jpg" \
-    --ckpt_dir "ckpt/" \
-    --ttf_path "fonts/NomNaTong-Regular.otf" \
-    --output_dir "data_examples/train" \
-    --num_inference_steps 20 \
-    --guidance_scale 7.5 \
-    --batch_size 8 \
-    --seed 42 \
-    --fp16 \
-    --channels_last
-
-# With line range and periodic saving
-python sample_batch.py \
-    --characters "nom_tu_tao.txt" \
-    --start_line 1 \
-    --end_line 100 \
-    --style_images "style_images/" \
-    --ckpt_dir "ckpt/" \
-    --ttf_path "fonts/" \
-    --output_dir "output_data" \
-    --batch_size 8 \
-    --save_interval 5 \
-    --fp16 \
-    --channels_last
-
-# Resume from checkpoint
-python sample_batch.py \
-    --characters "nom_tu_tao.txt" \
-    --style_images "style_images/" \
-    --ckpt_dir "ckpt/" \
-    --ttf_path "fonts/" \
-    --output_dir "output_data" \
-    --resume_from "output_data/results_checkpoint.json" \
-    --batch_size 8 \
-    --fp16
-"""
