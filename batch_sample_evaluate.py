@@ -881,6 +881,7 @@ def main():
     char_paths = generate_content_images(
         characters, font_manager, args.output_dir, args
     )
+    print(f"DEBUG: Generated content image paths for fonts.")
     
     # Create args namespace for pipeline
     pipeline_args = create_args_namespace(args)
