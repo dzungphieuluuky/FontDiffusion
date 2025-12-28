@@ -41,7 +41,7 @@ echo "  Batch size: $BATCH_SIZE"
 echo ""
 
 # Run the batch generation
-python batch_sample_evaluate.py \
+python sample_batch.py \
     --characters "$CHARACTERS" \
     --style_images "$STYLE_IMAGES" \
     --ttf_path "$TTF_DIR" \
