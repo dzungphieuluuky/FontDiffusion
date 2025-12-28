@@ -423,55 +423,56 @@ def load_checkpoint(checkpoint_path: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def generate_content_images(characters: List[str], 
-                           font_manager: FontManager,
-                           output_dir: str, 
-                           args: Namespace) -> Dict[str, str]:
+def generate_content_images(
+    characters: List[str], 
+    font_manager: FontManager,
+    output_dir: str, 
+    args: Namespace
+) -> Dict[str, str]:
     """
-    Generate and save content character images (single set, using first available font)
+    Generate and save content character images (using the first suitable font for each character)
     Output: data_examples/train/ContentImage/charX.png
-    
+
     Returns:
         Dict mapping char -> path
     """
     content_dir: str = os.path.join(output_dir, 'ContentImage')
     os.makedirs(content_dir, exist_ok=True)
-    
-    # Use first available font
+
     font_names: List[str] = font_manager.get_font_names()
     if not font_names:
         raise ValueError("No fonts loaded")
-    
-    font_name: str = font_names[0]
-    font: Any = font_manager.get_font(font_name)
-    
+
     print(f"\n{'='*60}")
     print(f"Generating Content Images")
-    print(f"Using font: {font_name}")
+    print(f"Using {len(font_names)} fonts")
     print(f"Characters: {len(characters)}")
     print('='*60)
-    
+
     char_paths: Dict[str, str] = {}
-    
-    # Add tqdm progress bar
+
     for idx, char in enumerate(tqdm(characters, desc="📝 Content images", ncols=80)):
-        if not font_manager.is_char_in_font(font_name, char):
-            tqdm.write(f"  ⚠ Warning: '{char}' not in font, skipping...")
+        found_font = None
+        for font_name in font_names:
+            if font_manager.is_char_in_font(font_name, char):
+                found_font = font_name
+                break
+        if not found_font:
+            tqdm.write(f"  ⚠ Warning: '{char}' not in any font, skipping...")
             continue
-        
         try:
+            font = font_manager.get_font(found_font)
             content_img: Image.Image = ttf2im(font=font, char=char)
             char_path: str = os.path.join(content_dir, f'char{idx}.png')
             content_img.save(char_path)
             char_paths[char] = char_path
         except Exception as e:
             tqdm.write(f"  ✗ Error generating '{char}': {e}")
-    
+
     print(f"✓ Generated {len(char_paths)} content images")
     print('='*60)
-    
-    return char_paths
 
+    return char_paths
 
 def sampling_batch_optimized(args: Namespace, 
                              pipe: Any, 
