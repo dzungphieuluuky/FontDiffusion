@@ -478,7 +478,7 @@ def generate_content_images(
 def sampling_batch_optimized(args: Namespace, 
                              pipe: FontDiffuserDPMPipeline, 
                              characters: List[str], 
-                             style_image_path: str, 
+                             style_image_path: str | Image.Image, 
                              font_manager: FontManager,
                              font_name: str) -> Tuple[Optional[List[Image.Image]], 
                                                       Optional[List[str]], 
@@ -493,7 +493,10 @@ def sampling_batch_optimized(args: Namespace,
     
     try:
         # Load style image
-        style_image: Image.Image = Image.open(style_image_path).convert('RGB')
+        if isinstance(style_image_path, str):
+            style_image: Image.Image = Image.open(style_image_path).convert('RGB')
+        else:
+            style_image: Image.Image = style_image_path.convert('RGB')
         style_transform: transforms.Compose = get_style_transform(args.style_image_size)
         
         font: Any = font_manager.get_font(font_name)
