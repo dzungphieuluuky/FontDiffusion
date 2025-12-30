@@ -5,7 +5,7 @@ Create Hugging Face dataset from generated FontDiffusion images and push to Hub
 import os
 import json
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 
 import torch
@@ -51,11 +51,21 @@ class FontDiffusionDatasetBuilder:
     def _load_results_metadata(self) -> Optional[Dict[str, Any]]:
         """Load results.json metadata if available"""
         results_path = self.data_dir / "results.json"
-        if results_path.exists():
+        if not results_path.exists():
+            return None
+        
+        try:
             with open(results_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        return None
-    
+        except json.JSONDecodeError as e:
+            print(f"\n⚠ Warning: results.json is corrupted ({e})")
+            print(f"  Proceeding without metadata...")
+            return None
+        except Exception as e:
+            print(f"\n⚠ Warning: Could not load results.json ({e})")
+            print(f"  Proceeding without metadata...")
+            return None 
+           
     def build_dataset(self) -> Dataset:
         """
         Build dataset with structure:
@@ -76,100 +86,97 @@ class FontDiffusionDatasetBuilder:
         # Load metadata
         metadata = self._load_results_metadata()
         
-        # Get all style directories
-        style_dirs = sorted([d for d in self.target_dir.iterdir() if d.is_dir()])
-        print(f"\nFound {len(style_dirs)} style directories")
-        
-        # Extract style names and create style index mapping
-        style_names = [d.name for d in style_dirs]
-        style_to_idx = {name: idx for idx, name in enumerate(style_names)}
-        
-        # Load content images
-        content_images = self._load_content_images()
-        
-        # Build dataset rows
         dataset_rows: List[Dict[str, Any]] = []
         
-        print("\nProcessing style-character pairs...")
-        style_iterator = tqdm(style_dirs, desc="🎨 Styles", ncols=80)
+        # Load all content and target images
+        content_dir = self.data_dir / "ContentImage"
+        target_base_dir = self.data_dir / "TargetImage"
         
-        for style_dir in style_iterator:
-            style_name = style_dir.name
-            style_idx = style_to_idx[style_name]
+        if not content_dir.exists() or not target_base_dir.exists():
+            raise ValueError(f"Missing required directories in {self.data_dir}")
+        
+        # Build mapping from results.json
+        gen_map: Dict[Tuple[int, int], Dict[str, Any]] = {}  # (char_idx, style_idx) -> gen_info
+        
+        if metadata and 'generations' in metadata:
+            for gen_info in metadata['generations']:
+                char_idx = gen_info.get('char_index')
+                style_idx = gen_info.get('style_index')
+                
+                if char_idx is not None and style_idx is not None:
+                    gen_map[(char_idx, style_idx)] = gen_info
+        
+        # Iterate through target images
+        for style_dir in sorted(target_base_dir.iterdir()):
+            if not style_dir.is_dir():
+                continue
             
-            # Get all target images in this style directory
-            target_images = sorted(style_dir.glob("*.png"))
+            style_name = style_dir.name  # e.g., "style0"
+            style_idx = int(style_name.replace('style', ''))
             
-            for target_path in target_images:
-                try:
-                    # Parse filename: style0+char0.png -> char0
-                    filename = target_path.stem  # Remove .png
-                    if '+' not in filename:
-                        continue
-                    
-                    char_part = filename.split('+')[1]  # Extract "char0"
-                    char_idx = int(char_part.replace('char', ''))
-                    
-                    # Get character and content image
-                    if char_idx >= len(content_images):
-                        continue
-                    
-                    content_data = content_images[char_idx]
-                    character = content_data['character']
-                    content_image_path = content_data['path']
-                    
-                    # Load images
-                    content_image = PILImage.open(content_image_path).convert('RGB')
-                    target_image = PILImage.open(target_path).convert('RGB')
-                    
-                    # Get font info from metadata if available
-                    font_name = "unknown"
-                    if metadata:
-                        for gen_info in metadata.get('generations', []):
-                            if (gen_info.get('char_index') == char_idx and 
-                                gen_info.get('style') == style_name):
-                                font_name = gen_info.get('font', 'unknown')
-                                break
-                    
-                    # Create dataset row
-                    row = {
-                        'character': character,
-                        'char_index': char_idx,
-                        'style': style_name,
-                        'style_index': style_idx,
-                        'content_image': content_image,
-                        'target_image': target_image,
-                        'font': font_name
-                    }
-                    
-                    dataset_rows.append(row)
-                    
-                except Exception as e:
-                    tqdm.write(f"  ⚠ Error processing {target_path}: {e}")
+            for target_img_path in sorted(style_dir.glob("*.png")):
+                # Parse filename: style0+char5.png
+                filename = target_img_path.stem
+                parts = filename.split('+')
+                
+                if len(parts) != 2:
                     continue
+                
+                char_idx_str = parts[1].replace('char', '')
+                
+                try:
+                    char_idx = int(char_idx_str)
+                except ValueError:
+                    continue
+                
+                # Get content image path
+                content_img_path = content_dir / f"char{char_idx}.png"
+                
+                if not content_img_path.exists():
+                    print(f"⚠ Missing content image: {content_img_path}")
+                    continue
+                
+                # Load images
+                try:
+                    content_image = PILImage.open(content_img_path).convert('RGB')
+                    target_image = PILImage.open(target_img_path).convert('RGB')
+                except Exception as e:
+                    print(f"⚠ Error loading images for {filename}: {e}")
+                    continue
+                
+                # Get metadata for this pair
+                gen_info = gen_map.get((char_idx, style_idx), {})
+                
+                # Extract information - use gen_info first, then fallback
+                character = gen_info.get('character', '?')
+                font_name = gen_info.get('font', 'unknown')  # Now gets from gen_info!
+                
+                row = {
+                    'character': character,
+                    'char_index': char_idx,
+                    'style': style_name,
+                    'style_index': style_idx,
+                    'content_image': content_image,
+                    'target_image': target_image,
+                    'font': font_name
+                }
+                
+                dataset_rows.append(row)
         
-        print(f"\n✓ Loaded {len(dataset_rows)} image pairs")
+        print(f"✓ Loaded {len(dataset_rows)} samples")
         
-        # Create dataset
-        dataset = Dataset.from_dict({
-            'character': [row['character'] for row in dataset_rows],
-            'char_index': [row['char_index'] for row in dataset_rows],
-            'style': [row['style'] for row in dataset_rows],
-            'style_index': [row['style_index'] for row in dataset_rows],
-            'content_image': [row['content_image'] for row in dataset_rows],
-            'target_image': [row['target_image'] for row in dataset_rows],
-            'font': [row['font'] for row in dataset_rows]
-        })
+        if not dataset_rows:
+            raise ValueError("No samples loaded!")
         
-        # Set image column types
-        dataset = dataset.cast_column('content_image', HFImage())
-        dataset = dataset.cast_column('target_image', HFImage())
-        
-        print(f"\n✓ Dataset created with {len(dataset)} samples")
-        print(f"  Columns: {dataset.column_names}")
-        print(f"  Features: {dataset.features}")
-        
-        return dataset
+        return Dataset.from_dict({
+            'character': [r['character'] for r in dataset_rows],
+            'char_index': [r['char_index'] for r in dataset_rows],
+            'style': [r['style'] for r in dataset_rows],
+            'style_index': [r['style_index'] for r in dataset_rows],
+            'content_image': [r['content_image'] for r in dataset_rows],
+            'target_image': [r['target_image'] for r in dataset_rows],
+            'font': [r['font'] for r in dataset_rows],
+        }).cast_column('content_image', HFImage()).cast_column('target_image', HFImage())
     
     def _load_content_images(self) -> List[Dict[str, Any]]:
         """Load all content images and their metadata"""
@@ -177,31 +184,40 @@ class FontDiffusionDatasetBuilder:
         
         content_files = sorted(self.content_dir.glob("char*.png"))
         
-        for idx, img_path in enumerate(content_files):
-            # Parse filename: char0.png
-            char_idx = int(img_path.stem.replace('char', ''))
-            
-            # Load metadata if available to get character
-            metadata = self._load_results_metadata()
-            character = '?'
-            
-            if metadata:
-                for gen_info in metadata.get('generations', []):
-                    if gen_info.get('char_index') == char_idx:
-                        character = gen_info.get('character', '?')
-                        break
-            
-            content_images.append({
-                'index': char_idx,
-                'character': character,
-                'path': str(img_path)
-            })
+        if not content_files:
+            raise ValueError(f"No content images found in {self.content_dir}")
+        
+        metadata = self._load_results_metadata()
+        
+        for img_path in content_files:
+            try:
+                # Parse filename: char0.png
+                char_idx = int(img_path.stem.replace('char', ''))
+                
+                # Get character from metadata or use placeholder
+                character = '?'
+                
+                if metadata:
+                    for gen_info in metadata.get('generations', []):
+                        if gen_info.get('char_index') == char_idx:
+                            character = gen_info.get('character', '?')
+                            break
+                
+                content_images.append({
+                    'index': char_idx,
+                    'character': character,
+                    'path': str(img_path)
+                })
+            except Exception as e:
+                print(f"⚠ Error processing {img_path}: {e}")
+                continue
         
         # Sort by index
         content_images.sort(key=lambda x: x['index'])
         
-        return content_images
-    
+        print(f"✓ Loaded {len(content_images)} content images")
+        
+        return content_images    
     def push_to_hub(self, dataset: Dataset) -> None:
         """Push dataset to Hugging Face Hub"""
         if not self.config.push_to_hub:

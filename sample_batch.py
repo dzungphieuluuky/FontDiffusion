@@ -1027,6 +1027,7 @@ def log_to_wandb(results: Dict[str, Any], args: Namespace) -> None:
 
 def main() -> None:
     args: Namespace = parse_args()
+    results: Dict[str, Any] = {}  # Initialize early
 
     print("\n" + "="*60)
     print("FONTDIFFUSER STANDARD FORMAT GENERATION (Index-based)")
