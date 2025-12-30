@@ -10,7 +10,7 @@ import time
 import json
 import argparse
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional, Any, Set
+from typing import List, Dict, Tuple, Optional, Any, Set, Union
 from tqdm import tqdm
 
 import numpy as np
@@ -528,14 +528,12 @@ def generate_content_images(
     characters: List[str], 
     font_manager: FontManager,
     output_dir: str, 
-    args: Namespace
-) -> Dict[str, str]:
+    args: Namespace,
+    index_manager: Optional[ResultsIndexManager] = None  # ✅ Accept existing manager
+) -> Tuple[Dict[str, str], ResultsIndexManager]:
     """
-    Generate and save content character images (using the first suitable font for each character)
-    Output: data_examples/train_original/ContentImage/charX.png
-
-    Returns:
-        Dict mapping char -> path
+    Generate and save content character images
+    Returns: (char_paths dict, updated index_manager)
     """
     content_dir: str = os.path.join(output_dir, 'ContentImage')
     os.makedirs(content_dir, exist_ok=True)
@@ -550,35 +548,46 @@ def generate_content_images(
     print(f"Characters: {len(characters)}")
     print('='*60)
 
+    # Use provided manager or create new one
+    if index_manager is None:
+        index_manager = ResultsIndexManager()
+    
     char_paths: Dict[str, str] = {}
+    chars_without_fonts: List[str] = []
 
-    for idx, char in enumerate(tqdm(characters, desc="📝 Content images", ncols=80)):
+    for char in tqdm(characters, desc="📝 Content images", ncols=80):
         found_font = None
         for font_name in font_names:
             if font_manager.is_char_in_font(font_name, char):
                 found_font = font_name
                 break
+        
         if not found_font:
             tqdm.write(f"  ⚠ Warning: '{char}' not in any font, skipping...")
+            chars_without_fonts.append(char)
             continue
+        
         try:
             font = font_manager.get_font(found_font)
             content_img: Image.Image = ttf2im(font=font, char=char)
-            char_path: str = os.path.join(content_dir, f'char{idx}.png')
+            char_idx = index_manager.get_char_index(char)  # ✅ Use consistent index
+            char_path: str = os.path.join(content_dir, f'char{char_idx}.png')
             content_img.save(char_path)
             char_paths[char] = char_path
         except Exception as e:
             tqdm.write(f"  ✗ Error generating '{char}': {e}")
 
     print(f"✓ Generated {len(char_paths)} content images")
+    if chars_without_fonts:
+        print(f"⚠ {len(chars_without_fonts)} characters not found in any font")
     print('='*60)
 
-    return char_paths
+    return char_paths, index_manager  # ✅ Return updated manager
 
 def sampling_batch_optimized(args: Namespace, 
                              pipe: FontDiffuserDPMPipeline, 
                              characters: List[str], 
-                             style_image_path: str | Image.Image, 
+                             style_image_path: Union[str, Image.Image], 
                              font_manager: FontManager,
                              font_name: str) -> Tuple[Optional[List[Image.Image]], 
                                                       Optional[List[str]], 
@@ -673,23 +682,22 @@ def batch_generate_images(pipe: FontDiffuserDPMPipeline,
                           args: Namespace, 
                           evaluator: QualityEvaluator,
                           font_manager: FontManager, 
-                          resume_results: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                          resume_results: Optional[Dict[str, Any]] = None,
+                          index_manager: Optional[ResultsIndexManager] = None) -> Dict[str, Any]:
     """
     Generate images in batches for all fonts and styles with checkpoint support
-    Output: data_examples/train_original/TargetImage/styleX/styleX+charY.png
-    Uses character and style indices from results.json for tracking
     """
     
-    # Initialize results index manager
-    existing_results_path = os.path.join(output_dir, 'results.json')
-    index_manager = ResultsIndexManager(existing_results_path if os.path.exists(existing_results_path) else None)
+    # Use provided manager or create new one
+    if index_manager is None:
+        existing_results_path = os.path.join(output_dir, 'results.json')
+        index_manager = ResultsIndexManager(existing_results_path if os.path.exists(existing_results_path) else None)
     
     # Initialize or resume results
     if resume_results:
         results: Dict[str, Any] = resume_results
         print(f"📥 Resuming from checkpoint: {len(index_manager.existing_pairs)} style-character pairs already processed")
         
-        # Ensure metrics structure exists
         if 'metrics' not in results:
             results['metrics'] = {
                 'lpips': [],
@@ -710,7 +718,8 @@ def batch_generate_images(pipe: FontDiffuserDPMPipeline,
             'characters': characters,
             'styles': [f"style{i}" for i in range(len(style_paths))],
             'total_chars': len(characters),
-            'total_styles': len(style_paths)
+            'total_styles': len(style_paths),
+            'total_possible_pairs': len(characters) * len(style_paths)
         }
 
     # Create TargetImage directory
@@ -724,6 +733,7 @@ def batch_generate_images(pipe: FontDiffuserDPMPipeline,
     print(f"Fonts: {len(font_names)}")
     print(f"Styles: {len(style_paths)}")
     print(f"Number of Characters: {len(characters)}")
+    print(f"Total possible pairs: {len(characters) * len(style_paths)}")
     print(f"Batch size: {args.batch_size}")
     print(f"Inference steps: {args.num_inference_steps}")
     print(f"Guidance scale: {args.guidance_scale}")
@@ -733,11 +743,26 @@ def batch_generate_images(pipe: FontDiffuserDPMPipeline,
 
     # Map each character to its first supporting font
     char_to_font: Dict[str, str] = {}
+    chars_without_fonts: List[str] = []
+    
     for char in characters:
+        found_font = None
         for font_name in font_names:
             if font_manager.is_char_in_font(font_name, char):
-                char_to_font[char] = font_name
+                found_font = font_name
                 break
+        
+        if found_font:
+            char_to_font[char] = found_font
+        else:
+            chars_without_fonts.append(char)
+
+    if chars_without_fonts:
+        print(f"\n⚠ {len(chars_without_fonts)} characters not in any font (will be skipped):")
+        for char in chars_without_fonts[:10]:  # Show first 10
+            print(f"  - '{char}'")
+        if len(chars_without_fonts) > 10:
+            print(f"  ... and {len(chars_without_fonts) - 10} more")
 
     # Main generation loop with progress bar
     style_iterator = tqdm(enumerate(style_paths), total=len(style_paths), 
@@ -745,11 +770,11 @@ def batch_generate_images(pipe: FontDiffuserDPMPipeline,
 
     skipped_count = 0
     generated_count = 0
+    failed_no_font_count = 0
 
     for style_idx, style_path in style_iterator:
         style_name: str = f"style{style_idx}"
         
-        # Get style index from index manager
         managed_style_idx = index_manager.get_style_index(style_name)
 
         style_dir: str = os.path.join(target_base_dir, style_name)
@@ -758,20 +783,24 @@ def batch_generate_images(pipe: FontDiffuserDPMPipeline,
         style_iterator.set_postfix_str(f"Processing {style_name}")
 
         # Group characters by font for this style
-        # Only process pairs that don't exist in results.json
         font_to_chars: Dict[str, List[str]] = {}
         
         for char in characters:
             char_idx = index_manager.get_char_index(char)
             
-            # Check if this (char_idx, style_idx) pair already exists
+            # Skip if already exists
             if index_manager.pair_exists(char_idx, managed_style_idx):
                 skipped_count += 1
                 continue
             
+            # Skip if character has no font
             font_name = char_to_font.get(char)
-            if font_name:
-                font_to_chars.setdefault(font_name, []).append(char)
+            if not font_name:
+                failed_no_font_count += 1
+                continue
+            
+            # Add to processing queue
+            font_to_chars.setdefault(font_name, []).append(char)
 
         try:
             for font_name, chars_for_font in font_to_chars.items():
@@ -784,20 +813,19 @@ def batch_generate_images(pipe: FontDiffuserDPMPipeline,
                     continue
 
                 tqdm.write(f"  ✓ {style_name} ({font_name}): {len(images)} images in {batch_time:.2f}s "
-                          f"({batch_time/len(images):.3f}s/img)")
+                        f"({batch_time/len(images):.3f}s/img)")
+
+                style_idx_final = index_manager.get_style_index(style_name)  # ✅ Define before use
 
                 # Save generated images
                 for char, img in zip(valid_chars, images):
                     try:
-                        # Get indices from index manager
                         char_idx = index_manager.get_char_index(char)
-                        style_idx_final = index_manager.get_style_index(style_name)
                         
                         img_name: str = f"{style_name}+char{char_idx}.png"
                         img_path: str = os.path.join(style_dir, img_name)
                         evaluator.save_image(img, img_path)
 
-                        # Store generation info with indices
                         results['generations'].append({
                             'character': char,
                             'char_index': char_idx,
@@ -808,23 +836,20 @@ def batch_generate_images(pipe: FontDiffuserDPMPipeline,
                             'output_path': img_path
                         })
                         
-                        # Mark this pair as processed
                         index_manager.add_pair(char_idx, style_idx_final)
                         generated_count += 1
                         
                     except Exception as e:
                         tqdm.write(f"    ✗ Error saving {char}: {e}")
 
-                # Store timing
                 results['metrics']['inference_times'].append({
                     'style': style_name,
-                    'style_index': style_idx_final,
+                    'style_index': style_idx_final,  # ✅ Now defined
                     'font': font_name,
                     'total_time': batch_time,
                     'num_images': len(images),
                     'time_per_image': batch_time / len(images) if images else 0
                 })
-
             # Periodic checkpoint saving
             if args.save_interval > 0 and (style_idx + 1) % args.save_interval == 0:
                 save_checkpoint(results, output_dir)
@@ -836,10 +861,14 @@ def batch_generate_images(pipe: FontDiffuserDPMPipeline,
             continue
 
     print("\n" + "="*60)
-    print(f"✓ Generation complete!")
-    print(f"  Generated: {generated_count} new pairs")
-    print(f"  Skipped: {skipped_count} existing pairs (already in results.json)")
-    print(f"  Total: {len(results['generations'])} samples")
+    print(f"✓ GENERATION COMPLETE!")
+    print("="*60)
+    print(f"\n📊 SUMMARY:")
+    print(f"  Total possible pairs: {len(characters) * len(style_paths)}")
+    print(f"    ├─ Generated (new):     {generated_count} pairs")
+    print(f"    ├─ Skipped (exist):     {skipped_count} pairs")
+    print(f"    └─ Failed (no font):    {failed_no_font_count} pairs")
+    print(f"\n  Final results.json: {len(results['generations'])} samples")
     print("="*60)
 
     return results
@@ -1027,18 +1056,16 @@ def log_to_wandb(results: Dict[str, Any], args: Namespace) -> None:
 
 def main() -> None:
     args: Namespace = parse_args()
-    results: Dict[str, Any] = {}  # Initialize early
+    results: Dict[str, Any] = {}
 
     print("\n" + "="*60)
     print("FONTDIFFUSER STANDARD FORMAT GENERATION (Index-based)")
     print("="*60)
 
     try:
-        # Load characters and styles
         characters: List[str] = load_characters(args.characters, args.start_line, args.end_line)
         style_paths: List[str] = load_style_images(args.style_images)
 
-        # Initialize font manager
         print(f"\nInitializing font manager...")
         font_manager: FontManager = FontManager(args.ttf_path)
 
@@ -1047,7 +1074,6 @@ def main() -> None:
         print(f"  Number of Styles: {len(style_paths)}")
         print(f"  Output Directory: {args.output_dir}")
 
-        # Create output directories
         os.makedirs(args.output_dir, exist_ok=True)
 
         # Check for resume
@@ -1055,26 +1081,31 @@ def main() -> None:
         if args.resume_from:
             resume_results = load_checkpoint(args.resume_from)
 
-        # Generate content images (single set)
-        if not resume_results:  # Skip if resuming
-            char_paths: Dict[str, str] = generate_content_images(
-                characters, font_manager, args.output_dir, args
+        # ✅ Initialize index manager ONCE
+        existing_results_path = os.path.join(args.output_dir, 'results.json')
+        index_manager = ResultsIndexManager(
+            existing_results_path if os.path.exists(existing_results_path) else None
+        )
+
+        # Generate content images with shared index manager
+        if not resume_results:
+            char_paths: Dict[str, str]
+            char_paths, index_manager = generate_content_images(
+                characters, font_manager, args.output_dir, args, index_manager  # ✅ Pass manager
             )
 
         # Create args namespace for pipeline
         pipeline_args: Namespace = create_args_namespace(args)
 
-        # Load pipeline
         print("\nLoading FontDiffuser pipeline...")
         pipe: FontDiffuserDPMPipeline = load_fontdiffuser_pipeline(pipeline_args)
 
-        # Initialize evaluator
         evaluator: QualityEvaluator = QualityEvaluator(device=args.device)
 
-        # Generate target images (now with index-based tracking)
+        # Generate target images with same index manager
         results: Dict[str, Any] = batch_generate_images(
             pipe, characters, style_paths, args.output_dir,
-            pipeline_args, evaluator, font_manager, resume_results
+            pipeline_args, evaluator, font_manager, resume_results, index_manager  # ✅ Pass manager
         )
 
         # Evaluate if requested
@@ -1089,7 +1120,6 @@ def main() -> None:
             json.dump(results, f, indent=2, ensure_ascii=False)
         print(f"\n✓ Results saved to {results_path}")
 
-        # Log to wandb
         if args.use_wandb:
             log_to_wandb(results, args)
 
