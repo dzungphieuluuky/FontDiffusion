@@ -688,6 +688,16 @@ def batch_generate_images(pipe: FontDiffuserDPMPipeline,
     if resume_results:
         results: Dict[str, Any] = resume_results
         print(f"📥 Resuming from checkpoint: {len(index_manager.existing_pairs)} style-character pairs already processed")
+        
+        # Ensure metrics structure exists
+        if 'metrics' not in results:
+            results['metrics'] = {
+                'lpips': [],
+                'ssim': [],
+                'inference_times': []
+            }
+        elif 'inference_times' not in results['metrics']:
+            results['metrics']['inference_times'] = []
     else:
         results: Dict[str, Any] = {
             'generations': [],
