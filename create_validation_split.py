@@ -34,6 +34,11 @@ class ValidationSplitCreator:
     def __init__(self, config: ValidationSplitConfig):
         self.config = config
         self.data_root = Path(config.data_root)
+        
+        # Use separate directory for original data
+        self.original_train_dir = self.data_root / "train_original"
+        
+        # Split directories
         self.train_dir = self.data_root / "train"
         self.val_dir = self.data_root / "val"
         self.test_dir = self.data_root / "test"
@@ -45,11 +50,16 @@ class ValidationSplitCreator:
     
     def _validate_structure(self) -> None:
         """Validate training directory structure"""
-        if not (self.train_dir / "TargetImage").exists():
-            raise ValueError(f"TargetImage not found in {self.train_dir}")
-        if not (self.train_dir / "ContentImage").exists():
-            raise ValueError(f"ContentImage not found in {self.train_dir}")
-        print("✓ Validated training directory structure")
+        # Check if original exists, otherwise check train
+        source_dir = self.original_train_dir if self.original_train_dir.exists() else self.train_dir
+        
+        if not (source_dir / "TargetImage").exists():
+            raise ValueError(f"TargetImage not found in {source_dir}")
+        if not (source_dir / "ContentImage").exists():
+            raise ValueError(f"ContentImage not found in {source_dir}")
+        
+        self.source_train_dir = source_dir
+        print(f"✓ Using source directory: {self.source_train_dir}")
     
     def analyze_data(self) -> Tuple[List[str], List[str], Dict[str, List[str]]]:
         """
@@ -66,7 +76,7 @@ class ValidationSplitCreator:
         characters = set()
         char_to_styles = defaultdict(set)  # char -> set of styles
         
-        target_dir = self.train_dir / "TargetImage"
+        target_dir = self.source_train_dir / "TargetImage"
         
         # Scan all style directories
         for style_folder in target_dir.iterdir():
@@ -198,15 +208,19 @@ class ValidationSplitCreator:
             (split_target_dir / style).mkdir(exist_ok=True)
         
         # Copy content images
-        source_content_dir = self.train_dir / "ContentImage"
+        source_content_dir = self.source_train_dir / "ContentImage"
+        content_copied = 0
+        
         for char in allowed_chars:
             src_path = source_content_dir / f"{char}.png"
-            if src_path.exists():
-                dst_path = split_content_dir / f"{char}.png"
+            dst_path = split_content_dir / f"{char}.png"
+            
+            if src_path.exists() and src_path.resolve() != dst_path.resolve():
                 shutil.copy2(src_path, dst_path)
+                content_copied += 1
         
         # Copy target images
-        source_target_dir = self.train_dir / "TargetImage"
+        source_target_dir = self.source_train_dir / "TargetImage"
         copied_count = 0
         
         for style in allowed_styles:
@@ -222,14 +236,16 @@ class ValidationSplitCreator:
                 char_part = filename.split('+')[1]
                 if char_part in allowed_chars:
                     dst_path = split_target_dir / style / img_file.name
-                    shutil.copy2(img_file, dst_path)
-                    copied_count += 1
+                    
+                    if img_file.resolve() != dst_path.resolve():
+                        shutil.copy2(img_file, dst_path)
+                        copied_count += 1
         
         print(f"  ✓ Copied {copied_count} target images")
-        print(f"  ✓ Copied {len(allowed_chars)} content images")
+        print(f"  ✓ Copied {content_copied} content images")
         
         return copied_count
-    
+        
     def create_splits(self) -> None:
         """Create all splits"""
         print("\n" + "="*60)
@@ -364,3 +380,11 @@ if __name__ == "__main__":
         create_scenarios=args.scenarios,
         random_seed=args.seed
     )
+
+"""Example
+python create_validation_split.py \
+  --data_root data_examples \
+  --val_ratio 0.2 \
+  --test_ratio 0.1 \
+  --seed 42
+"""

@@ -1,0 +1,37 @@
+{
+  "train": {
+    "styles": [
+      "FZOuYHGXSJW"
+    ],
+    "characters": [],
+    "description": "Seen styles + Seen characters (training data)"
+  },
+  "val_seen_style_unseen_char": {
+    "styles": [
+      "FZOuYHGXSJW"
+    ],
+    "characters": [],
+    "description": "Seen styles + Unseen characters"
+  },
+  "val_unseen_style_seen_char": {
+    "styles": [
+      "FZGuanJKSJW"
+    ],
+    "characters": [],
+    "description": "Unseen styles + Seen characters"
+  },
+  "val_unseen_both": {
+    "styles": [
+      "FZGuanJKSJW"
+    ],
+    "characters": [],
+    "description": "Unseen styles + Unseen characters"
+  },
+  "test": {
+    "styles": [
+      "FZZCHJW"
+    ],
+    "characters": [],
+    "description": "Test set (hold-out)"
+  }
+}

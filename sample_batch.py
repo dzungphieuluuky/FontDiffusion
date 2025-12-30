@@ -1,7 +1,7 @@
 """
 Batch sampling and evaluation for FontDiffuser
 Generates images in FontDiffuser standard training format:
-data_examples/train/ContentImage/ + TargetImage/styleX/
+data_examples/train_original/ContentImage/ + TargetImage/styleX/
 """
 
 import os
@@ -239,7 +239,7 @@ def parse_args() -> Namespace:
                        help='End line number for character file (inclusive, None = end of file)')
     parser.add_argument('--style_images', type=str, required=True,
                        help='Comma-separated paths to style images or directory')
-    parser.add_argument('--output_dir', type=str, default='data_examples/train',
+    parser.add_argument('--output_dir', type=str, default='data_examples/train_original',
                        help='Output directory (will create ContentImage/ and TargetImage/ subdirs)')
     parser.add_argument('--ground_truth_dir', type=str, default=None,
                        help='Directory with ground truth images for evaluation')
@@ -432,7 +432,7 @@ def generate_content_images(
 ) -> Dict[str, str]:
     """
     Generate and save content character images (using the first suitable font for each character)
-    Output: data_examples/train/ContentImage/charX.png
+    Output: data_examples/train_original/ContentImage/charX.png
 
     Returns:
         Dict mapping char -> path
@@ -576,7 +576,7 @@ def batch_generate_images(pipe: FontDiffuserDPMPipeline,
                           resume_results: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Generate images in batches for all fonts and styles with checkpoint support
-    Output: data_examples/train/TargetImage/styleX/styleX+charY.png
+    Output: data_examples/train_original/TargetImage/styleX/styleX+charY.png
     """
     # Initialize or resume results
     if resume_results:
