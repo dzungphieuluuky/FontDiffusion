@@ -10,7 +10,7 @@ import torch
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from safetensors.torch import save_file
-from huggingface_hub import HfApi, create_repo
+from huggingface_hub import HfApi, create_repo, login
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -138,24 +138,14 @@ Examples:
 
 
 def get_token(token_arg: Optional[str]) -> Optional[str]:
-    """
-    Get HF token from argument or environment variable
-    
-    Args:
-        token_arg: Token passed via command line
-        
-    Returns:
-        HF token or None
-    """
+    """Get HF token from argument or environment variable"""
     if token_arg:
         return token_arg
     
-    # Check environment variable
     token_env = os.getenv('HF_TOKEN')
     if token_env:
         return token_env
     
-    # Check huggingface_hub config
     try:
         from huggingface_hub import HfFolder
         return HfFolder.get_token()
@@ -171,15 +161,13 @@ def validate_inputs(args: argparse.Namespace) -> bool:
     print("VALIDATING INPUTS")
     print("="*70)
 
-    # Check weights directory
-    if not os.path.exists(args.weights_dir):
+    if not os.path.isdir(args.weights_dir):
         print(f"✗ Error: Weights directory not found: {args.weights_dir}")
         return False
     
     print(f"✓ Weights directory: {args.weights_dir}")
     print(f"  Contents: {len(os.listdir(args.weights_dir))} files")
 
-    # Check if uploading
     if not args.no_upload:
         if not args.repo_id:
             print("✗ Error: --repo_id is required when uploading (use --no-upload to skip)")
@@ -187,7 +175,6 @@ def validate_inputs(args: argparse.Namespace) -> bool:
         
         print(f"✓ Repository ID: {args.repo_id}")
 
-        # Check token
         token = get_token(args.token)
         if not token:
             print("✗ Error: HF token not found!")
@@ -197,15 +184,14 @@ def validate_inputs(args: argparse.Namespace) -> bool:
             print("    3. huggingface-cli login")
             return False
         
-        print(f"✓ HF token: {'*' * 20}")  # Hide actual token
+        print(f"✓ HF token: {'*' * 20}")
     else:
         print("⊘ Skipping upload (--no-upload)")
 
-    # Check files
     print(f"\n✓ Files to process: {len(args.files)}")
     for file_name in args.files:
         file_path = os.path.join(args.weights_dir, file_name)
-        if os.path.exists(file_path):
+        if os.path.isfile(file_path):
             size_mb = os.path.getsize(file_path) / (1024 * 1024)
             print(f"  ✓ {file_name} ({size_mb:.2f} MB)")
         else:
@@ -214,16 +200,51 @@ def validate_inputs(args: argparse.Namespace) -> bool:
     return True
 
 
-def convert_pth_to_safetensors(args: argparse.Namespace) -> bool:
+def load_pth_file(pth_path: str, weights_only: bool = True, verbose: bool = False) -> Optional[Dict[str, Any]]:
     """
-    Convert .pth files to safetensors format
+    Load a .pth file safely
     
     Args:
-        args: Parsed command-line arguments
+        pth_path: Path to .pth file
+        weights_only: Use weights_only mode (safer)
+        verbose: Print debug info
         
     Returns:
-        True if successful, False otherwise
+        State dict or None if failed
     """
+    try:
+        if verbose:
+            print(f"  Loading: {pth_path}")
+        
+        state_dict = torch.load(
+            pth_path,
+            map_location="cpu",
+            weights_only=weights_only
+        )
+        
+        if verbose:
+            print(f"  Type: {type(state_dict)}")
+        
+        # Unwrap nested state_dict
+        if isinstance(state_dict, dict):
+            if "state_dict" in state_dict:
+                if verbose:
+                    print(f"  Unwrapping 'state_dict' key...")
+                state_dict = state_dict["state_dict"]
+            elif "model" in state_dict:
+                if verbose:
+                    print(f"  Unwrapping 'model' key...")
+                state_dict = state_dict["model"]
+        
+        return state_dict if isinstance(state_dict, dict) else None
+        
+    except Exception as e:
+        print(f"  ✗ Failed to load: {e}")
+        return None
+
+
+def convert_pth_to_safetensors(args: argparse.Namespace) -> bool:
+    """Convert .pth files to safetensors format"""
     if args.skip_conversion:
         print("\n⊘ Skipping conversion (--skip-conversion)")
         return True
@@ -239,40 +260,25 @@ def convert_pth_to_safetensors(args: argparse.Namespace) -> bool:
         pth_path = os.path.join(args.weights_dir, file_name)
         safe_path = pth_path.replace(".pth", ".safetensors")
 
-        if not os.path.exists(pth_path):
+        if not os.path.isfile(pth_path):
             print(f"\n⚠ {file_name}: Not found, skipping")
             continue
 
         try:
             print(f"\n📦 {file_name}")
-            print(f"  Loading from: {pth_path}")
-
+            
             # Load weights
-            if args.weights_only:
-                state_dict = torch.load(
-                    pth_path,
-                    map_location="cpu",
-                    weights_only=True
-                )
-            else:
-                state_dict = torch.load(
-                    pth_path,
-                    map_location="cpu"
-                )
+            state_dict = load_pth_file(
+                pth_path,
+                weights_only=args.weights_only,
+                verbose=args.verbose
+            )
+            
+            if state_dict is None:
+                print(f"  ✗ Error: Failed to load state dict")
+                failed_count += 1
+                continue
 
-            if args.verbose:
-                print(f"  Loaded type: {type(state_dict)}")
-
-            # Handle nested state_dict
-            if isinstance(state_dict, dict):
-                if "state_dict" in state_dict:
-                    print(f"  Found nested 'state_dict' key, unwrapping...")
-                    state_dict = state_dict["state_dict"]
-                elif "model" in state_dict:
-                    print(f"  Found nested 'model' key, unwrapping...")
-                    state_dict = state_dict["model"]
-
-            # Validate state_dict
             if not isinstance(state_dict, dict):
                 print(f"  ✗ Error: Expected dict, got {type(state_dict)}")
                 failed_count += 1
@@ -292,9 +298,8 @@ def convert_pth_to_safetensors(args: argparse.Namespace) -> bool:
             pth_size_mb = os.path.getsize(pth_path) / (1024 * 1024)
             compression = ((pth_size_mb - safe_size_mb) / pth_size_mb) * 100
 
-            print(f"  ✓ Converted to: {safe_path}")
-            print(f"    Original size: {pth_size_mb:.2f} MB")
-            print(f"    Safetensors size: {safe_size_mb:.2f} MB")
+            print(f"  ✓ Saved to: {safe_path}")
+            print(f"    Original: {pth_size_mb:.2f} MB → Safetensors: {safe_size_mb:.2f} MB")
             print(f"    Compression: {compression:.1f}%")
 
             converted_count += 1
@@ -302,29 +307,18 @@ def convert_pth_to_safetensors(args: argparse.Namespace) -> bool:
         except Exception as e:
             print(f"  ✗ Error: {e}")
             failed_count += 1
-            import traceback
             if args.verbose:
+                import traceback
                 traceback.print_exc()
 
     print("\n" + "-"*70)
     print(f"Conversion complete: {converted_count} succeeded, {failed_count} failed")
     
-    if failed_count > 0:
-        return False
-    
-    return True
+    return failed_count == 0
 
 
 def upload_to_hub(args: argparse.Namespace) -> bool:
-    """
-    Upload converted weights to Hugging Face Hub
-    
-    Args:
-        args: Parsed command-line arguments
-        
-    Returns:
-        True if successful, False otherwise
-    """
+    """Upload converted weights to Hugging Face Hub"""
     if args.no_upload:
         print("\n⊘ Skipping upload (--no-upload)")
         return True
@@ -344,7 +338,8 @@ def upload_to_hub(args: argparse.Namespace) -> bool:
             print("✗ Error: HF token not found")
             return False
 
-        # Initialize API
+        # Login
+        login(token=token)
         api = HfApi()
 
         # Determine privacy
@@ -354,13 +349,12 @@ def upload_to_hub(args: argparse.Namespace) -> bool:
         print(f"  Repo ID: {args.repo_id}")
         print(f"  Private: {private}")
 
-        # Create repo if it doesn't exist
         create_repo(
             repo_id=args.repo_id,
-            token=token,
             repo_type="model",
             exist_ok=True,
-            private=private
+            private=private,
+            token=token
         )
 
         print(f"✓ Repository ready\n")
@@ -375,15 +369,16 @@ def upload_to_hub(args: argparse.Namespace) -> bool:
             commit_message=args.commit_message
         )
 
+        model_url = f"https://huggingface.co/models/{args.repo_id}"
         print(f"\n✓ Upload successful!")
-        print(f"  Repository URL: https://huggingface.co/models/{args.repo_id}")
+        print(f"  Repository URL: {model_url}")
         
         return True
 
     except Exception as e:
         print(f"\n✗ Upload failed: {e}")
-        import traceback
         if args.verbose:
+            import traceback
             traceback.print_exc()
         return False
 
@@ -394,7 +389,6 @@ def main():
     print("PYTORCH TO SAFETENSORS CONVERTER & HF UPLOADER")
     print("="*70)
 
-    # Parse arguments
     args = parse_arguments()
 
     if args.verbose:
@@ -405,18 +399,15 @@ def main():
             else:
                 print(f"  {key}: {value}")
 
-    # Validate inputs
     if not validate_inputs(args):
         print("\n✗ Validation failed")
         sys.exit(1)
 
-    # Convert to safetensors
     if not convert_pth_to_safetensors(args):
         print("\n✗ Conversion failed")
         if not args.skip_conversion:
             sys.exit(1)
 
-    # Upload to Hub
     if not upload_to_hub(args):
         print("\n✗ Upload failed")
         sys.exit(1)
@@ -429,8 +420,8 @@ def main():
         print(f"\n📦 Your weights are now available at:")
         print(f"   https://huggingface.co/models/{args.repo_id}")
         print(f"\n📖 Load them with:")
-        print(f"   from transformers import AutoModel")
-        print(f"   model = AutoModel.from_pretrained('{args.repo_id}')")
+        print(f"   from safetensors.torch import load_file")
+        print(f"   state = load_file('model.safetensors')")
 
 
 if __name__ == "__main__":
@@ -446,24 +437,33 @@ if __name__ == "__main__":
         sys.exit(1)
 
 """Example
-python pth2safetensors.py \
-  --weights_dir "ckpt" \
-  --repo_id "your_username/font-diffusion-weights" \
-  --token "hf_xxxxxxxxxxxxx"
+Examples:
+  # Basic usage with all arguments
+  python pth2safetensors.py \
+    --weights_dir "ckpt" \
+    --repo_id "username/font-diffusion-weights" \
+    --token "hf_xxxxxxxxxxxxx"
 
-# Convert only
-python pth2safetensors.py \
-  --weights_dir "ckpt" \
-  --no-upload
+  # Use environment variable for token
+  export HF_TOKEN="hf_xxxxxxxxxxxxx"
+  python pth2safetensors.py \
+    --weights_dir "ckpt" \
+    --repo_id "username/font-diffusion-weights"
 
-python pth2safetensors.py \
-  --weights_dir "ckpt" \
-  --repo_id "your_username/font-diffusion-weights" \
-  --skip-conversion
-  
-python pth2safetensors.py \
-  --weights_dir "ckpt" \
-  --repo_id "your_username/font-diffusion-weights" \
-  --verbose
+  # Convert only specific files
+  python pth2safetensors.py \
+    --weights_dir "ckpt" \
+    --repo_id "username/font-diffusion-weights" \
+    --files "unet.pth" "style_encoder.pth"
 
+  # Convert without uploading
+  python pth2safetensors.py \
+    --weights_dir "ckpt" \
+    --no-upload
+
+  # Upload existing .safetensors files (no conversion)
+  python pth2safetensors.py \
+    --weights_dir "ckpt" \
+    --repo_id "username/font-diffusion-weights" \
+    --skip-conversion
 """
