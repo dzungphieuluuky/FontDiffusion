@@ -331,10 +331,11 @@ python sample_batch.py \
   --style_images "styles/" \
   --ckpt_dir "checkpoints/phase1" \
   --ttf_path "fonts/" \
-  --output_dir "data_examples/train"
+  --output_dir "data_examples/train_original"
   
 python create_hf_dataset.py \
-  --data_dir "data_examples/train" \
-  --repo_id "your_username/fontdiffusion-dataset" \
+  --data_dir "my_dataset/train" \
+  --repo_id "HF_USERNAME/font-diffusion-generated-data" \
   --split "train" \
-  --token "hf_xxxxxxxxxxxxx"""
+  --private \
+  --token "HF_TOKEN"""

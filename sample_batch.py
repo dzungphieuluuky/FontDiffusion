@@ -150,6 +150,106 @@ class FontManager:
             if self.is_char_in_font(font_name, char)
         ]
 
+class ResultsIndexManager:
+    """Manages character and style indices from results.json"""
+    
+    def __init__(self, results_path: Optional[str] = None):
+        """
+        Initialize results index manager
+        
+        Args:
+            results_path: Path to results.json file
+        """
+        self.char_index_map: Dict[str, int] = {}  # character -> index
+        self.style_index_map: Dict[str, int] = {}  # style_name -> index
+        self.existing_pairs: Set[Tuple[int, int]] = set()  # (char_idx, style_idx)
+        self.char_idx_to_char: Dict[int, str] = {}  # index -> character
+        
+        if results_path and os.path.exists(results_path):
+            self._load_from_results(results_path)
+    
+    def _load_from_results(self, results_path: str) -> None:
+        """Load character and style indices from results.json"""
+        try:
+            with open(results_path, 'r', encoding='utf-8') as f:
+                results = json.load(f)
+            
+            # Extract character list and build mapping
+            if 'characters' in results:
+                for char in results['characters']:
+                    # Try to find corresponding char_index from generations
+                    char_idx = None
+                    for gen in results.get('generations', []):
+                        if gen.get('character') == char:
+                            char_idx = gen.get('char_index')
+                            if char_idx is not None:
+                                break
+                    
+                    if char_idx is not None:
+                        self.char_index_map[char] = int(char_idx)
+                        self.char_idx_to_char[int(char_idx)] = char
+            
+            # Extract style list and build mapping
+            if 'styles' in results:
+                for style_name in results['styles']:
+                    # Parse style index from name (e.g., 'style0' -> 0)
+                    style_idx = self._parse_style_index(style_name)
+                    if style_idx is not None:
+                        self.style_index_map[style_name] = style_idx
+            
+            # Build set of existing (char_idx, style_idx) pairs
+            for gen in results.get('generations', []):
+                char_idx = gen.get('char_index')
+                style_idx = gen.get('style_index')
+                
+                if char_idx is not None and style_idx is not None:
+                    self.existing_pairs.add((int(char_idx), int(style_idx)))
+            
+            print(f"✓ Loaded results.json:")
+            print(f"  Characters: {len(self.char_index_map)}")
+            print(f"  Styles: {len(self.style_index_map)}")
+            print(f"  Existing pairs: {len(self.existing_pairs)}")
+            
+        except Exception as e:
+            print(f"⚠ Error loading results.json: {e}")
+    
+    def _parse_style_index(self, style_name: str) -> Optional[int]:
+        """Extract style index from style name (e.g., 'style0' -> 0)"""
+        try:
+            if style_name.startswith('style'):
+                return int(style_name[5:])
+        except (ValueError, IndexError):
+            pass
+        return None
+    
+    def get_char_index(self, char: str) -> int:
+        """Get character index, assign if not exists"""
+        if char not in self.char_index_map:
+            # Assign new index
+            new_idx = len(self.char_index_map)
+            self.char_index_map[char] = new_idx
+            self.char_idx_to_char[new_idx] = char
+        return self.char_index_map[char]
+    
+    def get_style_index(self, style_name: str) -> int:
+        """Get style index from style name"""
+        if style_name not in self.style_index_map:
+            style_idx = self._parse_style_index(style_name)
+            if style_idx is not None:
+                self.style_index_map[style_name] = style_idx
+            else:
+                # Fallback: assign based on style_name alone
+                self.style_index_map[style_name] = len(self.style_index_map)
+        return self.style_index_map[style_name]
+    
+    def pair_exists(self, char_idx: int, style_idx: int) -> bool:
+        """Check if (char_index, style_index) pair already exists"""
+        return (int(char_idx), int(style_idx)) in self.existing_pairs
+    
+    def add_pair(self, char_idx: int, style_idx: int) -> None:
+        """Mark a (char_index, style_index) pair as processed"""
+        self.existing_pairs.add((int(char_idx), int(style_idx)))
+
 
 class QualityEvaluator:
     """Evaluates generated images using LPIPS, SSIM, and FID"""
@@ -577,15 +677,17 @@ def batch_generate_images(pipe: FontDiffuserDPMPipeline,
     """
     Generate images in batches for all fonts and styles with checkpoint support
     Output: data_examples/train_original/TargetImage/styleX/styleX+charY.png
+    Uses character and style indices from results.json for tracking
     """
+    
+    # Initialize results index manager
+    existing_results_path = os.path.join(output_dir, 'results.json')
+    index_manager = ResultsIndexManager(existing_results_path if os.path.exists(existing_results_path) else None)
+    
     # Initialize or resume results
     if resume_results:
         results: Dict[str, Any] = resume_results
-        # Build a set of processed (style, character) pairs
-        processed_pairs: Set[Tuple[str, str]] = set(
-            (g['style'], g['character']) for g in results['generations']
-        )
-        print(f"📥 Resuming from checkpoint: {len(processed_pairs)} style-character pairs already processed")
+        print(f"📥 Resuming from checkpoint: {len(index_manager.existing_pairs)} style-character pairs already processed")
     else:
         results: Dict[str, Any] = {
             'generations': [],
@@ -595,10 +697,11 @@ def batch_generate_images(pipe: FontDiffuserDPMPipeline,
                 'inference_times': []
             },
             'fonts': font_manager.get_font_names(),
+            'characters': characters,
+            'styles': [f"style{i}" for i in range(len(style_paths))],
             'total_chars': len(characters),
             'total_styles': len(style_paths)
         }
-        processed_pairs: Set[Tuple[str, str]] = set()
 
     # Create TargetImage directory
     target_base_dir: str = os.path.join(output_dir, 'TargetImage')
@@ -606,10 +709,10 @@ def batch_generate_images(pipe: FontDiffuserDPMPipeline,
 
     font_names: List[str] = font_manager.get_font_names()
     print(f"\n{'='*60}")
-    print(f"BATCH GENERATION")
+    print(f"BATCH GENERATION (Index-based Tracking)")
     print('='*60)
     print(f"Fonts: {len(font_names)}")
-    print(f"Styles Path: {len(style_paths)}")
+    print(f"Styles: {len(style_paths)}")
     print(f"Number of Characters: {len(characters)}")
     print(f"Batch size: {args.batch_size}")
     print(f"Inference steps: {args.num_inference_steps}")
@@ -626,26 +729,36 @@ def batch_generate_images(pipe: FontDiffuserDPMPipeline,
                 char_to_font[char] = font_name
                 break
 
-    # Create character index mapping
-    char_to_idx: Dict[str, int] = {char: idx for idx, char in enumerate(characters)}
-
     # Main generation loop with progress bar
     style_iterator = tqdm(enumerate(style_paths), total=len(style_paths), 
                          desc="🎨 Generating styles", ncols=100)
 
+    skipped_count = 0
+    generated_count = 0
+
     for style_idx, style_path in style_iterator:
         style_name: str = f"style{style_idx}"
+        
+        # Get style index from index manager
+        managed_style_idx = index_manager.get_style_index(style_name)
 
         style_dir: str = os.path.join(target_base_dir, style_name)
         os.makedirs(style_dir, exist_ok=True)
 
         style_iterator.set_postfix_str(f"Processing {style_name}")
 
-        # Group characters by font for this style, but only those not already processed
+        # Group characters by font for this style
+        # Only process pairs that don't exist in results.json
         font_to_chars: Dict[str, List[str]] = {}
+        
         for char in characters:
-            if (style_name, char) in processed_pairs:
-                continue  # Skip already processed pair
+            char_idx = index_manager.get_char_index(char)
+            
+            # Check if this (char_idx, style_idx) pair already exists
+            if index_manager.pair_exists(char_idx, managed_style_idx):
+                skipped_count += 1
+                continue
+            
             font_name = char_to_font.get(char)
             if font_name:
                 font_to_chars.setdefault(font_name, []).append(char)
@@ -666,28 +779,36 @@ def batch_generate_images(pipe: FontDiffuserDPMPipeline,
                 # Save generated images
                 for char, img in zip(valid_chars, images):
                     try:
-                        char_idx: int = char_to_idx.get(char, 0)
+                        # Get indices from index manager
+                        char_idx = index_manager.get_char_index(char)
+                        style_idx_final = index_manager.get_style_index(style_name)
+                        
                         img_name: str = f"{style_name}+char{char_idx}.png"
                         img_path: str = os.path.join(style_dir, img_name)
                         evaluator.save_image(img, img_path)
 
-                        # Store generation info
+                        # Store generation info with indices
                         results['generations'].append({
                             'character': char,
                             'char_index': char_idx,
-                            'font': font_name,
                             'style': style_name,
+                            'style_index': style_idx_final,
+                            'font': font_name,
                             'style_path': style_path,
                             'output_path': img_path
                         })
+                        
                         # Mark this pair as processed
-                        processed_pairs.add((style_name, char))
+                        index_manager.add_pair(char_idx, style_idx_final)
+                        generated_count += 1
+                        
                     except Exception as e:
                         tqdm.write(f"    ✗ Error saving {char}: {e}")
 
                 # Store timing
                 results['metrics']['inference_times'].append({
                     'style': style_name,
+                    'style_index': style_idx_final,
                     'font': font_name,
                     'total_time': batch_time,
                     'num_images': len(images),
@@ -705,7 +826,10 @@ def batch_generate_images(pipe: FontDiffuserDPMPipeline,
             continue
 
     print("\n" + "="*60)
-    print(f"✓ Generation complete! Total images: {len(results['generations'])}")
+    print(f"✓ Generation complete!")
+    print(f"  Generated: {generated_count} new pairs")
+    print(f"  Skipped: {skipped_count} existing pairs (already in results.json)")
+    print(f"  Total: {len(results['generations'])} samples")
     print("="*60)
 
     return results
@@ -895,7 +1019,7 @@ def main() -> None:
     args: Namespace = parse_args()
 
     print("\n" + "="*60)
-    print("FONTDIFFUSER STANDARD FORMAT GENERATION")
+    print("FONTDIFFUSER STANDARD FORMAT GENERATION (Index-based)")
     print("="*60)
 
     try:
@@ -906,16 +1030,6 @@ def main() -> None:
         # Initialize font manager
         print(f"\nInitializing font manager...")
         font_manager: FontManager = FontManager(args.ttf_path)
-
-        # Print per-font character support summary
-        # print("\nFont coverage summary:")
-        # total_chars = len(characters)
-        # for font_name in font_manager.get_font_names():
-        #     available_chars = font_manager.get_available_chars_for_font(font_name, characters)
-        #     print(f"  {font_name}: {len(available_chars)} / {total_chars} characters supported")
-        # print()
-
-        # print(f"\n📊 Configuration:")
 
         print(f"\n📊 Configuration:")
         print(f"  Number of Characters: {len(characters)} (lines {args.start_line}-{args.end_line or 'end'})")
@@ -946,7 +1060,7 @@ def main() -> None:
         # Initialize evaluator
         evaluator: QualityEvaluator = QualityEvaluator(device=args.device)
 
-        # Generate target images
+        # Generate target images (now with index-based tracking)
         results: Dict[str, Any] = batch_generate_images(
             pipe, characters, style_paths, args.output_dir,
             pipeline_args, evaluator, font_manager, resume_results
@@ -985,7 +1099,7 @@ def main() -> None:
         print(f"    │   ├── style1/")
         print(f"    │   │   └── ...")
         print(f"    │   └── ...")
-        print(f"    ├── results.json")
+        print(f"    ├── results.json (with char_index and style_index)")
         print(f"    └── results_checkpoint.json (if using --save_interval)")
 
     except KeyboardInterrupt:

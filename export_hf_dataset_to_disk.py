@@ -22,6 +22,7 @@ class ExportConfig:
     local_dataset_path: Optional[str] = None  # Local dataset path to load from
     split: str = "train"
     create_metadata: bool = True  # Create results.json metadata
+    token: Optional[str] = None  # HF token for private repos
 
 
 class DatasetExporter:
@@ -55,9 +56,11 @@ class DatasetExporter:
         
         if self.config.repo_id:
             print(f"\nLoading from Hub: {self.config.repo_id}")
+            # ✅ Pass token for private repos
             dataset = load_dataset(
                 self.config.repo_id,
-                split=self.config.split)
+                split=self.config.split,
+                token=self.config.token)  # ← Add token here
         elif self.config.local_dataset_path:
             print(f"\nLoading from local path: {self.config.local_dataset_path}")
             dataset = Dataset.load_from_disk(self.config.local_dataset_path)
@@ -259,7 +262,8 @@ def export_dataset(
     repo_id: Optional[str] = None,
     local_dataset_path: Optional[str] = None,
     split: str = "train",
-    create_metadata: bool = True
+    create_metadata: bool = True,
+    token: Optional[str] = None  # ← Add token parameter
 ) -> None:
     """
     Export dataset to original directory structure
@@ -270,6 +274,7 @@ def export_dataset(
         local_dataset_path: Local dataset path to load from
         split: Dataset split name
         create_metadata: Whether to create results.json
+        token: HF token for private repos
     """
     
     if not repo_id and not local_dataset_path:
@@ -280,7 +285,8 @@ def export_dataset(
         repo_id=repo_id,
         local_dataset_path=local_dataset_path,
         split=split,
-        create_metadata=create_metadata
+        create_metadata=create_metadata,
+        token=token  # ← Pass token
     )
     
     exporter = DatasetExporter(config)
@@ -314,6 +320,8 @@ if __name__ == "__main__":
                        help='Dataset split name')
     parser.add_argument('--no-metadata', action='store_true', default=False,
                        help='Do not create results.json metadata')
+    parser.add_argument('--token', type=str, default=None,  # ← Add this
+                       help='Hugging Face token for private repos')
     
     args = parser.parse_args()
     
@@ -326,7 +334,8 @@ if __name__ == "__main__":
         repo_id=args.repo_id,
         local_dataset_path=args.local_dataset_path,
         split=args.split,
-        create_metadata=not args.no_metadata
+        create_metadata=not args.no_metadata,
+        token=args.token  # ← Pass token
     )
 
 """Example
