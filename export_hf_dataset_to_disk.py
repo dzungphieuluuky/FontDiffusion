@@ -1,44 +1,42 @@
 """
 Export Hugging Face dataset back to original FontDiffusion directory structure
-Preserves original results.json AND results_checkpoint.json from pipeline generation
+✅ SIMPLIFIED: Only uses results_checkpoint.json (single source of truth)
 """
+
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any
 from dataclasses import dataclass
-import json
-import os
-import shutil
 
 from datasets import Dataset, load_dataset
 from PIL import Image as PILImage
 from tqdm import tqdm
+import json
+import os
 
 
 @dataclass
 class ExportConfig:
+    """Configuration for dataset export"""
     output_dir: str
     repo_id: Optional[str] = None
     local_dataset_path: Optional[str] = None
     split: str = "train"
-    create_metadata: bool = True
     token: Optional[str] = None
-    preserve_original_metadata: bool = True
 
 
 class DatasetExporter:
-    """Export Hugging Face dataset to disk, preserving original metadata files"""
+    """Export Hugging Face dataset to disk"""
     
     def __init__(self, config: ExportConfig):
         self.config = config
         self.output_dir = Path(config.output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
     
-    def export(self) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    def export(self) -> Dict[str, Any]:
         """
         Export dataset from Hub to disk
         
         Returns:
-            Tuple of (results_metadata, checkpoint_metadata)
+            metadata: The complete results_checkpoint.json data
         """
         print("\n" + "="*60)
         print("EXPORTING DATASET TO DISK")
@@ -59,7 +57,6 @@ class DatasetExporter:
             print(f"   Split: {self.config.split}")
             
             try:
-                # ✅ FIXED: Correct way to load from Hub
                 dataset = load_dataset(
                     self.config.repo_id,
                     split=self.config.split,
@@ -73,11 +70,6 @@ class DatasetExporter:
                 print(f"   Repository: {self.config.repo_id}")
                 print(f"   Split: {self.config.split}")
                 print(f"   Error: {type(e).__name__}: {e}")
-                print(f"\n⚠️  Troubleshooting:")
-                print(f"   1. Check repository exists: https://huggingface.co/datasets/{self.config.repo_id}")
-                print(f"   2. Check split name is correct (available splits: train, validation, test)")
-                print(f"   3. Check token has access to private datasets")
-                print(f"   4. Try using --local_dataset_path instead if you have dataset cached locally")
                 raise
         
         else:
@@ -94,172 +86,53 @@ class DatasetExporter:
         content_dir.mkdir(parents=True, exist_ok=True)
         target_base_dir.mkdir(parents=True, exist_ok=True)
         
-        # Try to load both original metadata files
-        original_results, original_checkpoint = self._try_load_original_metadata()
+        # Try to load original metadata from Hub
+        metadata = self._try_load_checkpoint_from_hub()
         
-        if (original_results or original_checkpoint) and self.config.preserve_original_metadata:
-            print("\n✅ Found original metadata - preserving it")
-            return self._export_with_original_metadata(
-                dataset, original_results, original_checkpoint
-            )
-        else:
-            print("\n⚠ Original metadata not found - reconstructing from dataset")
-            return self._export_with_reconstructed_metadata(dataset), None    
-    def _try_load_original_metadata(self) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
-        """
-        Try to load both results.json and results_checkpoint.json from various sources
-        
-        PRIORITY:
-        1. results_checkpoint.json (complete, saved during training)
-        2. results.json (may be incomplete if training was interrupted)
-        
-        Returns:
-            Tuple of (results_data, checkpoint_data)
-        """
-        results_data: Optional[Dict[str, Any]] = None
-        checkpoint_data: Optional[Dict[str, Any]] = None
+        # Export images from dataset
+        return self._export_images_and_build_metadata(dataset, metadata)
+    
+    def _try_load_checkpoint_from_hub(self) -> Optional[Dict[str, Any]]:
+        """Try to load results_checkpoint.json from Hub"""
+        if not self.config.repo_id:
+            return None
         
         try:
-            # Method 1: Try to download from Hub repository
-            if self.config.repo_id:
-                from huggingface_hub import hf_hub_download
-                
-                print("\n📥 Attempting to load metadata from Hub...")
-                
-                # ✅ PRIORITY 1: Try results_checkpoint.json FIRST (it's more complete)
-                try:
-                    checkpoint_path = hf_hub_download(
-                        repo_id=self.config.repo_id,
-                        filename="results_checkpoint.json",
-                        repo_type="dataset",
-                        token=self.config.token
-                    )
-                    
-                    with open(checkpoint_path, 'r', encoding='utf-8') as f:
-                        checkpoint_data = json.load(f)
-                    
-                    print(f"  ✓ Loaded results_checkpoint.json from Hub ({len(checkpoint_data.get('generations', []))} generations)")
-                    
-                except Exception as e:
-                    print(f"  ⚠ results_checkpoint.json not found on Hub: {type(e).__name__}")
-                
-                # ✅ PRIORITY 2: Try results.json (fallback only)
-                try:
-                    results_path = hf_hub_download(
-                        repo_id=self.config.repo_id,
-                        filename="results.json",
-                        repo_type="dataset",
-                        token=self.config.token
-                    )
-                    
-                    with open(results_path, 'r', encoding='utf-8') as f:
-                        results_data = json.load(f)
-                    
-                    num_gens = len(results_data.get('generations', []))
-                    print(f"  ✓ Loaded results.json from Hub ({num_gens} generations)")
-                    
-                    # ⚠️ VALIDATE: Check if results.json is incomplete
-                    if checkpoint_data and len(results_data.get('generations', [])) < len(checkpoint_data.get('generations', [])):
-                        print(f"  ⚠ WARNING: results.json ({num_gens} gens) is incomplete!")
-                        print(f"           Using results_checkpoint.json instead ({len(checkpoint_data.get('generations', []))} gens)")
-                        results_data = None  # Don't use incomplete file
-                    
-                except Exception as e:
-                    print(f"  ⚠ results.json not found on Hub: {type(e).__name__}")
-                
-                # If we found at least one file from Hub, return it
-                if results_data or checkpoint_data:
-                    return results_data, checkpoint_data
-                
-                print("  ⚠ No metadata files found on Hub")
+            from huggingface_hub import hf_hub_download
             
-            # Method 2: Try local cache/parent directory
-            print("\n📁 Attempting to load metadata from local cache...")
+            print("\n📥 Attempting to load results_checkpoint.json from Hub...")
             
-            # ✅ PRIORITY 1: Try results_checkpoint.json FIRST
-            local_checkpoint_path = self.output_dir.parent / "results_checkpoint.json"
-            if local_checkpoint_path.exists():
-                try:
-                    with open(local_checkpoint_path, 'r', encoding='utf-8') as f:
-                        checkpoint_data = json.load(f)
-                    print(f"  ✓ Loaded results_checkpoint.json from local ({len(checkpoint_data.get('generations', []))} generations)")
-                except Exception as e:
-                    print(f"  ⚠ Error loading local results_checkpoint.json: {e}")
+            checkpoint_path = hf_hub_download(
+                repo_id=self.config.repo_id,
+                filename="results_checkpoint.json",
+                repo_type="dataset",
+                token=self.config.token
+            )
             
-            # ✅ PRIORITY 2: Try results.json ONLY if checkpoint not found
-            local_results_path = self.output_dir.parent / "results.json"
-            if local_results_path.exists() and not checkpoint_data:
-                try:
-                    with open(local_results_path, 'r', encoding='utf-8') as f:
-                        results_data = json.load(f)
-                    
-                    num_gens = len(results_data.get('generations', []))
-                    print(f"  ✓ Loaded results.json from local ({num_gens} generations)")
-                    
-                    # ⚠️ VALIDATE: Check completeness
-                    if checkpoint_data and num_gens < len(checkpoint_data.get('generations', [])):
-                        print(f"  ⚠ WARNING: results.json is incomplete, using checkpoint instead")
-                        results_data = None
-                        
-                except Exception as e:
-                    print(f"  ⚠ Error loading local results.json: {e}")
-            elif local_results_path.exists() and checkpoint_data:
-                # We have checkpoint, so results.json is optional
-                try:
-                    with open(local_results_path, 'r', encoding='utf-8') as f:
-                        potential_results = json.load(f)
-                    
-                    # Only use results.json if it has more data than checkpoint
-                    if len(potential_results.get('generations', [])) > len(checkpoint_data.get('generations', [])):
-                        results_data = potential_results
-                        print(f"  ✓ Loaded results.json from local ({len(results_data.get('generations', []))} generations)")
-                except Exception as e:
-                    pass  # Silently skip if there's an issue
+            with open(checkpoint_path, 'r', encoding='utf-8') as f:
+                metadata = json.load(f)
             
-            if results_data or checkpoint_data:
-                return results_data, checkpoint_data
-            
-            print(f"  ⚠ No metadata files found locally")
-            return None, None
+            num_gens = len(metadata.get('generations', []))
+            print(f"  ✓ Loaded results_checkpoint.json ({num_gens} generations)")
+            return metadata
             
         except Exception as e:
-            print(f"\n⚠ Error loading original metadata: {e}")
-            return None, None    
+            print(f"  ⚠ Could not load results_checkpoint.json: {type(e).__name__}")
+            return None
+    
+    def _export_images_and_build_metadata(self, 
+                                         dataset: Dataset,
+                                         original_metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Export images and build/preserve metadata"""
         
-    def _export_with_original_metadata(self, 
-                                    dataset: Dataset, 
-                                    original_results: Optional[Dict[str, Any]],
-                                    original_checkpoint: Optional[Dict[str, Any]]) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
-        """
-        Export dataset while preserving original results.json and results_checkpoint.json
-        
-        ✅ Uses results_checkpoint.json as SOURCE OF TRUTH (most complete)
-        ✅ Falls back to results.json if checkpoint missing
-        """
-        print("\n" + "="*60)
-        print("EXPORTING WITH ORIGINAL METADATA")
-        print("="*60)
-        
-        # ✅ PRIORITY: Use checkpoint if available (it's more complete)
-        metadata_source = original_checkpoint if original_checkpoint else original_results
-        
-        if not metadata_source:
-            print("⚠️  WARNING: No metadata source found, reconstructing from dataset")
-            return self._export_with_reconstructed_metadata(dataset), None
-        
-        # Show which source we're using
-        source_name = "results_checkpoint.json" if original_checkpoint else "results.json"
-        num_generations = len(metadata_source.get('generations', []))
-        print(f"📋 Using {source_name} as metadata source ({num_generations} generations)")
+        print("\nExporting images from dataset...")
         
         content_dir = self.output_dir / "ContentImage"
         target_base_dir = self.output_dir / "TargetImage"
         
         # Export content images
-        print("\nExporting content images...")
-        content_samples_exported = 0
-        
-        for idx, sample in enumerate(tqdm(dataset, desc="📝 Exporting content images", ncols=80)):
+        print("\n📝 Exporting content images...")
+        for idx, sample in enumerate(tqdm(dataset, desc="Content images", ncols=80)):
             if 'content_image' in sample:
                 char_idx = sample.get('char_index', idx)
                 content_img = sample['content_image']
@@ -267,15 +140,12 @@ class DatasetExporter:
                 if isinstance(content_img, PILImage.Image):
                     content_path = content_dir / f"char{char_idx}.png"
                     content_img.save(str(content_path))
-                    content_samples_exported += 1
         
-        print(f"✓ Exported {content_samples_exported} content images")
+        print(f"✓ Exported content images")
         
-        # Export target images organized by style
-        print("\nExporting target images...")
-        target_samples_exported = 0
-        
-        for sample in tqdm(dataset, desc="🎨 Exporting target images", ncols=80):
+        # Export target images
+        print("\n🎨 Exporting target images...")
+        for sample in tqdm(dataset, desc="Target images", ncols=80):
             if 'target_image' in sample:
                 char_idx = sample.get('char_index', 0)
                 style = sample.get('style', 'style0')
@@ -288,171 +158,98 @@ class DatasetExporter:
                 if isinstance(target_img, PILImage.Image):
                     target_path = style_dir / f"{style}+char{char_idx}.png"
                     target_img.save(str(target_path))
-                    target_samples_exported += 1
         
-        print(f"✓ Exported {target_samples_exported} target images")
+        print(f"✓ Exported target images")
         
-        # ✅ Save metadata files
-        print("\nSaving metadata files...")
+        # Use or reconstruct metadata
+        if original_metadata:
+            print("\n✅ Using original results_checkpoint.json")
+            metadata = self._update_metadata_paths(original_metadata)
+        else:
+            print("\n⚠ Reconstructing metadata from dataset")
+            metadata = self._build_metadata_from_dataset(dataset)
         
-        updated_results = None
-        updated_checkpoint = None
+        # Save results_checkpoint.json
+        print("\n💾 Saving results_checkpoint.json...")
+        checkpoint_path = self.output_dir / "results_checkpoint.json"
+        with open(checkpoint_path, 'w', encoding='utf-8') as f:
+            json.dump(metadata, f, indent=2, ensure_ascii=False)
         
-        # ✅ ALWAYS save the source metadata (checkpoint or results)
-        if original_checkpoint:
-            updated_checkpoint = self._update_metadata_paths(original_checkpoint)
-            checkpoint_path = self.output_dir / "results_checkpoint.json"
-            with open(checkpoint_path, 'w', encoding='utf-8') as f:
-                json.dump(updated_checkpoint, f, indent=2, ensure_ascii=False)
-            print(f"  ✓ Saved results_checkpoint.json ({len(updated_checkpoint.get('generations', []))} generations)")
+        num_gens = len(metadata.get('generations', []))
+        print(f"  ✓ Saved results_checkpoint.json ({num_gens} generations)")
         
-        # ✅ ALSO save results.json if available (even if incomplete, preserve it)
-        if original_results:
-            updated_results = self._update_metadata_paths(original_results)
-            results_path = self.output_dir / "results.json"
-            with open(results_path, 'w', encoding='utf-8') as f:
-                json.dump(updated_results, f, indent=2, ensure_ascii=False)
-            num_gen = len(updated_results.get('generations', []))
-            print(f"  ✓ Saved results.json ({num_gen} generations)")
-            
-            # ⚠️ WARN if results.json is incomplete
-            if original_checkpoint and num_gen < len(original_checkpoint.get('generations', [])):
-                print(f"  ⚠️  WARNING: results.json has {num_gen} generations but checkpoint has {len(original_checkpoint.get('generations', []))}")
-                print(f"             This is expected if training was interrupted. Using checkpoint as source of truth.")
+        self._log_metadata_stats(metadata)
         
-        # Log metadata statistics from the COMPLETE source
-        if updated_checkpoint:
-            self._log_metadata_stats(updated_checkpoint)
-        elif updated_results:
-            self._log_metadata_stats(updated_results)
-        
-        return updated_results or {}, updated_checkpoint    
-    def _update_metadata_paths(self, original_metadata: Dict[str, Any]) -> Dict[str, Any]:
-        metadata = json.loads(json.dumps(original_metadata))
-        
+        return metadata
+    
+    def _update_metadata_paths(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """Update all paths in metadata to match export directory"""
         for generation in metadata.get('generations', []):
             char_idx = generation.get('char_index', 0)
             style = generation.get('style', 'style0')
             
-            # Update ALL path fields consistently
-            generation['output_path'] = f"{self.output_dir}/TargetImage/{style}/{style}+char{char_idx}.png"
-            generation['content_image_path'] = f"{self.output_dir}/ContentImage/char{char_idx}.png"
-            generation['target_image_path'] = f"{self.output_dir}/TargetImage/{style}/{style}+char{char_idx}.png"
+            generation['output_path'] = str(
+                self.output_dir / 'TargetImage' / style / f"{style}+char{char_idx}.png"
+            )
+            generation['content_image_path'] = str(
+                self.output_dir / 'ContentImage' / f"char{char_idx}.png"
+            )
+            generation['target_image_path'] = str(
+                self.output_dir / 'TargetImage' / style / f"{style}+char{char_idx}.png"
+            )
         
         return metadata
     
-    def _log_metadata_stats(self, metadata: Dict[str, Any]) -> None:
-        """Log metadata statistics"""
-        try:
-            num_generations = len(metadata.get('generations', []))
-            num_styles = len(metadata.get('styles', []))
-            num_chars = len(metadata.get('characters', []))
-            fonts = metadata.get('fonts', [])
+    def _build_metadata_from_dataset(self, dataset: Dataset) -> Dict[str, Any]:
+        """Build metadata from dataset samples"""
+        generations = []
+        characters_set = set()
+        styles_set = set()
+        fonts_set = set()
+        
+        for sample in dataset:
+            char = sample.get('character', f"char{sample.get('char_index', 0)}")
+            char_idx = sample.get('char_index', 0)
+            style = sample.get('style', 'style0')
+            style_idx = sample.get('style_index', 0)
+            font = sample.get('font', 'unknown')
             
-            print(f"\n📊 Metadata Statistics:")
-            print(f"  Total generations: {num_generations}")
-            print(f"  Total characters: {num_chars}")
-            print(f"  Total styles: {num_styles}")
-            print(f"  Fonts: {', '.join(fonts) if fonts else 'unknown'}")
-        except Exception as e:
-            print(f"⚠ Could not log metadata stats: {e}")
-    
-    def _export_with_reconstructed_metadata(self, dataset: Dataset) -> Dict[str, Any]:
-        """
-        Reconstruct metadata from dataset if original not available
-        ⚠ Use only as fallback
-        """
-        print("\n" + "="*60)
-        print("RECONSTRUCTING METADATA FROM DATASET")
-        print("="*60)
+            generations.append({
+                'character': char,
+                'char_index': char_idx,
+                'style': style,
+                'style_index': style_idx,
+                'font': font,
+                'output_path': str(self.output_dir / 'TargetImage' / style / f"{style}+char{char_idx}.png"),
+                'content_image_path': str(self.output_dir / 'ContentImage' / f"char{char_idx}.png"),
+                'target_image_path': str(self.output_dir / 'TargetImage' / style / f"{style}+char{char_idx}.png")
+            })
+            
+            characters_set.add(char)
+            styles_set.add(style)
+            fonts_set.add(font)
         
-        content_dir = self.output_dir / "ContentImage"
-        target_base_dir = self.output_dir / "TargetImage"
-        
-        print("\nExporting images...")
-        content_samples_exported = 0
-        target_samples_exported = 0
-        
-        metadata: Dict[str, Any] = {
-            'generations': [],
+        return {
+            'generations': generations,
             'metrics': {
                 'lpips': [],
                 'ssim': [],
                 'inference_times': []
             },
-            'styles': [],
-            'characters': [],
-            'fonts': [],
-            'total_chars': 0,
-            'total_styles': 0
+            'characters': sorted(list(characters_set)),
+            'styles': sorted(list(styles_set)),
+            'fonts': sorted(list(fonts_set)),
+            'total_chars': len(characters_set),
+            'total_styles': len(styles_set)
         }
-        
-        unique_chars = set()
-        unique_styles = set()
-        unique_fonts = set()
-        
-        for sample in tqdm(dataset, desc="📊 Exporting samples", ncols=80):
-            char_idx = sample.get('char_index', 0)
-            character = sample.get('character', '?')
-            style = sample.get('style', 'style0')
-            style_idx = sample.get('style_index', 0)
-            font = sample.get('font', 'unknown')
-            
-            unique_chars.add(character)
-            unique_styles.add(style)
-            unique_fonts.add(font)
-            
-            # Export content image
-            if 'content_image' in sample:
-                content_img = sample['content_image']
-                if isinstance(content_img, PILImage.Image):
-                    content_path = content_dir / f"char{char_idx}.png"
-                    content_img.save(str(content_path))
-                    content_samples_exported += 1
-            
-            # Export target image
-            if 'target_image' in sample:
-                target_img = sample['target_image']
-                if isinstance(target_img, PILImage.Image):
-                    style_dir = target_base_dir / style
-                    style_dir.mkdir(parents=True, exist_ok=True)
-                    
-                    target_path = style_dir / f"{style}+char{char_idx}.png"
-                    target_img.save(str(target_path))
-                    target_samples_exported += 1
-            
-            # Add to metadata
-            metadata['generations'].append({
-                'character': character,
-                'char_index': char_idx,
-                'style': style,
-                'style_index': style_idx,
-                'font': font,
-                'content_image_path': f"{self.config.output_dir}/ContentImage/char{char_idx}.png",
-                'target_image_path': f"{self.config.output_dir}/TargetImage/{style}/{style}+char{char_idx}.png"
-            })
-        
-        # Update metadata summary
-        metadata['characters'] = sorted(list(unique_chars))
-        metadata['styles'] = sorted(list(unique_styles))
-        metadata['fonts'] = sorted(list(unique_fonts))
-        metadata['total_chars'] = len(unique_chars)
-        metadata['total_styles'] = len(unique_styles)
-        
-        print(f"✓ Exported {content_samples_exported} content images")
-        print(f"✓ Exported {target_samples_exported} target images")
-        
-        # Save reconstructed metadata
-        print("\nSaving reconstructed metadata...")
-        results_path = self.output_dir / "results.json"
-        with open(results_path, 'w', encoding='utf-8') as f:
-            json.dump(metadata, f, indent=2, ensure_ascii=False)
-        print(f"  ✓ Saved reconstructed results.json")
-        
-        # Log metadata statistics
-        self._log_metadata_stats(metadata)
-        
-        return metadata
+    
+    def _log_metadata_stats(self, metadata: Dict[str, Any]) -> None:
+        """Log metadata statistics"""
+        print("\n📊 Metadata Statistics:")
+        print(f"  Total generations: {len(metadata.get('generations', []))}")
+        print(f"  Total characters: {metadata.get('total_chars', 0)}")
+        print(f"  Total styles: {metadata.get('total_styles', 0)}")
+        print(f"  Fonts: {', '.join(metadata.get('fonts', ['unknown']))}")
 
 
 def export_dataset(
@@ -460,118 +257,89 @@ def export_dataset(
     repo_id: Optional[str] = None,
     local_dataset_path: Optional[str] = None,
     split: str = "train",
-    create_metadata: bool = True,
-    token: Optional[str] = None,
-    preserve_original: bool = True
+    token: Optional[str] = None
 ) -> None:
-    """
-    Export dataset from Hub or local path to disk
-    Handles both results.json and results_checkpoint.json
-    
-    Args:
-        output_dir: Directory to export to
-        repo_id: Hub repo ID
-        local_dataset_path: Local dataset path
-        split: Dataset split
-        create_metadata: Whether to create metadata
-        token: HF token
-        preserve_original: Try to preserve original metadata files
-    """
+    """Export dataset to disk"""
     
     config = ExportConfig(
         output_dir=output_dir,
         repo_id=repo_id,
         local_dataset_path=local_dataset_path,
         split=split,
-        create_metadata=create_metadata,
-        token=token,
-        preserve_original_metadata=preserve_original
+        token=token
     )
     
     exporter = DatasetExporter(config)
-    results_metadata, checkpoint_metadata = exporter.export()
+    metadata = exporter.export()
     
     print("\n" + "="*60)
-    print("✓ EXPORT COMPLETE!")
+    print("✅ EXPORT COMPLETE!")
     print("="*60)
-    print(f"\nOutput structure:")
-    print(f"  {output_dir}/")
-    print(f"    ├── ContentImage/")
-    print(f"    │   ├── char0.png")
-    print(f"    │   ├── char1.png")
-    print(f"    │   └── ...")
-    print(f"    ├── TargetImage/")
-    print(f"    │   ├── style0/")
-    print(f"    │   ├── style1/")
-    print(f"    │   └── ...")
-    
-    if results_metadata:
-        print(f"    ├── results.json ✅ ({len(results_metadata.get('generations', []))} generations)")
-    
-    if checkpoint_metadata:
-        print(f"    └── results_checkpoint.json ✅ ({len(checkpoint_metadata.get('generations', []))} generations)")
-    
-    print("="*60)
+    print(f"\nFiles created:")
+    print(f"  ✓ {output_dir}/ContentImage/")
+    print(f"  ✓ {output_dir}/TargetImage/")
+    print(f"  ✓ {output_dir}/results_checkpoint.json")
 
 
 if __name__ == "__main__":
     import argparse
+    import sys
     
-    parser = argparse.ArgumentParser(description="Export Hugging Face dataset to disk")
+    parser = argparse.ArgumentParser(
+        description="Export Hugging Face dataset to disk",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+EXAMPLES:
+
+1. Export from Hub:
+   python export_hf_dataset_to_disk.py \\
+     --output_dir "my_dataset/train" \\
+     --repo_id "dzungpham/font-diffusion-data" \\
+     --split "train"
+
+2. Export from local cache:
+   python export_hf_dataset_to_disk.py \\
+     --output_dir "my_dataset/train" \\
+     --local_dataset_path "~/.cache/huggingface/datasets/.../train"
+        """
+    )
+    
     parser.add_argument('--output_dir', type=str, required=True,
-                       help='Directory to export to')
+                       help='✅ REQUIRED: Directory to export to')
     parser.add_argument('--repo_id', type=str, default=None,
-                       help='Hugging Face repo ID')
+                       help='Hugging Face repo ID (e.g., username/dataset-name)')
     parser.add_argument('--local_dataset_path', type=str, default=None,
-                       help='Local dataset path')
+                       help='Local dataset path (alternative to --repo_id)')
     parser.add_argument('--split', type=str, default='train',
-                       help='Dataset split')
+                       help='Dataset split name (default: train)')
     parser.add_argument('--token', type=str, default=None,
-                       help='Hugging Face token')
-    parser.add_argument('--preserve_original', action='store_true', default=True,
-                       help='Preserve original results.json and results_checkpoint.json')
-    parser.add_argument('--no_preserve_original', action='store_false', dest='preserve_original',
-                       help='Do not preserve original metadata files')
+                       help='Hugging Face token (for private datasets)')
     
     args = parser.parse_args()
     
-    export_dataset(
-        output_dir=args.output_dir,
-        repo_id=args.repo_id,
-        local_dataset_path=args.local_dataset_path,
-        split=args.split,
-        token=args.token,
-        preserve_original=args.preserve_original
-    )
-
-
-"""
-USAGE EXAMPLES:
-
-# Export with both metadata files preserved from Hub
-python export_hf_dataset_to_disk.py \
-  --output_dir "my_dataset/train_original" \
-  --repo_id "dzungpham/font-diffusion-generated-data" \
-  --split "train_original" \
-  --token "hf_xxxxx" \
-  --preserve_original
-
-# Export from local dataset
-python export_hf_dataset_to_disk.py \
-  --output_dir "my_dataset/train" \
-  --local_dataset_path "cached_dataset/train" \
-  --preserve_original
-
-# Export without preserving metadata (reconstruct from dataset)
-python export_hf_dataset_to_disk.py \
-  --output_dir "my_dataset/val" \
-  --repo_id "dzungpham/font-diffusion-generated-data" \
-  --split "val" \
-  --no_preserve_original
-
-OUTPUT FILES:
-  ✅ results.json          - Main results with all generations
-  ✅ results_checkpoint.json - Checkpoint saved during generation
-  ✅ ContentImage/         - Original character images
-  ✅ TargetImage/          - Generated styled character images
-"""
+    # Validation
+    if not args.repo_id and not args.local_dataset_path:
+        print("\n" + "="*60)
+        print("❌ ERROR: Missing required argument")
+        print("="*60)
+        print("\nYou must provide EITHER:")
+        print("  --repo_id          : Load from Hugging Face Hub")
+        print("  --local_dataset_path : Load from local disk")
+        print("="*60)
+        sys.exit(1)
+    
+    try:
+        export_dataset(
+            output_dir=args.output_dir,
+            repo_id=args.repo_id,
+            local_dataset_path=args.local_dataset_path,
+            split=args.split,
+            token=args.token
+        )
+    except KeyboardInterrupt:
+        print("\n\n⚠️  Export interrupted by user")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n\n❌ Export failed:")
+        print(f"   {type(e).__name__}: {e}")
+        sys.exit(1)

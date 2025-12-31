@@ -575,14 +575,15 @@ def save_results_json(results: Dict[str, Any],
         print(f"  ⚠ Error saving results.json: {e}")
 
 
-def save_checkpoint(results: Dict[str, Any], 
-                   output_dir: str, 
-                   checkpoint_name: str = 'results_checkpoint.json') -> None:
-    """Save intermediate results checkpoint - same structure as generate_metadata.py"""
+def save_checkpoint(results: Dict[str, Any], output_dir: str) -> None:
+    """
+    ✅ SIMPLIFIED: Save ONLY results_checkpoint.json
+    This is the single source of truth for all generation metadata
+    """
     try:
-        checkpoint_path: str = os.path.join(output_dir, checkpoint_name)
+        checkpoint_path: str = os.path.join(output_dir, 'results_checkpoint.json')
         
-        # Use same cleaning logic as save_results_json
+        # Ensure metrics exist
         if 'metrics' not in results:
             results['metrics'] = {
                 'lpips': [],
@@ -590,7 +591,7 @@ def save_checkpoint(results: Dict[str, Any],
                 'inference_times': []
             }
         
-        # Clean generations to match generate_metadata.py structure
+        # Clean and validate generations
         cleaned_generations: List[Dict[str, Any]] = []
         for gen in results.get('generations', []):
             cleaned_gen = {
@@ -603,12 +604,13 @@ def save_checkpoint(results: Dict[str, Any],
                 'content_image_path': gen.get('content_image_path', ''),
                 'target_image_path': gen.get('target_image_path', '')
             }
+            # Only include non-empty fields
             cleaned_gen = {k: v for k, v in cleaned_gen.items() if v is not None and v != ''}
             cleaned_generations.append(cleaned_gen)
         
         results['generations'] = cleaned_generations
         
-        # Ensure metadata
+        # Auto-populate metadata from generations
         if 'characters' not in results:
             results['characters'] = sorted(list(set(
                 g.get('character') for g in cleaned_generations if g.get('character')
@@ -630,9 +632,13 @@ def save_checkpoint(results: Dict[str, Any],
         if 'total_styles' not in results:
             results['total_styles'] = len(results.get('styles', []))
         
+        # Save ONLY results_checkpoint.json
         with open(checkpoint_path, 'w', encoding='utf-8') as f:
             json.dump(results, f, indent=2, ensure_ascii=False)
-        print(f"  💾 Checkpoint saved: {checkpoint_path}")
+        
+        num_gens = len(cleaned_generations)
+        print(f"  ✅ Saved results_checkpoint.json ({num_gens} generations)")
+        
     except Exception as e:
         print(f"  ⚠ Error saving checkpoint: {e}")
 
@@ -642,12 +648,164 @@ def load_checkpoint(checkpoint_path: str) -> Optional[Dict[str, Any]]:
         if os.path.exists(checkpoint_path):
             with open(checkpoint_path, 'r', encoding='utf-8') as f:
                 results: Dict[str, Any] = json.load(f)
-            print(f"✓ Loaded checkpoint from {checkpoint_path}")
+            print(f"✓ Loaded checkpoint ({len(results.get('generations', []))} generations)")
             return results
         return None
     except Exception as e:
         print(f"⚠ Error loading checkpoint: {e}")
         return None
+
+
+def batch_generate_images(pipe: FontDiffuserDPMPipeline, 
+                          characters: List[str], 
+                          style_paths: List[str],
+                          output_dir: str, 
+                          args: Namespace, 
+                          evaluator: QualityEvaluator,
+                          font_manager: FontManager, 
+                          resume_results: Optional[Dict[str, Any]] = None,
+                          index_manager: Optional[ResultsIndexManager] = None) -> Dict[str, Any]:
+    """
+    Generate images in batches.
+    ✅ SIMPLIFIED: Only saves results_checkpoint.json periodically and at end
+    """
+    
+    # Initialize index manager
+    if index_manager is None:
+        existing_checkpoint_path = os.path.join(output_dir, 'results_checkpoint.json')
+        index_manager = ResultsIndexManager(
+            existing_checkpoint_path if os.path.exists(existing_checkpoint_path) else None
+        )
+    
+    # Initialize results
+    if resume_results:
+        results = resume_results
+        print(f"📥 Resuming: {len(index_manager.existing_pairs)} pairs already processed")
+    else:
+        results = {
+            'generations': [],
+            'metrics': {
+                'lpips': [],
+                'ssim': [],
+                'inference_times': []
+            },
+            'dataset_split': args.dataset_split,
+            'fonts': font_manager.get_font_names(),
+            'characters': characters,
+            'styles': [f"style{i}" for i in range(len(style_paths))],
+            'total_chars': len(characters),
+            'total_styles': len(style_paths),
+        }
+    
+    # Setup directories
+    target_base_dir = os.path.join(output_dir, 'TargetImage')
+    os.makedirs(target_base_dir, exist_ok=True)
+    
+    # Print configuration
+    print(f"\n{'='*70}")
+    print(f"{'BATCH IMAGE GENERATION':^70}")
+    print('='*70)
+    print(f"Fonts:              {len(font_manager.get_font_names())}")
+    print(f"Styles:             {len(style_paths)}")
+    print(f"Characters:         {len(characters)}")
+    print(f"Batch size:         {args.batch_size}")
+    print(f"Inference steps:    {args.num_inference_steps}")
+    print(f"Save interval:      Every {args.save_interval} styles" if args.save_interval > 0 else "Save interval:      End only")
+    print(f"Output dir:         {output_dir}")
+    print('='*70 + '\n')
+    
+    # Build char-to-font mapping
+    char_to_font = _build_char_font_map(characters, font_manager)
+    chars_without_fonts = [c for c in characters if c not in char_to_font]
+    
+    if chars_without_fonts:
+        print(f"⚠️  {len(chars_without_fonts)} characters not in any font (will skip)")
+    
+    # Initialize counters
+    generated_count = 0
+    skipped_count = 0
+    failed_count = len(chars_without_fonts)
+    generation_start_time = time.time()
+    
+    # Main generation loop
+    for style_idx, style_path in tqdm(enumerate(style_paths), total=len(style_paths), 
+                                      desc="🎨 Generating styles", ncols=100):
+        style_name = f"style{style_idx}"
+        style_idx_managed = index_manager.get_style_index(style_name)
+        style_dir = os.path.join(target_base_dir, style_name)
+        os.makedirs(style_dir, exist_ok=True)
+        
+        try:
+            # Group characters by font for this style
+            font_to_chars = _group_chars_by_font(
+                characters, char_to_font, index_manager, style_idx_managed
+            )
+            
+            if not font_to_chars:
+                skipped_count += len(characters)
+                continue
+            
+            # Generate images for each font
+            for font_name, chars_for_font in font_to_chars.items():
+                images, valid_chars, batch_time = sampling_batch_optimized(
+                    args, pipe, chars_for_font, style_path, font_manager, font_name
+                )
+                
+                if images is None:
+                    tqdm.write(f"  ⚠️  {style_name} ({font_name}): No images generated")
+                    continue
+                
+                tqdm.write(f"  ✓ {style_name} ({font_name}): {len(images)} in {batch_time:.2f}s")
+                
+                # Save images and metadata
+                for char, img in zip(valid_chars, images):
+                    char_idx = index_manager.get_char_index(char)
+                    img_name = f"{style_name}+char{char_idx}.png"
+                    img_path = os.path.join(style_dir, img_name)
+                    
+                    evaluator.save_image(img, img_path)
+                    
+                    # Add generation record
+                    results['generations'].append({
+                        'character': char,
+                        'char_index': char_idx,
+                        'style': style_name,
+                        'style_index': style_idx_managed,
+                        'font': font_name,
+                        'output_path': img_path,
+                        'content_image_path': f"ContentImage/char{char_idx}.png",
+                        'target_image_path': f"TargetImage/{style_name}/{style_name}+char{char_idx}.png"
+                    })
+                    
+                    index_manager.add_pair(char_idx, style_idx_managed)
+                    generated_count += 1
+                
+                # Track inference time
+                results['metrics']['inference_times'].append({
+                    'style': style_name,
+                    'style_index': style_idx_managed,
+                    'font': font_name,
+                    'total_time': batch_time,
+                    'num_images': len(images),
+                    'time_per_image': batch_time / len(images) if images else 0
+                })
+            
+            # ✅ SIMPLIFIED: Only save checkpoint periodically
+            if args.save_interval > 0 and (style_idx + 1) % args.save_interval == 0:
+                _print_checkpoint_status(style_idx + 1, len(style_paths), 
+                                        generated_count, skipped_count, generation_start_time)
+                save_checkpoint(results, output_dir)
+            
+        except Exception as e:
+            tqdm.write(f"  ✗ {style_name}: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    # Final statistics
+    _print_generation_summary(generated_count, skipped_count, failed_count, 
+                             len(characters) * len(style_paths), generation_start_time)
+    
+    return results
 
 def generate_content_images(
     characters: List[str], 
@@ -798,157 +956,6 @@ def sampling_batch_optimized(args: Namespace,
         import traceback
         traceback.print_exc()
         return None, None, None
-
-
-def batch_generate_images(pipe: FontDiffuserDPMPipeline, 
-                          characters: List[str], 
-                          style_paths: List[str],
-                          output_dir: str, 
-                          args: Namespace, 
-                          evaluator: QualityEvaluator,
-                          font_manager: FontManager, 
-                          resume_results: Optional[Dict[str, Any]] = None,
-                          index_manager: Optional[ResultsIndexManager] = None) -> Dict[str, Any]:
-    """
-    Generate images in batches for all styles and characters.
-    Saves results.json periodically with complete metadata matching generate_metadata.py
-    """
-    
-    # Initialize index manager
-    if index_manager is None:
-        existing_results_path = os.path.join(output_dir, 'results_checkpoint.json')
-        index_manager = ResultsIndexManager(
-            existing_results_path if os.path.exists(existing_results_path) else None
-        )
-    
-    # Initialize results
-    if resume_results:
-        results = resume_results
-        print(f"📥 Resuming: {len(index_manager.existing_pairs)} pairs already processed")
-    else:
-        results = {
-            'generations': [],
-            'metrics': {...},
-            'dataset_split': args.dataset_split,  # ✅ ADD THIS
-            'fonts': font_manager.get_font_names(),
-            'characters': characters,
-            'styles': [f"style{i}" for i in range(len(style_paths))],
-            'total_chars': len(characters),
-            'total_styles': len(style_paths),
-        }
-    
-    # Setup directories
-    target_base_dir = os.path.join(output_dir, 'TargetImage')
-    os.makedirs(target_base_dir, exist_ok=True)
-    
-    # Print configuration
-    print(f"\n{'='*70}")
-    print(f"{'BATCH IMAGE GENERATION':^70}")
-    print('='*70)
-    print(f"Fonts:              {len(font_manager.get_font_names())}")
-    print(f"Styles:             {len(style_paths)}")
-    print(f"Characters:         {len(characters)}")
-    print(f"Total pairs:        {len(characters) * len(style_paths)}")
-    print(f"Batch size:         {args.batch_size}")
-    print(f"Inference steps:    {args.num_inference_steps}")
-    print(f"Save interval:      Every {args.save_interval} styles" if args.save_interval > 0 else "Save interval:      End only")
-    print(f"Output dir:         {output_dir}")
-    print('='*70 + '\n')
-    
-    # Build char-to-font mapping
-    char_to_font = _build_char_font_map(characters, font_manager)
-    chars_without_fonts = [c for c in characters if c not in char_to_font]
-    
-    if chars_without_fonts:
-        print(f"⚠️  {len(chars_without_fonts)} characters not in any font (will skip)")
-    
-    # Initialize counters
-    generated_count = 0
-    skipped_count = 0
-    failed_count = len(chars_without_fonts)
-    generation_start_time = time.time()
-    
-    # Main generation loop
-    for style_idx, style_path in tqdm(enumerate(style_paths), total=len(style_paths), 
-                                      desc="🎨 Generating styles", ncols=100):
-        style_name = f"style{style_idx}"
-        style_idx_managed = index_manager.get_style_index(style_name)
-        style_dir = os.path.join(target_base_dir, style_name)
-        os.makedirs(style_dir, exist_ok=True)
-        
-        try:
-            # Group characters by font for this style
-            font_to_chars = _group_chars_by_font(
-                characters, char_to_font, index_manager, style_idx_managed
-            )
-            
-            if not font_to_chars:
-                skipped_count += len(characters)
-                continue
-            
-            # Generate images for each font
-            for font_name, chars_for_font in font_to_chars.items():
-                images, valid_chars, batch_time = sampling_batch_optimized(
-                    args, pipe, chars_for_font, style_path, font_manager, font_name
-                )
-                
-                if images is None:
-                    tqdm.write(f"  ⚠️  {style_name} ({font_name}): No images generated")
-                    continue
-                
-                tqdm.write(f"  ✓ {style_name} ({font_name}): {len(images)} in {batch_time:.2f}s")
-                
-                # Save images and metadata
-                for char, img in zip(valid_chars, images):
-                    char_idx = index_manager.get_char_index(char)
-                    img_name = f"{style_name}+char{char_idx}.png"
-                    img_path = os.path.join(style_dir, img_name)
-                    
-                    evaluator.save_image(img, img_path)
-                    
-                    # Add generation record with complete metadata (matching generate_metadata.py)
-                    results['generations'].append({
-                        'character': char,
-                        'char_index': char_idx,
-                        'style': style_name,
-                        'style_index': style_idx_managed,
-                        'font': font_name,
-                        'output_path': img_path,
-                        'content_image_path': f"ContentImage/char{char_idx}.png",
-                        'target_image_path': f"TargetImage/{style_name}/{style_name}+char{char_idx}.png"
-                    })
-                    
-                    index_manager.add_pair(char_idx, style_idx_managed)
-                    generated_count += 1
-                
-                # Track inference time
-                results['metrics']['inference_times'].append({
-                    'style': style_name,
-                    'style_index': style_idx_managed,
-                    'font': font_name,
-                    'total_time': batch_time,
-                    'num_images': len(images),
-                    'time_per_image': batch_time / len(images) if images else 0
-                })
-            
-            # Periodic checkpoint save
-            if args.save_interval > 0 and (style_idx + 1) % args.save_interval == 0:
-                _print_checkpoint_status(style_idx + 1, len(style_paths), 
-                                        generated_count, skipped_count, generation_start_time)
-                save_checkpoint(results, output_dir)
-                save_results_json(results, output_dir)
-            
-        except Exception as e:
-            tqdm.write(f"  ✗ {style_name}: {e}")
-            import traceback
-            traceback.print_exc()
-    
-    # Final statistics
-    _print_generation_summary(generated_count, skipped_count, failed_count, 
-                             len(characters) * len(style_paths), generation_start_time)
-    
-    return results
-
 
 def _build_char_font_map(characters: List[str], font_manager: FontManager) -> Dict[str, str]:
     """Map each character to its first available font"""
@@ -1206,7 +1213,7 @@ def main() -> None:
     results: Dict[str, Any] = {}
 
     print("\n" + "="*60)
-    print("FONTDIFFUSER STANDARD FORMAT GENERATION (Index-based)")
+    print("FONTDIFFUSER - SIMPLIFIED (Only results_checkpoint.json)")
     print("="*60)
 
     try:
@@ -1217,7 +1224,7 @@ def main() -> None:
         font_manager: FontManager = FontManager(args.ttf_path)
 
         print(f"\n📊 Configuration:")
-        print(f"  Dataset split: {args.dataset_split}")  # ✅ ADD THIS
+        print(f"  Dataset split: {args.dataset_split}")
         print(f"  Number of Characters: {len(characters)} (lines {args.start_line}-{args.end_line or 'end'})")
         print(f"  Number of Styles: {len(style_paths)}")
         print(f"  Output Directory: {args.output_dir}")
@@ -1230,13 +1237,13 @@ def main() -> None:
         if args.resume_from:
             resume_results = load_checkpoint(args.resume_from)
 
-        # ✅ Initialize index manager ONCE
-        existing_results_path = os.path.join(args.output_dir, 'results.json')
+        # ✅ Initialize index manager from results_checkpoint.json
+        existing_checkpoint_path = os.path.join(args.output_dir, 'results_checkpoint.json')
         index_manager = ResultsIndexManager(
-            existing_results_path if os.path.exists(existing_results_path) else None
+            existing_checkpoint_path if os.path.exists(existing_checkpoint_path) else None
         )
 
-        # Generate content images with shared index manager
+        # Generate content images
         if not resume_results:
             char_paths: Dict[str, str]
             char_paths, index_manager = generate_content_images(
@@ -1251,7 +1258,7 @@ def main() -> None:
 
         evaluator: QualityEvaluator = QualityEvaluator(device=args.device)
 
-        # Generate target images with same index manager
+        # Generate target images
         results: Dict[str, Any] = batch_generate_images(
             pipe, characters, style_paths, args.output_dir,
             pipeline_args, evaluator, font_manager, resume_results, index_manager
@@ -1263,24 +1270,15 @@ def main() -> None:
                 results, evaluator, args.ground_truth_dir, args.compute_fid
             )
 
-        # ✅ Save final results (comprehensive)
-        results_path: str = os.path.join(args.output_dir, 'results.json')
-        with open(results_path, 'w', encoding='utf-8') as f:
-            json.dump(results, f, indent=2, ensure_ascii=False)
-        print(f"\n✓ Final results saved to {results_path}")
-        
-        # Also save backup
-        timestamp: str = time.strftime('%Y%m%d_%H%M%S')
-        results_final_backup: str = os.path.join(args.output_dir, f'results_final_{timestamp}.json')
-        with open(results_final_backup, 'w', encoding='utf-8') as f:
-            json.dump(results, f, indent=2, ensure_ascii=False)
-        print(f"✓ Backup saved to {results_final_backup}")
+        # ✅ SIMPLIFIED: Save ONLY results_checkpoint.json as final output
+        print("\n📝 Saving final checkpoint...")
+        save_checkpoint(results, args.output_dir)
 
         if args.use_wandb:
             log_to_wandb(results, args)
 
         print("\n" + "="*60)
-        print("✓ ALL DONE!")
+        print("✅ GENERATION COMPLETE!")
         print("="*60)
         print(f"\nOutput structure:")
         print(f"  {args.output_dir}/")
@@ -1293,17 +1291,14 @@ def main() -> None:
         print(f"    │   │   ├── style0+char0.png")
         print(f"    │   │   └── ...")
         print(f"    │   └── ...")
-        print(f"    ├── results.json ✅ (updated periodically)")
-        print(f"    ├── results_checkpoint.json (intermediate)")
-        print(f"    └── results_backup_*.json (timestamped)")
+        print(f"    └── results_checkpoint.json ✅ (single source of truth)")
 
     except KeyboardInterrupt:
         print("\n\n⚠ Generation interrupted by user!")
-        print("💾 Saving emergency checkpoint before exit...")
+        print("💾 Saving emergency checkpoint...")
         if 'results' in locals() and results:
-            save_checkpoint(results, args.output_dir, 'results_interrupted.json')
-            save_results_json(results, args.output_dir, 'results.json')  # ✅ Save latest state
-            print("✓ Latest state saved to results.json")
+            save_checkpoint(results, args.output_dir)
+            print("✓ Latest state saved to results_checkpoint.json")
         sys.exit(1)
 
     except Exception as e:
@@ -1313,8 +1308,9 @@ def main() -> None:
         
         # Save emergency checkpoint
         if 'results' in locals() and results:
-            save_results_json(results, args.output_dir, 'results.json')
+            save_checkpoint(results, args.output_dir)
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
