@@ -1,11 +1,12 @@
 """
 Create Hugging Face dataset from generated FontDiffusion images
-✅ FIXED: Dynamically discovers images instead of using checkpoint paths
+✅ Uses hash-based file naming with unicode characters
+✅ Relies on results_checkpoint.json as single source of truth
 """
 
 import os
 import json
-import shutil
+import hashlib
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
@@ -15,6 +16,53 @@ from datasets import Dataset, DatasetDict, Image as HFImage
 from PIL import Image as PILImage
 import pyarrow.parquet as pq
 from tqdm import tqdm
+
+
+def compute_file_hash(char: str, style: str, font: str = "") -> str:
+    """
+    Compute deterministic hash for a (character, style, font) combination
+    
+    Args:
+        char: Unicode character
+        style: Style name
+        font: Font name (optional)
+    
+    Returns:
+        8-character hash string
+    """
+    content = f"{char}_{style}_{font}"
+    return hashlib.sha256(content.encode('utf-8')).hexdigest()[:8]
+
+
+def get_content_filename(char: str, font: str = "") -> str:
+    """
+    Get content image filename for character
+    Format: {unicode_codepoint}_{char}_{hash}.png
+    Example: U+4E00_中_a1b2c3d4.png
+    """
+    codepoint = f"U+{ord(char):04X}"
+    hash_val = compute_file_hash(char, "", font)
+    # Sanitize char for filename (replace problematic characters)
+    safe_char = char if char.isprintable() and char not in '<>:"/\\|?*' else ""
+    if safe_char:
+        return f"{codepoint}_{safe_char}_{hash_val}.png"
+    else:
+        return f"{codepoint}_{hash_val}.png"
+
+
+def get_target_filename(char: str, style: str, font: str = "") -> str:
+    """
+    Get target image filename
+    Format: {unicode_codepoint}_{char}_{style}_{hash}.png
+    Example: U+4E00_中_style0_a1b2c3d4.png
+    """
+    codepoint = f"U+{ord(char):04X}"
+    hash_val = compute_file_hash(char, style, font)
+    safe_char = char if char.isprintable() and char not in '<>:"/\\|?*' else ""
+    if safe_char:
+        return f"{codepoint}_{safe_char}_{style}_{hash_val}.png"
+    else:
+        return f"{codepoint}_{style}_{hash_val}.png"
 
 
 @dataclass
@@ -37,6 +85,7 @@ class FontDiffusionDatasetBuilder:
         self.data_dir = Path(config.data_dir)
         self.content_dir = self.data_dir / "ContentImage"
         self.target_dir = self.data_dir / "TargetImage"
+        self.results_checkpoint = self.data_dir / "results_checkpoint.json"
 
         self._validate_structure()
 
@@ -46,118 +95,80 @@ class FontDiffusionDatasetBuilder:
             raise ValueError(f"ContentImage directory not found: {self.content_dir}")
         if not self.target_dir.exists():
             raise ValueError(f"TargetImage directory not found: {self.target_dir}")
+        if not self.results_checkpoint.exists():
+            raise ValueError(f"results_checkpoint.json not found: {self.results_checkpoint}")
 
         print(f"✓ Validated directory structure")
         print(f"  Content images: {self.content_dir}")
         print(f"  Target images: {self.target_dir}")
+        print(f"  Results checkpoint: {self.results_checkpoint}")
 
-    def _discover_content_images(self) -> Dict[int, str]:
-        """
-        ✅ DISCOVER from filesystem (not from checkpoint)
-        Returns mapping: char_index -> image_path
-        """
-        char_images = {}
+    def _load_results_checkpoint(self) -> Dict[str, Any]:
+        """Load results_checkpoint.json (single source of truth)"""
+        with open(self.results_checkpoint, 'r', encoding='utf-8') as f:
+            results = json.load(f)
         
-        for img_file in sorted(self.content_dir.glob("char*.png")):
-            try:
-                char_idx = int(img_file.stem.replace("char", ""))
-                char_images[char_idx] = str(img_file)
-            except ValueError:
-                continue
+        print(f"\n✓ Loaded results_checkpoint.json")
+        print(f"  Generations: {len(results.get('generations', []))}")
+        print(f"  Characters: {len(results.get('characters', []))}")
+        print(f"  Styles: {len(results.get('styles', []))}")
         
-        if not char_images:
-            raise ValueError(f"No content images found in {self.content_dir}")
-        
-        print(f"  ✓ Found {len(char_images)} content images")
-        return char_images
-
-    def _discover_target_images(self) -> Dict[Tuple[int, int], str]:
-        """
-        ✅ DISCOVER from filesystem (not from checkpoint)
-        Returns mapping: (char_index, style_index) -> image_path
-        """
-        target_images = {}
-        
-        for style_dir in sorted(self.target_dir.glob("style*")):
-            if not style_dir.is_dir():
-                continue
-            
-            try:
-                style_idx = int(style_dir.name.replace("style", ""))
-            except ValueError:
-                continue
-            
-            for img_file in sorted(style_dir.glob("style*+char*.png")):
-                try:
-                    filename = img_file.stem
-                    parts = filename.split("+")
-                    if len(parts) != 2:
-                        continue
-                    
-                    char_idx = int(parts[1].replace("char", ""))
-                    target_images[(char_idx, style_idx)] = str(img_file)
-                except ValueError:
-                    continue
-        
-        if not target_images:
-            raise ValueError(f"No target images found in {self.target_dir}")
-        
-        print(f"  ✓ Found {len(target_images)} target images")
-        return target_images
+        return results
 
     def build_dataset(self) -> Dataset:
         """
-        Build dataset by discovering images from filesystem
-        ✅ Does NOT rely on checkpoint paths
+        Build dataset from results_checkpoint.json
+        ✅ Single source of truth
         """
         print("\n" + "=" * 60)
         print("BUILDING DATASET")
         print("=" * 60)
 
-        print(f"\n🖼️  Discovering images from disk...")
-        content_images = self._discover_content_images()
-        target_images = self._discover_target_images()
+        # Load checkpoint
+        results = self._load_results_checkpoint()
+        generations = results.get('generations', [])
+
+        if not generations:
+            raise ValueError("No generations found in results_checkpoint.json")
 
         dataset_rows: List[Dict[str, Any]] = []
 
-        print(f"\n📋 Loading {len(target_images)} image pairs...")
+        print(f"\n🖼️  Loading {len(generations)} image pairs...")
 
-        for (char_idx, style_idx), target_path in tqdm(
-            target_images.items(),
-            desc="Loading images",
-            ncols=100,
-            unit="pair"
-        ):
-            # Get content image path
-            if char_idx not in content_images:
-                tqdm.write(f"⚠ Missing content for char{char_idx}")
+        for gen in tqdm(generations, desc="Loading images", ncols=100, unit="pair"):
+            char = gen.get('character')
+            style = gen.get('style')
+            font = gen.get('font', 'unknown')
+            
+            # Get file paths from checkpoint
+            content_path = self.data_dir / gen.get('content_image_path', '')
+            target_path = self.data_dir / gen.get('target_image_path', '')
+            
+            # Verify files exist
+            if not content_path.exists():
+                tqdm.write(f"⚠ Missing content: {content_path}")
                 continue
             
-            content_path = content_images[char_idx]
+            if not target_path.exists():
+                tqdm.write(f"⚠ Missing target: {target_path}")
+                continue
             
             # Load images
             try:
                 content_image = PILImage.open(content_path).convert("RGB")
                 target_image = PILImage.open(target_path).convert("RGB")
             except Exception as e:
-                tqdm.write(f"⚠ Error loading pair ({char_idx}, {style_idx}): {e}")
+                tqdm.write(f"⚠ Error loading pair ({char}, {style}): {e}")
                 continue
             
-            # Extract metadata from filenames
-            target_filename = Path(target_path).stem
-            parts = target_filename.split("+")
-            
-            style_name = parts[0] if parts else f"style{style_idx}"
-            character = f"char{char_idx}"
-            
             row = {
-                "character": character,
-                "char_index": char_idx,
-                "style": style_name,
-                "style_index": style_idx,
+                "character": char,
+                "style": style,
+                "font": font,
                 "content_image": content_image,
                 "target_image": target_image,
-                "font": "unknown",  # Not in filesystem, use default
+                "content_hash": compute_file_hash(char, "", font),
+                "target_hash": compute_file_hash(char, style, font),
             }
             
             dataset_rows.append(row)
@@ -172,12 +183,12 @@ class FontDiffusionDatasetBuilder:
             Dataset.from_dict(
                 {
                     "character": [r["character"] for r in dataset_rows],
-                    "char_index": [r["char_index"] for r in dataset_rows],
                     "style": [r["style"] for r in dataset_rows],
-                    "style_index": [r["style_index"] for r in dataset_rows],
+                    "font": [r["font"] for r in dataset_rows],
                     "content_image": [r["content_image"] for r in dataset_rows],
                     "target_image": [r["target_image"] for r in dataset_rows],
-                    "font": [r["font"] for r in dataset_rows],
+                    "content_hash": [r["content_hash"] for r in dataset_rows],
+                    "target_hash": [r["target_hash"] for r in dataset_rows],
                 }
             )
             .cast_column("content_image", HFImage())

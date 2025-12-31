@@ -1,17 +1,47 @@
 """
 Export Hugging Face dataset back to original FontDiffusion directory structure
-✅ SIMPLIFIED: Only uses results_checkpoint.json (single source of truth)
+✅ Uses hash-based file naming with unicode characters
+✅ Preserves results_checkpoint.json as single source of truth
 """
 
 from pathlib import Path
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
+import hashlib
 
 from datasets import Dataset, load_dataset
 from PIL import Image as PILImage
 from tqdm import tqdm
 import json
 import os
+
+
+def compute_file_hash(char: str, style: str, font: str = "") -> str:
+    """Compute deterministic hash for a (character, style, font) combination"""
+    content = f"{char}_{style}_{font}"
+    return hashlib.sha256(content.encode('utf-8')).hexdigest()[:8]
+
+
+def get_content_filename(char: str, font: str = "") -> str:
+    """Get content image filename for character"""
+    codepoint = f"U+{ord(char):04X}"
+    hash_val = compute_file_hash(char, "", font)
+    safe_char = char if char.isprintable() and char not in '<>:"/\\|?*' else ""
+    if safe_char:
+        return f"{codepoint}_{safe_char}_{hash_val}.png"
+    else:
+        return f"{codepoint}_{hash_val}.png"
+
+
+def get_target_filename(char: str, style: str, font: str = "") -> str:
+    """Get target image filename"""
+    codepoint = f"U+{ord(char):04X}"
+    hash_val = compute_file_hash(char, style, font)
+    safe_char = char if char.isprintable() and char not in '<>:"/\\|?*' else ""
+    if safe_char:
+        return f"{codepoint}_{safe_char}_{style}_{hash_val}.png"
+    else:
+        return f"{codepoint}_{style}_{hash_val}.png"
 
 
 @dataclass
@@ -86,88 +116,82 @@ class DatasetExporter:
         content_dir.mkdir(parents=True, exist_ok=True)
         target_base_dir.mkdir(parents=True, exist_ok=True)
 
-        # Try to load original metadata from Hub
-        metadata = self._try_load_checkpoint_from_hub()
-
-        # Export images from dataset
-        return self._export_images_and_build_metadata(dataset, metadata)
-
-    def _try_load_checkpoint_from_hub(self) -> Optional[Dict[str, Any]]:
-        """Try to load results_checkpoint.json from Hub"""
-        if not self.config.repo_id:
-            return None
-
-        try:
-            from huggingface_hub import hf_hub_download
-
-            print("\n📥 Attempting to load results_checkpoint.json from Hub...")
-
-            checkpoint_path = hf_hub_download(
-                repo_id=self.config.repo_id,
-                filename="results_checkpoint.json",
-                repo_type="dataset",
-                token=self.config.token,
-            )
-
-            with open(checkpoint_path, "r", encoding="utf-8") as f:
-                metadata = json.load(f)
-
-            num_gens = len(metadata.get("generations", []))
-            print(f"  ✓ Loaded results_checkpoint.json ({num_gens} generations)")
-            return metadata
-
-        except Exception as e:
-            print(f"  ⚠ Could not load results_checkpoint.json: {type(e).__name__}")
-            return None
+        # Export images and build metadata
+        return self._export_images_and_build_metadata(dataset)
 
     def _export_images_and_build_metadata(
-        self, dataset: Dataset, original_metadata: Optional[Dict[str, Any]]
+        self, dataset: Dataset
     ) -> Dict[str, Any]:
-        """Export images and build/preserve metadata"""
+        """Export images and build metadata"""
 
         print("\nExporting images from dataset...")
 
         content_dir = self.output_dir / "ContentImage"
         target_base_dir = self.output_dir / "TargetImage"
 
-        # Export content images
-        print("\n📝 Exporting content images...")
-        for idx, sample in enumerate(tqdm(dataset, desc="Content images", ncols=80)):
-            if "content_image" in sample:
-                char_idx = sample.get("char_index", idx)
-                content_img = sample["content_image"]
+        # Track exported content images to avoid duplicates
+        exported_content = set()
+        
+        # Build generations list
+        generations = []
 
-                if isinstance(content_img, PILImage.Image):
-                    content_path = content_dir / f"char{char_idx}.png"
-                    content_img.save(str(content_path))
+        # Export images
+        print("\n🎨 Exporting images...")
+        for sample in tqdm(dataset, desc="Exporting", ncols=80):
+            char = sample.get('character')
+            style = sample.get('style')
+            font = sample.get('font', 'unknown')
+            
+            # Export content image (once per character)
+            content_filename = get_content_filename(char, font)
+            
+            if content_filename not in exported_content:
+                if "content_image" in sample:
+                    content_img = sample["content_image"]
+                    if isinstance(content_img, PILImage.Image):
+                        content_path = content_dir / content_filename
+                        content_img.save(str(content_path))
+                        exported_content.add(content_filename)
 
-        print(f"✓ Exported content images")
-
-        # Export target images
-        print("\n🎨 Exporting target images...")
-        for sample in tqdm(dataset, desc="Target images", ncols=80):
+            # Export target image
             if "target_image" in sample:
-                char_idx = sample.get("char_index", 0)
-                style = sample.get("style", "style0")
-
                 style_dir = target_base_dir / style
                 style_dir.mkdir(parents=True, exist_ok=True)
 
+                target_filename = get_target_filename(char, style, font)
                 target_img = sample["target_image"]
 
                 if isinstance(target_img, PILImage.Image):
-                    target_path = style_dir / f"{style}+char{char_idx}.png"
+                    target_path = style_dir / target_filename
                     target_img.save(str(target_path))
 
-        print(f"✓ Exported target images")
+            # Build generation record
+            generations.append({
+                'character': char,
+                'style': style,
+                'font': font,
+                'content_image_path': f"ContentImage/{get_content_filename(char, font)}",
+                'target_image_path': f"TargetImage/{style}/{get_target_filename(char, style, font)}",
+                'content_hash': compute_file_hash(char, "", font),
+                'target_hash': compute_file_hash(char, style, font),
+            })
 
-        # Use or reconstruct metadata
-        if original_metadata:
-            print("\n✅ Using original results_checkpoint.json")
-            metadata = self._update_metadata_paths(original_metadata)
-        else:
-            print("\n⚠ Reconstructing metadata from dataset")
-            metadata = self._build_metadata_from_dataset(dataset)
+        print(f"✓ Exported {len(exported_content)} content images")
+        print(f"✓ Exported {len(generations)} target images")
+
+        # Build metadata
+        characters_set = set(g['character'] for g in generations)
+        styles_set = set(g['style'] for g in generations)
+        fonts_set = set(g['font'] for g in generations if g['font'] != 'unknown')
+
+        metadata = {
+            'generations': generations,
+            'characters': sorted(list(characters_set)),
+            'styles': sorted(list(styles_set)),
+            'fonts': sorted(list(fonts_set)) if fonts_set else ['unknown'],
+            'total_chars': len(characters_set),
+            'total_styles': len(styles_set),
+        }
 
         # Save results_checkpoint.json
         print("\n💾 Saving results_checkpoint.json...")
@@ -175,83 +199,10 @@ class DatasetExporter:
         with open(checkpoint_path, "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2, ensure_ascii=False)
 
-        num_gens = len(metadata.get("generations", []))
-        print(f"  ✓ Saved results_checkpoint.json ({num_gens} generations)")
-
+        print(f"  ✓ Saved results_checkpoint.json ({len(generations)} generations)")
         self._log_metadata_stats(metadata)
 
         return metadata
-
-    def _update_metadata_paths(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
-        """Update all paths in metadata to match export directory"""
-        for generation in metadata.get("generations", []):
-            char_idx = generation.get("char_index", 0)
-            style = generation.get("style", "style0")
-
-            generation["output_path"] = str(
-                self.output_dir / "TargetImage" / style / f"{style}+char{char_idx}.png"
-            )
-            generation["content_image_path"] = str(
-                self.output_dir / "ContentImage" / f"char{char_idx}.png"
-            )
-            generation["target_image_path"] = str(
-                self.output_dir / "TargetImage" / style / f"{style}+char{char_idx}.png"
-            )
-
-        return metadata
-
-    def _build_metadata_from_dataset(self, dataset: Dataset) -> Dict[str, Any]:
-        """Build metadata from dataset samples"""
-        generations = []
-        characters_set = set()
-        styles_set = set()
-        fonts_set = set()
-
-        for sample in dataset:
-            char = sample.get("character", f"char{sample.get('char_index', 0)}")
-            char_idx = sample.get("char_index", 0)
-            style = sample.get("style", "style0")
-            style_idx = sample.get("style_index", 0)
-            font = sample.get("font", "unknown")
-
-            generations.append(
-                {
-                    "character": char,
-                    "char_index": char_idx,
-                    "style": style,
-                    "style_index": style_idx,
-                    "font": font,
-                    "output_path": str(
-                        self.output_dir
-                        / "TargetImage"
-                        / style
-                        / f"{style}+char{char_idx}.png"
-                    ),
-                    "content_image_path": str(
-                        self.output_dir / "ContentImage" / f"char{char_idx}.png"
-                    ),
-                    "target_image_path": str(
-                        self.output_dir
-                        / "TargetImage"
-                        / style
-                        / f"{style}+char{char_idx}.png"
-                    ),
-                }
-            )
-
-            characters_set.add(char)
-            styles_set.add(style)
-            fonts_set.add(font)
-
-        return {
-            "generations": generations,
-            "metrics": {"lpips": [], "ssim": [], "inference_times": []},
-            "characters": sorted(list(characters_set)),
-            "styles": sorted(list(styles_set)),
-            "fonts": sorted(list(fonts_set)),
-            "total_chars": len(characters_set),
-            "total_styles": len(styles_set),
-        }
 
     def _log_metadata_stats(self, metadata: Dict[str, Any]) -> None:
         """Log metadata statistics"""
