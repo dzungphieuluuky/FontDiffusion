@@ -30,7 +30,8 @@ if __name__ == "__main__":
     with gr.Blocks() as demo:
         with gr.Row():
             with gr.Column(scale=1):
-                gr.HTML("""
+                gr.HTML(
+                    """
                     <div style="text-align: center; max-width: 1200px; margin: 20px auto;">
                     <h1 style="font-weight: 900; font-size: 3rem; margin: 0rem">
                         FontDiffuser
@@ -58,7 +59,8 @@ if __name__ == "__main__":
                     2. FontDiffuser excels in generating complex character and handling large style variation. And it achieves state-of-the-art performance.
                     </h2>
                     </div>
-                    """)
+                    """
+                )
                 gr.Image("figures/result_vis.png")
                 gr.Image("figures/demo_tips.png")
             with gr.Column(scale=1):

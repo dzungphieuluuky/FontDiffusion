@@ -19,7 +19,7 @@ import os
 def compute_file_hash(char: str, style: str, font: str = "") -> str:
     """Compute deterministic hash for a (character, style, font) combination"""
     content = f"{char}_{style}_{font}"
-    return hashlib.sha256(content.encode('utf-8')).hexdigest()[:8]
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()[:8]
 
 
 def get_content_filename(char: str, font: str = "") -> str:
@@ -119,9 +119,7 @@ class DatasetExporter:
         # Export images and build metadata
         return self._export_images_and_build_metadata(dataset)
 
-    def _export_images_and_build_metadata(
-        self, dataset: Dataset
-    ) -> Dict[str, Any]:
+    def _export_images_and_build_metadata(self, dataset: Dataset) -> Dict[str, Any]:
         """Export images and build metadata"""
 
         print("\nExporting images from dataset...")
@@ -131,20 +129,20 @@ class DatasetExporter:
 
         # Track exported content images to avoid duplicates
         exported_content = set()
-        
+
         # Build generations list
         generations = []
 
         # Export images
         print("\n🎨 Exporting images...")
         for sample in tqdm(dataset, desc="Exporting", ncols=80):
-            char = sample.get('character')
-            style = sample.get('style')
-            font = sample.get('font', 'unknown')
-            
+            char = sample.get("character")
+            style = sample.get("style")
+            font = sample.get("font", "unknown")
+
             # Export content image (once per character)
             content_filename = get_content_filename(char, font)
-            
+
             if content_filename not in exported_content:
                 if "content_image" in sample:
                     content_img = sample["content_image"]
@@ -166,31 +164,33 @@ class DatasetExporter:
                     target_img.save(str(target_path))
 
             # Build generation record
-            generations.append({
-                'character': char,
-                'style': style,
-                'font': font,
-                'content_image_path': f"ContentImage/{get_content_filename(char, font)}",
-                'target_image_path': f"TargetImage/{style}/{get_target_filename(char, style, font)}",
-                'content_hash': compute_file_hash(char, "", font),
-                'target_hash': compute_file_hash(char, style, font),
-            })
+            generations.append(
+                {
+                    "character": char,
+                    "style": style,
+                    "font": font,
+                    "content_image_path": f"ContentImage/{get_content_filename(char, font)}",
+                    "target_image_path": f"TargetImage/{style}/{get_target_filename(char, style, font)}",
+                    "content_hash": compute_file_hash(char, "", font),
+                    "target_hash": compute_file_hash(char, style, font),
+                }
+            )
 
         print(f"✓ Exported {len(exported_content)} content images")
         print(f"✓ Exported {len(generations)} target images")
 
         # Build metadata
-        characters_set = set(g['character'] for g in generations)
-        styles_set = set(g['style'] for g in generations)
-        fonts_set = set(g['font'] for g in generations if g['font'] != 'unknown')
+        characters_set = set(g["character"] for g in generations)
+        styles_set = set(g["style"] for g in generations)
+        fonts_set = set(g["font"] for g in generations if g["font"] != "unknown")
 
         metadata = {
-            'generations': generations,
-            'characters': sorted(list(characters_set)),
-            'styles': sorted(list(styles_set)),
-            'fonts': sorted(list(fonts_set)) if fonts_set else ['unknown'],
-            'total_chars': len(characters_set),
-            'total_styles': len(styles_set),
+            "generations": generations,
+            "characters": sorted(list(characters_set)),
+            "styles": sorted(list(styles_set)),
+            "fonts": sorted(list(fonts_set)) if fonts_set else ["unknown"],
+            "total_chars": len(characters_set),
+            "total_styles": len(styles_set),
         }
 
         # Save results_checkpoint.json

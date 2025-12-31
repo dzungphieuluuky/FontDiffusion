@@ -21,17 +21,17 @@ from tqdm import tqdm
 def compute_file_hash(char: str, style: str, font: str = "") -> str:
     """
     Compute deterministic hash for a (character, style, font) combination
-    
+
     Args:
         char: Unicode character
         style: Style name
         font: Font name (optional)
-    
+
     Returns:
         8-character hash string
     """
     content = f"{char}_{style}_{font}"
-    return hashlib.sha256(content.encode('utf-8')).hexdigest()[:8]
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()[:8]
 
 
 def get_content_filename(char: str, font: str = "") -> str:
@@ -96,7 +96,9 @@ class FontDiffusionDatasetBuilder:
         if not self.target_dir.exists():
             raise ValueError(f"TargetImage directory not found: {self.target_dir}")
         if not self.results_checkpoint.exists():
-            raise ValueError(f"results_checkpoint.json not found: {self.results_checkpoint}")
+            raise ValueError(
+                f"results_checkpoint.json not found: {self.results_checkpoint}"
+            )
 
         print(f"✓ Validated directory structure")
         print(f"  Content images: {self.content_dir}")
@@ -105,14 +107,14 @@ class FontDiffusionDatasetBuilder:
 
     def _load_results_checkpoint(self) -> Dict[str, Any]:
         """Load results_checkpoint.json (single source of truth)"""
-        with open(self.results_checkpoint, 'r', encoding='utf-8') as f:
+        with open(self.results_checkpoint, "r", encoding="utf-8") as f:
             results = json.load(f)
-        
+
         print(f"\n✓ Loaded results_checkpoint.json")
         print(f"  Generations: {len(results.get('generations', []))}")
         print(f"  Characters: {len(results.get('characters', []))}")
         print(f"  Styles: {len(results.get('styles', []))}")
-        
+
         return results
 
     def build_dataset(self) -> Dataset:
@@ -126,7 +128,7 @@ class FontDiffusionDatasetBuilder:
 
         # Load checkpoint
         results = self._load_results_checkpoint()
-        generations = results.get('generations', [])
+        generations = results.get("generations", [])
 
         if not generations:
             raise ValueError("No generations found in results_checkpoint.json")
@@ -136,23 +138,23 @@ class FontDiffusionDatasetBuilder:
         print(f"\n🖼️  Loading {len(generations)} image pairs...")
 
         for gen in tqdm(generations, desc="Loading images", ncols=100, unit="pair"):
-            char = gen.get('character')
-            style = gen.get('style')
-            font = gen.get('font', 'unknown')
-            
+            char = gen.get("character")
+            style = gen.get("style")
+            font = gen.get("font", "unknown")
+
             # Get file paths from checkpoint
-            content_path = self.data_dir / gen.get('content_image_path', '')
-            target_path = self.data_dir / gen.get('target_image_path', '')
-            
+            content_path = self.data_dir / gen.get("content_image_path", "")
+            target_path = self.data_dir / gen.get("target_image_path", "")
+
             # Verify files exist
             if not content_path.exists():
                 tqdm.write(f"⚠ Missing content: {content_path}")
                 continue
-            
+
             if not target_path.exists():
                 tqdm.write(f"⚠ Missing target: {target_path}")
                 continue
-            
+
             # Load images
             try:
                 content_image = PILImage.open(content_path).convert("RGB")
@@ -160,7 +162,7 @@ class FontDiffusionDatasetBuilder:
             except Exception as e:
                 tqdm.write(f"⚠ Error loading pair ({char}, {style}): {e}")
                 continue
-            
+
             row = {
                 "character": char,
                 "style": style,
@@ -170,7 +172,7 @@ class FontDiffusionDatasetBuilder:
                 "content_hash": compute_file_hash(char, "", font),
                 "target_hash": compute_file_hash(char, style, font),
             }
-            
+
             dataset_rows.append(row)
 
         print(f"✓ Loaded {len(dataset_rows)} samples")
@@ -267,22 +269,30 @@ if __name__ == "__main__":
     import argparse
     import sys
 
-    parser = argparse.ArgumentParser(description="Create HF dataset from FontDiffusion images")
+    parser = argparse.ArgumentParser(
+        description="Create HF dataset from FontDiffusion images"
+    )
 
-    parser.add_argument("--data_dir", type=str, required=True,
-                       help="Path to data directory (with ContentImage/ and TargetImage/)")
-    parser.add_argument("--repo_id", type=str, required=True,
-                       help="HuggingFace repo ID")
-    parser.add_argument("--split", type=str, default="train",
-                       help="Dataset split name")
-    parser.add_argument("--private", action="store_true", default=False,
-                       help="Make repo private")
-    parser.add_argument("--no-push", action="store_true", default=False,
-                       help="Don't push to Hub")
-    parser.add_argument("--local-save", type=str, default=None,
-                       help="Also save locally to this path")
-    parser.add_argument("--token", type=str, default=None,
-                       help="HF token")
+    parser.add_argument(
+        "--data_dir",
+        type=str,
+        required=True,
+        help="Path to data directory (with ContentImage/ and TargetImage/)",
+    )
+    parser.add_argument(
+        "--repo_id", type=str, required=True, help="HuggingFace repo ID"
+    )
+    parser.add_argument("--split", type=str, default="train", help="Dataset split name")
+    parser.add_argument(
+        "--private", action="store_true", default=False, help="Make repo private"
+    )
+    parser.add_argument(
+        "--no-push", action="store_true", default=False, help="Don't push to Hub"
+    )
+    parser.add_argument(
+        "--local-save", type=str, default=None, help="Also save locally to this path"
+    )
+    parser.add_argument("--token", type=str, default=None, help="HF token")
 
     args = parser.parse_args()
 
@@ -309,5 +319,6 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n❌ Error: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)

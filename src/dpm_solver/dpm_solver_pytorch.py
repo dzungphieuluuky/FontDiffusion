@@ -646,15 +646,21 @@ class DPM_Solver:
             if steps % 3 == 0:
                 orders = [
                     3,
-                ] * (K - 2) + [2, 1]
+                ] * (
+                    K - 2
+                ) + [2, 1]
             elif steps % 3 == 1:
                 orders = [
                     3,
-                ] * (K - 1) + [1]
+                ] * (
+                    K - 1
+                ) + [1]
             else:
                 orders = [
                     3,
-                ] * (K - 1) + [2]
+                ] * (
+                    K - 1
+                ) + [2]
         elif order == 2:
             if steps % 2 == 0:
                 K = steps // 2
@@ -665,7 +671,9 @@ class DPM_Solver:
                 K = steps // 2 + 1
                 orders = [
                     2,
-                ] * (K - 1) + [1]
+                ] * (
+                    K - 1
+                ) + [1]
         elif order == 1:
             K = 1
             orders = [
@@ -1340,9 +1348,9 @@ class DPM_Solver:
         """
         t_0 = 1.0 / self.noise_schedule.total_N if t_start is None else t_start
         t_T = self.noise_schedule.T if t_end is None else t_end
-        assert t_0 > 0 and t_T > 0, (
-            "Time range needs to be greater than 0. For discrete-time DPMs, it needs to be in [1 / N, 1], where N is the length of betas array"
-        )
+        assert (
+            t_0 > 0 and t_T > 0
+        ), "Time range needs to be greater than 0. For discrete-time DPMs, it needs to be in [1 / N, 1], where N is the length of betas array"
         return self.sample(
             x,
             steps=steps,
@@ -1485,17 +1493,21 @@ class DPM_Solver:
         """
         t_0 = 1.0 / self.noise_schedule.total_N if t_end is None else t_end
         t_T = self.noise_schedule.T if t_start is None else t_start
-        assert t_0 > 0 and t_T > 0, (
-            "Time range needs to be greater than 0. For discrete-time DPMs, it needs to be in [1 / N, 1], where N is the length of betas array"
-        )
+        assert (
+            t_0 > 0 and t_T > 0
+        ), "Time range needs to be greater than 0. For discrete-time DPMs, it needs to be in [1 / N, 1], where N is the length of betas array"
         if return_intermediate:
-            assert method in ["multistep", "singlestep", "singlestep_fixed"], (
-                "Cannot use adaptive solver when saving intermediate values"
-            )
+            assert method in [
+                "multistep",
+                "singlestep",
+                "singlestep_fixed",
+            ], "Cannot use adaptive solver when saving intermediate values"
         if self.correcting_xt_fn is not None:
-            assert method in ["multistep", "singlestep", "singlestep_fixed"], (
-                "Cannot use adaptive solver when correcting_xt_fn is not None"
-            )
+            assert method in [
+                "multistep",
+                "singlestep",
+                "singlestep_fixed",
+            ], "Cannot use adaptive solver when correcting_xt_fn is not None"
         device = x.device
         intermediates = []
         with torch.no_grad():

@@ -37,7 +37,7 @@ from utils import (
 def compute_file_hash(char: str, style: str, font: str = "") -> str:
     """Compute deterministic hash for a (character, style, font) combination"""
     content = f"{char}_{style}_{font}"
-    return hashlib.sha256(content.encode('utf-8')).hexdigest()[:8]
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()[:8]
 
 
 def get_content_filename(char: str, font: str = "") -> str:
@@ -401,25 +401,6 @@ def load_fontdiffuser_pipeline(args: Namespace) -> FontDiffuserDPMPipeline:
         guidance_scale=getattr(args, "guidance_scale", 7.5),
     )
     print("✓ Loaded DPM-Solver pipeline successfully")
-
-    # Apply torch.compile if requested
-    if getattr(args, "compile", False):
-        print("\n" + "=" * 60)
-        print("Compiling pipeline with torch.compile...")
-        print("=" * 60)
-        try:
-            pipe = torch.compile(
-                pipe,
-                mode="reduce-overhead",
-                dynamic=False,
-                fullgraph=True,
-            )
-            print("✓ Pipeline compiled successfully!")
-            print("=" * 60)
-        except Exception as e:
-            print(f"⚠️ Warning: torch.compile failed: {e}")
-            print("  Continuing without compilation...")
-
     return pipe
 
 

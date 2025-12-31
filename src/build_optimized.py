@@ -189,9 +189,9 @@ def build_ddpm_scheduler_fast(args):
         clip_sample=True,
         prediction_type="epsilon",
         # These change inference behavior only
-        timestep_spacing="leading"
-        if getattr(args, "fast_inference", False)
-        else "linspace",
+        timestep_spacing=(
+            "leading" if getattr(args, "fast_inference", False) else "linspace"
+        ),
         steps_offset=0,
         thresholding=False,  # Disable for speed
         dynamic_thresholding_ratio=0.995,

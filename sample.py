@@ -62,9 +62,9 @@ def image_process(args, content_image=None, style_image=None):
     if not args.demo:
         # Read content image and style image
         if args.character_input:
-            assert args.content_character is not None, (
-                "The content_character should not be None."
-            )
+            assert (
+                args.content_character is not None
+            ), "The content_character should not be None."
             if not is_char_in_font(
                 font_path=args.ttf_path, char=args.content_character
             ):
@@ -79,9 +79,9 @@ def image_process(args, content_image=None, style_image=None):
     else:
         assert style_image is not None, "The style image should not be None."
         if args.character_input:
-            assert args.content_character is not None, (
-                "The content_character should not be None."
-            )
+            assert (
+                args.content_character is not None
+            ), "The content_character should not be None."
             if not is_char_in_font(
                 font_path=args.ttf_path, char=args.content_character
             ):

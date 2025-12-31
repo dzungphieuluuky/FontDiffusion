@@ -62,20 +62,21 @@ logger = get_logger(__name__)
 # ✅ NEW: Dynamic path discovery (ignores checkpoint paths)
 # ============================================================================
 
+
 def discover_content_images(content_dir: str) -> Dict[int, str]:
     """
     Discover content images from actual filesystem
     ✅ Does NOT rely on checkpoint paths
-    
+
     Returns:
         Dict mapping char_index -> image_path
     """
     char_images = {}
     content_path = Path(content_dir)
-    
+
     if not content_path.exists():
         raise FileNotFoundError(f"ContentImage directory not found: {content_dir}")
-    
+
     for img_file in sorted(content_path.glob("char*.png")):
         try:
             # Extract char index from filename (e.g., "char327.png" -> 327)
@@ -83,10 +84,10 @@ def discover_content_images(content_dir: str) -> Dict[int, str]:
             char_images[char_idx] = str(img_file)
         except (ValueError, IndexError):
             continue
-    
+
     if not char_images:
         raise ValueError(f"No content images found in {content_dir}")
-    
+
     print(f"  ✓ Found {len(char_images)} content images")
     return char_images
 
@@ -95,26 +96,26 @@ def discover_target_images(target_dir: str) -> Dict[Tuple[int, int], str]:
     """
     Discover target images from actual filesystem
     ✅ Does NOT rely on checkpoint paths
-    
+
     Returns:
         Dict mapping (char_index, style_index) -> image_path
     """
     target_images = {}
     target_path = Path(target_dir)
-    
+
     if not target_path.exists():
         raise FileNotFoundError(f"TargetImage directory not found: {target_dir}")
-    
+
     # Iterate through style directories
     for style_dir in sorted(target_path.glob("style*")):
         if not style_dir.is_dir():
             continue
-        
+
         try:
             style_idx = int(style_dir.name.replace("style", ""))
         except ValueError:
             continue
-        
+
         # Find target images in this style directory
         for img_file in sorted(style_dir.glob("style*+char*.png")):
             try:
@@ -123,15 +124,15 @@ def discover_target_images(target_dir: str) -> Dict[Tuple[int, int], str]:
                 parts = filename.split("+")
                 if len(parts) != 2:
                     continue
-                
+
                 char_idx = int(parts[1].replace("char", ""))
                 target_images[(char_idx, style_idx)] = str(img_file)
             except (ValueError, IndexError):
                 continue
-    
+
     if not target_images:
         raise ValueError(f"No target images found in {target_dir}")
-    
+
     print(f"  ✓ Found {len(target_images)} target images")
     return target_images
 
@@ -144,31 +145,35 @@ def validate_image_paths(
     ✅ Validate that all content images have corresponding targets
     """
     print(f"\n📋 Validating image paths...")
-    
+
     # Find which characters have content images
     content_chars = set(content_images.keys())
-    
+
     # Find which (char, style) pairs exist
     existing_pairs = set(target_images.keys())
-    
+
     # Extract unique styles and characters from existing pairs
     existing_styles = set(style_idx for char_idx, style_idx in existing_pairs)
     target_chars = set(char_idx for char_idx, style_idx in existing_pairs)
-    
+
     print(f"  Content images: {len(content_chars)} characters")
     print(f"  Target images: {len(target_images)} (char, style) pairs")
     print(f"  Unique styles: {len(existing_styles)}")
     print(f"  Unique characters in targets: {len(target_chars)}")
-    
+
     # Find mismatches
     missing_content = target_chars - content_chars
     unused_content = content_chars - target_chars
-    
+
     if missing_content:
-        print(f"  ⚠️  {len(missing_content)} target chars missing content images: {missing_content}")
-    
+        print(
+            f"  ⚠️  {len(missing_content)} target chars missing content images: {missing_content}"
+        )
+
     if unused_content:
-        print(f"  ⚠️  {len(unused_content)} content images have no targets: {unused_content}")
+        print(
+            f"  ⚠️  {len(unused_content)} content images have no targets: {unused_content}"
+        )
 
 
 def get_args():
@@ -406,7 +411,7 @@ def main():
     # Add missing arguments with defaults
     if not hasattr(args, "val_interval"):
         args.val_interval = 100  # Validate every 100 steps
-    
+
     # ===== Validation: Check checkpoint interval vs max_train_steps =====
     if args.ckpt_interval > args.max_train_steps:
         raise ValueError(
@@ -456,14 +461,14 @@ def main():
     # ============================================================================
     print(f"\n📂 Discovering images from filesystem...")
     print("=" * 60)
-    
+
     content_dir = os.path.join(args.data_root, "train", "ContentImage")
     target_dir = os.path.join(args.data_root, "train", "TargetImage")
-    
+
     content_images = discover_content_images(content_dir)
     target_images = discover_target_images(target_dir)
     validate_image_paths(content_images, target_images)
-    
+
     print("=" * 60)
 
     # Load model and noise_scheduler
@@ -861,9 +866,11 @@ def main():
                         "train/perceptual_loss": epoch_percep_loss / epoch_steps,
                         "train/offset_loss": epoch_offset_loss / epoch_steps,
                         "train/learning_rate": lr_scheduler.get_last_lr()[0],
-                        "train/gradient_norm": grad_norm.item()
-                        if isinstance(grad_norm, torch.Tensor)
-                        else grad_norm,
+                        "train/gradient_norm": (
+                            grad_norm.item()
+                            if isinstance(grad_norm, torch.Tensor)
+                            else grad_norm
+                        ),
                         "epoch": epoch,
                     }
 
