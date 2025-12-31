@@ -229,25 +229,51 @@ class GenerationTracker:
             with open(checkpoint_path, "r", encoding="utf-8") as f:
                 results = json.load(f)
 
-            self.generations = results.get("generations", [])
+            raw_generations = results.get("generations", [])
+            
+            # ✅ Track duplicates
+            seen_hashes: Set[str] = set()
+            unique_generations: List[Dict[str, Any]] = []
+            duplicate_count: int = 0
 
-            # Build hash set for fast lookup
-            for gen in self.generations:
+            # Build hash set for fast lookup and deduplicate
+            for gen in raw_generations:
                 target_hash = gen.get("target_hash")
-                if target_hash:
-                    self.generated_hashes.add(target_hash)
-                else:
+                
+                if not target_hash:
                     # Compute hash if not in checkpoint
                     char = gen.get("character", "")
                     style = gen.get("style", "")
                     font = gen.get("font", "")
+                    
+                    # Skip invalid entries
+                    if not char or not style:
+                        continue
+                        
                     target_hash = compute_file_hash(char, style, font)
-                    self.generated_hashes.add(target_hash)
+                
+                # ✅ Check for duplicates
+                if target_hash in seen_hashes:
+                    duplicate_count += 1
+                    continue  # Skip duplicate
+                
+                # Add to collections
+                seen_hashes.add(target_hash)
+                self.generated_hashes.add(target_hash)
+                unique_generations.append(gen)
+            
+            # ✅ Store only unique generations
+            self.generations = unique_generations
 
-            print(f"✓ Loaded checkpoint: {len(self.generations)} existing generations")
+            print(f"✓ Loaded checkpoint: {len(self.generations)} unique generations")
+            if duplicate_count > 0:
+                print(f"  ⚠️  Removed {duplicate_count} duplicate entries")
+            print(f"  Total raw entries: {len(raw_generations)}")
 
         except Exception as e:
             print(f"⚠ Error loading checkpoint: {e}")
+            import traceback
+            traceback.print_exc()
 
     def is_generated(self, char: str, style: str, font: str = "") -> bool:
         """Check if (char, style, font) combination has been generated"""
@@ -805,7 +831,8 @@ def batch_generate_images(
     print(f"Styles:               {len(style_paths_with_names)}")
     print(f"Characters:           {len(characters)}")
     print(f"Batch size:           {args.batch_size}")
-    print(f"Existing generations: {len(generation_tracker.generations)}")
+    print(f"Existing generations: {len(generation_tracker.generations)} unique pairs")
+    print(f"Existing hashes:      {len(generation_tracker.generated_hashes)}")
     print("=" * 70 + "\n")
 
     # Use first font for all characters
