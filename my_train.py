@@ -254,8 +254,7 @@ def main():
 
     # Add missing arguments with defaults
     if not hasattr(args, 'val_interval'):
-        args.val_interval = 500  # Validate every 500 steps
-
+        args.val_interval = 100  # Validate every 100 steps
     # ===== Validation: Check checkpoint interval vs max_train_steps =====
     if args.ckpt_interval > args.max_train_steps:
         raise ValueError(

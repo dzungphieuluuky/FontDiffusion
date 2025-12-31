@@ -95,4 +95,5 @@ def get_parser():
     
     parser.add_argument("--local_rank", type=int, default=-1, help="For distributed training: local_rank")
     
+    parser.add_argument("--val_interval", type=int, default=100, help="Validation interval in steps.")
     return parser
