@@ -344,7 +344,6 @@ jeepney==0.9.0
 cuda-toolkit==12.9.1
 fqdn==1.5.1
 sklearn-pandas==2.2.0
-zipp==3.23.0
 nvidia-nccl-cu12==2.27.5
 xxhash==3.6.0
 mdit-py-plugins==0.5.0
@@ -722,7 +721,6 @@ lazr.uri==1.0.6
 pyparsing==2.4.7
 PyGObject==3.42.1
 PyJWT==2.3.0
-zipp==1.0.0
 dbus-python==1.2.18
 keyring==23.5.0
 lazr.restfulclient==0.14.4
@@ -739,7 +737,6 @@ packaging==24.1
 backports.tarfile==1.2.0
 platformdirs==4.2.2
 typing_extensions==4.12.2
-zipp==3.19.2
 tomli==2.0.1
 jaraco.text==3.12.1
 inflect==7.3.1
