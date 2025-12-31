@@ -816,7 +816,7 @@ def batch_generate_images(pipe: FontDiffuserDPMPipeline,
     
     # Initialize index manager
     if index_manager is None:
-        existing_results_path = os.path.join(output_dir, 'results.json')
+        existing_results_path = os.path.join(output_dir, 'results_checkpoint.json')
         index_manager = ResultsIndexManager(
             existing_results_path if os.path.exists(existing_results_path) else None
         )
