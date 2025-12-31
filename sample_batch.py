@@ -230,7 +230,7 @@ class GenerationTracker:
                 results = json.load(f)
 
             raw_generations = results.get("generations", [])
-            
+
             # ✅ Track duplicates
             seen_hashes: Set[str] = set()
             unique_generations: List[Dict[str, Any]] = []
@@ -239,29 +239,29 @@ class GenerationTracker:
             # Build hash set for fast lookup and deduplicate
             for gen in raw_generations:
                 target_hash = gen.get("target_hash")
-                
+
                 if not target_hash:
                     # Compute hash if not in checkpoint
                     char = gen.get("character", "")
                     style = gen.get("style", "")
                     font = gen.get("font", "")
-                    
+
                     # Skip invalid entries
                     if not char or not style:
                         continue
-                        
+
                     target_hash = compute_file_hash(char, style, font)
-                
+
                 # ✅ Check for duplicates
                 if target_hash in seen_hashes:
                     duplicate_count += 1
                     continue  # Skip duplicate
-                
+
                 # Add to collections
                 seen_hashes.add(target_hash)
                 self.generated_hashes.add(target_hash)
                 unique_generations.append(gen)
-            
+
             # ✅ Store only unique generations
             self.generations = unique_generations
 
@@ -273,6 +273,7 @@ class GenerationTracker:
         except Exception as e:
             print(f"⚠ Error loading checkpoint: {e}")
             import traceback
+
             traceback.print_exc()
 
     def is_generated(self, char: str, style: str, font: str = "") -> bool:

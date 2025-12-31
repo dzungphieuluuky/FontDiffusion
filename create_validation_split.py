@@ -58,67 +58,67 @@ def detect_font_parameter(content_dir: Path, sample_chars: List[str]) -> str:
     from existing content image filenames.
     """
     print("\n🔍 Auto-detecting font parameter from existing files...")
-    
+
     # ✅ Get fonts from fonts/ directory
     fonts_dir = Path(__file__).parent / "fonts"
     candidate_fonts = ["", "default"]  # Start with empty and default
-    
+
     if fonts_dir.exists() and fonts_dir.is_dir():
         # Add all .ttf and .otf files (without extension)
         for font_file in fonts_dir.glob("*.[to][tf][f]"):  # Matches .ttf and .otf
             font_name = font_file.stem  # Filename without extension
             candidate_fonts.append(font_name)
-        
+
         print(f"  📂 Found {len(candidate_fonts) - 2} fonts in fonts/ directory")
     else:
         print(f"  ⚠️  fonts/ directory not found, using defaults only")
-    
+
     # Try to find a match using sample characters
     for test_char in sample_chars[:5]:  # Test with first 5 chars
         # Get actual filename from disk using only codepoint
         codepoint = f"U+{ord(test_char):04X}"
-        
+
         # Find files matching this character's codepoint (pattern: U+XXXX_*.png)
         pattern = f"{codepoint}_*.png"
         matching_files = list(content_dir.glob(pattern))
-        
+
         if not matching_files:
             continue
-        
+
         # Get the actual hash from the filename
         actual_file = matching_files[0]
         actual_filename = actual_file.stem
         parts = actual_filename.split("_")
-        
+
         if len(parts) >= 2:
             actual_hash = parts[-1]  # Last part is the hash
-            
+
             # Try each candidate font to see which produces this hash
             for candidate_font in candidate_fonts:
                 test_hash = compute_file_hash(test_char, "", candidate_font)
-                
+
                 if test_hash == actual_hash:
                     print(f"  ✓ Detected font parameter: '{candidate_font}'")
                     print(f"    Verified with: {actual_file.name}")
                     return candidate_font
-    
+
     # If no match found, show some example filenames for manual inspection
     print(f"  ⚠️  Could not auto-detect font parameter")
     print(f"  Example files found in {content_dir}:")
-    
+
     example_files = list(content_dir.glob("*.png"))[:5]
     for f in example_files:
         print(f"    {f.name}")
-    
+
     print(f"\n  Available candidate fonts tried:")
     for cf in candidate_fonts[:10]:
         print(f"    '{cf}'")
     if len(candidate_fonts) > 10:
         print(f"    ... and {len(candidate_fonts) - 10} more")
-    
+
     print(f"\n  Please check the hash generation in your sample script.")
     print(f"  Defaulting to empty string ('')")
-    
+
     return ""
 
 
@@ -147,7 +147,7 @@ class ValidationSplitCreator:
 
         # Set random seed
         random.seed(config.random_seed)
-        
+
         # Will be detected from files
         self.detected_font = None
 
@@ -215,7 +215,7 @@ class ValidationSplitCreator:
 
                 try:
                     parts = filename.split("_")
-                    
+
                     if len(parts) < 3:
                         continue
 
@@ -351,7 +351,7 @@ class ValidationSplitCreator:
         # Calculate validation split sizes
         num_val_styles = max(1, int(num_styles * self.config.val_split_ratio))
         num_val_chars = max(1, int(num_chars * self.config.val_split_ratio))
-        
+
         num_train_styles = num_styles - num_val_styles
         num_train_chars = num_chars - num_val_chars
 
@@ -389,8 +389,12 @@ class ValidationSplitCreator:
         for scenario_name, scenario_data in scenarios.items():
             print(f"\n  {scenario_name}:")
             print(f"    Description: {scenario_data['description']}")
-            print(f"    Styles: {len(scenario_data['styles'])} ({scenario_data['styles'][:3]}...)")
-            print(f"    Chars: {len(scenario_data['characters'])} ({scenario_data['characters'][:5]}...)")
+            print(
+                f"    Styles: {len(scenario_data['styles'])} ({scenario_data['styles'][:3]}...)"
+            )
+            print(
+                f"    Chars: {len(scenario_data['characters'])} ({scenario_data['characters'][:5]}...)"
+            )
 
         return scenarios
 
@@ -534,31 +538,37 @@ class ValidationSplitCreator:
 
                 try:
                     parts = filename.split("_")
-                    
+
                     # Extract codepoint (first part)
                     codepoint = parts[0]
-                    
+
                     if not codepoint.startswith("U+"):
                         continue
-                    
+
                     # Decode character from codepoint
                     char_code = int(codepoint.replace("U+", ""), 16)
                     char_part = chr(char_code)
 
                     # Check if content exists
-                    content_filename = get_content_filename(char_part, font=self.detected_font)
+                    content_filename = get_content_filename(
+                        char_part, font=self.detected_font
+                    )
                     content_path = content_dir / content_filename
 
                     if not content_path.exists():
                         missing_pairs += 1
-                        tqdm.write(f"    ❌ Missing content: {content_filename} for {target_file.name}")
-                        
+                        tqdm.write(
+                            f"    ❌ Missing content: {content_filename} for {target_file.name}"
+                        )
+
                 except (IndexError, ValueError) as e:
                     continue
 
         if missing_pairs > 0:
             print(f"  ⚠️  {missing_pairs}/{total_targets} targets missing content!")
-            raise ValueError(f"Validation failed: {missing_pairs} missing content images")
+            raise ValueError(
+                f"Validation failed: {missing_pairs} missing content images"
+            )
         else:
             print(f"  ✓ All {total_targets} targets have matching content")
 
@@ -571,7 +581,7 @@ class ValidationSplitCreator:
     ) -> None:
         """
         ✅ NEW: Copy and filter results_checkpoint.json for this split
-        
+
         Args:
             split_name: Name of the split ("train" or "val")
             split_dir: Directory for this split
@@ -579,40 +589,41 @@ class ValidationSplitCreator:
             allowed_styles: Styles included in this split
         """
         print(f"\n  📋 Filtering results_checkpoint.json for {split_name}...")
-        
+
         # Load original checkpoint
         original_checkpoint_path = self.source_train_dir / "results_checkpoint.json"
-        
+
         if not original_checkpoint_path.exists():
             print(f"    ⚠️  No results_checkpoint.json found in {self.source_train_dir}")
             print(f"    Skipping checkpoint creation for {split_name}")
             return
-        
+
         try:
             with open(original_checkpoint_path, "r", encoding="utf-8") as f:
                 original_data = json.load(f)
         except Exception as e:
             print(f"    ⚠️  Error loading checkpoint: {e}")
             return
-        
+
         # Filter generations based on allowed chars and styles
         original_generations = original_data.get("generations", [])
         filtered_generations = []
-        
+
         for gen in tqdm(
             original_generations,
             desc="    Filtering",
             ncols=80,
             unit="gen",
             leave=False,
+            bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
         ):
             char = gen.get("character")
             style = gen.get("style")
-            
+
             # Include generation if both char and style are in this split
             if char in allowed_chars and style in allowed_styles:
                 filtered_generations.append(gen)
-        
+
         # Create new checkpoint data
         split_checkpoint = {
             "split": split_name,
@@ -624,14 +635,16 @@ class ValidationSplitCreator:
             "original_source": str(self.source_train_dir),
             "filtered_from": str(original_checkpoint_path),
         }
-        
+
         # Save filtered checkpoint to split directory
         split_checkpoint_path = split_dir / "results_checkpoint.json"
-        
+
         with open(split_checkpoint_path, "w", encoding="utf-8") as f:
             json.dump(split_checkpoint, f, indent=2, ensure_ascii=False)
-        
-        print(f"    ✓ Saved checkpoint: {len(filtered_generations)}/{len(original_generations)} generations")
+
+        print(
+            f"    ✓ Saved checkpoint: {len(filtered_generations)}/{len(original_generations)} generations"
+        )
         print(f"    📄 {split_checkpoint_path}")
 
     def create_splits(self) -> None:
@@ -651,8 +664,10 @@ class ValidationSplitCreator:
         train_content, train_target, train_skipped = self.copy_images_for_split(
             "train", self.train_dir, scenarios, valid_pairs
         )
-        print(f"  ✓ Copied {train_content} content + {train_target} target (skipped {train_skipped})")
-        
+        print(
+            f"  ✓ Copied {train_content} content + {train_target} target (skipped {train_skipped})"
+        )
+
         # ✅ Copy and filter checkpoint for train split
         self._copy_and_filter_checkpoint(
             "train",
@@ -666,8 +681,10 @@ class ValidationSplitCreator:
         val_content, val_target, val_skipped = self.copy_images_for_split(
             "val", self.val_dir, scenarios, valid_pairs
         )
-        print(f"  ✓ Copied {val_content} content + {val_target} target (skipped {val_skipped})")
-        
+        print(
+            f"  ✓ Copied {val_content} content + {val_target} target (skipped {val_skipped})"
+        )
+
         # ✅ Copy and filter checkpoint for val split
         self._copy_and_filter_checkpoint(
             "val",
@@ -756,8 +773,10 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n❌ Error: {e}")
         import traceback
+
         traceback.print_exc()
         import sys
+
         sys.exit(1)
 
 """Example

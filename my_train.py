@@ -1,13 +1,15 @@
 """
 FontDiffuser Training Script
-✅ FIXED: Dynamically loads images from actual directory structure
-          instead of relying on results_checkpoint.json paths
+✅ Uses hash-based file naming with unicode characters
+✅ Discovers images from filesystem (not from checkpoint paths)
+✅ Compatible with results_checkpoint.json structure
 """
 
 import os
 import math
 import time
 import logging
+import hashlib
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 from tqdm.auto import tqdm
@@ -59,17 +61,97 @@ logger = get_logger(__name__)
 
 
 # ============================================================================
-# ✅ NEW: Dynamic path discovery (ignores checkpoint paths)
+# Hash-based filename utilities
 # ============================================================================
 
 
-def discover_content_images(content_dir: str) -> Dict[int, str]:
+def compute_file_hash(char: str, style: str, font: str = "") -> str:
+    """Compute deterministic hash for a (character, style, font) combination"""
+    content = f"{char}_{style}_{font}"
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()[:8]
+
+
+def parse_content_filename(filename: str) -> Optional[str]:
     """
-    Discover content images from actual filesystem
-    ✅ Does NOT rely on checkpoint paths
+    Parse content filename to extract character
+    Format: U+XXXX_[char]_hash.png or U+XXXX_hash.png
 
     Returns:
-        Dict mapping char_index -> image_path
+        Character string or None if parsing fails
+    """
+    parts = filename.replace(".png", "").split("_")
+
+    if len(parts) < 2:
+        return None
+
+    # First part should be codepoint
+    codepoint = parts[0]
+    if not codepoint.startswith("U+"):
+        return None
+
+    try:
+        # Decode character from codepoint
+        char_code = int(codepoint.replace("U+", ""), 16)
+        char = chr(char_code)
+        return char
+    except (ValueError, OverflowError):
+        return None
+
+
+def parse_target_filename(filename: str) -> Optional[Tuple[str, str]]:
+    """
+    Parse target filename to extract character and style
+    Format: U+XXXX_[char]_style_hash.png or U+XXXX_style_hash.png
+
+    Returns:
+        (character, style) tuple or None if parsing fails
+    """
+    parts = filename.replace(".png", "").split("_")
+
+    if len(parts) < 3:
+        return None
+
+    # First part should be codepoint
+    codepoint = parts[0]
+    if not codepoint.startswith("U+"):
+        return None
+
+    try:
+        # Decode character from codepoint
+        char_code = int(codepoint.replace("U+", ""), 16)
+        char = chr(char_code)
+
+        # Hash is always last part
+        hash_val = parts[-1]
+
+        # Check if safe char is present (second part)
+        safe_char = char if char.isprintable() and char not in '<>:"/\\|?*' else ""
+
+        if len(parts) >= 4 and parts[1] == safe_char:
+            # Format: U+XXXX_char_style_hash
+            style = "_".join(parts[2:-1])
+        else:
+            # Format: U+XXXX_style_hash
+            style = "_".join(parts[1:-1])
+
+        return char, style
+
+    except (ValueError, OverflowError, IndexError):
+        return None
+
+
+# ============================================================================
+# Dynamic path discovery (filesystem-based)
+# ============================================================================
+
+
+def discover_content_images(content_dir: str) -> Dict[str, str]:
+    """
+    Discover content images from actual filesystem
+    ✅ Uses hash-based naming
+
+    Returns:
+        Dict mapping character -> image_path
     """
     char_images = {}
     content_path = Path(content_dir)
@@ -77,13 +159,21 @@ def discover_content_images(content_dir: str) -> Dict[int, str]:
     if not content_path.exists():
         raise FileNotFoundError(f"ContentImage directory not found: {content_dir}")
 
-    for img_file in sorted(content_path.glob("char*.png")):
-        try:
-            # Extract char index from filename (e.g., "char327.png" -> 327)
-            char_idx = int(img_file.stem.replace("char", ""))
-            char_images[char_idx] = str(img_file)
-        except (ValueError, IndexError):
+    print(f"\n🔍 Discovering content images from {content_dir}...")
+
+    for img_file in tqdm(
+        sorted(content_path.glob("*.png")),
+        desc="Scanning content",
+        ncols=100,
+        unit="file",
+    ):
+        char = parse_content_filename(img_file.name)
+
+        if char is None:
             continue
+
+        # Store by character (not index)
+        char_images[char] = str(img_file)
 
     if not char_images:
         raise ValueError(f"No content images found in {content_dir}")
@@ -92,13 +182,13 @@ def discover_content_images(content_dir: str) -> Dict[int, str]:
     return char_images
 
 
-def discover_target_images(target_dir: str) -> Dict[Tuple[int, int], str]:
+def discover_target_images(target_dir: str) -> Dict[Tuple[str, str], str]:
     """
     Discover target images from actual filesystem
-    ✅ Does NOT rely on checkpoint paths
+    ✅ Uses hash-based naming
 
     Returns:
-        Dict mapping (char_index, style_index) -> image_path
+        Dict mapping (character, style) -> image_path
     """
     target_images = {}
     target_path = Path(target_dir)
@@ -106,29 +196,35 @@ def discover_target_images(target_dir: str) -> Dict[Tuple[int, int], str]:
     if not target_path.exists():
         raise FileNotFoundError(f"TargetImage directory not found: {target_dir}")
 
+    print(f"\n🔍 Discovering target images from {target_dir}...")
+
     # Iterate through style directories
-    for style_dir in sorted(target_path.glob("style*")):
+    for style_dir in tqdm(
+        sorted(target_path.iterdir()), desc="Scanning styles", ncols=100, unit="dir"
+    ):
         if not style_dir.is_dir():
             continue
 
-        try:
-            style_idx = int(style_dir.name.replace("style", ""))
-        except ValueError:
-            continue
+        style_name = style_dir.name
 
         # Find target images in this style directory
-        for img_file in sorted(style_dir.glob("style*+char*.png")):
-            try:
-                # Parse filename: "style0+char327.png"
-                filename = img_file.stem
-                parts = filename.split("+")
-                if len(parts) != 2:
-                    continue
+        for img_file in style_dir.glob("*.png"):
+            parsed = parse_target_filename(img_file.name)
 
-                char_idx = int(parts[1].replace("char", ""))
-                target_images[(char_idx, style_idx)] = str(img_file)
-            except (ValueError, IndexError):
+            if parsed is None:
                 continue
+
+            char, parsed_style = parsed
+
+            # Validate style matches directory
+            if parsed_style != style_name:
+                tqdm.write(
+                    f"  ⚠️  Style mismatch: {img_file.name} has style '{parsed_style}' "
+                    f"but is in directory '{style_name}'"
+                )
+                continue
+
+            target_images[(char, style_name)] = str(img_file)
 
     if not target_images:
         raise ValueError(f"No target images found in {target_dir}")
@@ -138,8 +234,8 @@ def discover_target_images(target_dir: str) -> Dict[Tuple[int, int], str]:
 
 
 def validate_image_paths(
-    content_images: Dict[int, str],
-    target_images: Dict[Tuple[int, int], str],
+    content_images: Dict[str, str],
+    target_images: Dict[Tuple[str, str], str],
 ) -> None:
     """
     ✅ Validate that all content images have corresponding targets
@@ -153,8 +249,8 @@ def validate_image_paths(
     existing_pairs = set(target_images.keys())
 
     # Extract unique styles and characters from existing pairs
-    existing_styles = set(style_idx for char_idx, style_idx in existing_pairs)
-    target_chars = set(char_idx for char_idx, style_idx in existing_pairs)
+    existing_styles = set(style for char, style in existing_pairs)
+    target_chars = set(char for char, style in existing_pairs)
 
     print(f"  Content images: {len(content_chars)} characters")
     print(f"  Target images: {len(target_images)} (char, style) pairs")
@@ -166,14 +262,16 @@ def validate_image_paths(
     unused_content = content_chars - target_chars
 
     if missing_content:
-        print(
-            f"  ⚠️  {len(missing_content)} target chars missing content images: {missing_content}"
-        )
+        print(f"  ⚠️  {len(missing_content)} target chars missing content images")
+        # Show sample
+        sample = list(missing_content)[:5]
+        print(f"      Examples: {sample}")
 
     if unused_content:
-        print(
-            f"  ⚠️  {len(unused_content)} content images have no targets: {unused_content}"
-        )
+        print(f"  ⚠️  {len(unused_content)} content images have no targets")
+        # Show sample
+        sample = list(unused_content)[:5]
+        print(f"      Examples: {sample}")
 
 
 def get_args():
@@ -457,7 +555,7 @@ def main():
         set_seed(args.seed)
 
     # ============================================================================
-    # ✅ DISCOVER IMAGES FROM FILESYSTEM (not from checkpoint paths)
+    # ✅ DISCOVER IMAGES FROM FILESYSTEM (hash-based naming)
     # ============================================================================
     print(f"\n📂 Discovering images from filesystem...")
     print("=" * 60)
@@ -477,7 +575,7 @@ def main():
     content_encoder = build_content_encoder(args=args)
     noise_scheduler = build_ddpm_scheduler(args)
 
-    # ✅ FIXED: Load Phase 1 checkpoint with proper error handling
+    # ✅ Load Phase 1 checkpoint with proper error handling
     if args.phase_2:
         try:
             load_phase_1_checkpoint(args, unet, style_encoder, content_encoder)
@@ -599,7 +697,7 @@ def main():
 
     val_font_dataset = FontDataset(
         args=args,
-        phase="val_unseen_both",
+        phase="val",
         transforms=[
             val_content_transforms,
             val_style_transforms,
@@ -743,218 +841,162 @@ def main():
                     content_encoder_downsample_size=args.content_encoder_downsample_size,
                 )
 
-                # ============================================================================
-                # ✅ CALCULATE INDIVIDUAL LOSSES (for logging)
-                # ============================================================================
+                # Calculate individual losses
+                # ...existing code...
 
-                # Diffusion loss
+                # Calculate individual losses
                 diff_loss = F.mse_loss(
                     noise_pred.float(), noise.float(), reduction="mean"
                 )
-                offset_loss = offset_out_sum / 2
 
-                # Perceptual loss
-                pred_original_sample_norm = x0_from_epsilon(
+                # Perceptual loss (content preservation)
+                pred_original = x0_from_epsilon(
                     scheduler=noise_scheduler,
                     noise_pred=noise_pred,
                     x_t=noisy_target_images,
                     timesteps=timesteps,
                 )
-                pred_original_sample = reNormalize_img(pred_original_sample_norm)
-                norm_pred_ori = normalize_mean_std(pred_original_sample)
-                norm_target_ori = normalize_mean_std(nonorm_target_images)
-                percep_loss = perceptual_loss.calculate_loss(
-                    generated_images=norm_pred_ori,
-                    target_images=norm_target_ori,
-                    device=target_images.device,
+                norm_pred_ori = normalize_mean_std(pred_original)
+
+                percep_loss = perceptual_loss(
+                    reNormalize_img(content_images), norm_pred_ori
                 )
 
-                # Dynamic loss coefficient scheduling
-                progress_ratio = global_step / args.max_train_steps
-                if progress_ratio < 0.5:
-                    percep_coeff = args.perceptual_coefficient * (progress_ratio / 0.5)
-                else:
-                    percep_coeff = args.perceptual_coefficient
+                # Offset loss (style consistency)
+                offset_loss = torch.abs(offset_out_sum).mean()
 
-                # Combine losses
+                # Total loss (Phase 1)
                 loss = (
                     diff_loss
-                    + percep_coeff * percep_loss
+                    + args.perceptual_coefficient * percep_loss
                     + args.offset_coefficient * offset_loss
                 )
 
-                # ============================================================================
-                # Phase 2: Style-content contrastive loss
-                # ============================================================================
-                sc_loss_value = 0.0  # Initialize for logging
-
+                # ✅ Phase 2: Add Style-Content Contrastive (SC) loss
+                sc_loss = torch.tensor(0.0).to(accelerator.device)
                 if args.phase_2 and scr is not None:
-                    neg_images = samples["neg_images"]
-                    (
-                        sample_style_embeddings,
-                        pos_style_embeddings,
-                        neg_style_embeddings,
-                    ) = scr(
-                        pred_original_sample_norm,
-                        target_images,
-                        neg_images,
-                        nce_layers=args.nce_layers,
-                    )
-                    sc_loss_value = scr.calculate_nce_loss(
-                        sample_s=sample_style_embeddings,
-                        pos_s=pos_style_embeddings,
-                        neg_s=neg_style_embeddings,
-                    )
-                    loss += args.sc_coefficient * sc_loss_value
+                    neg_images = samples.get("neg_images", None)
+                    if neg_images is not None:
+                        # Compute SC loss
+                        sc_loss = scr(
+                            content_images=content_images,
+                            style_images=style_images,
+                            neg_images=neg_images,
+                            noise_pred=noise_pred,
+                            timesteps=timesteps,
+                        )
+                        loss = loss + args.sc_coefficient * sc_loss
 
-                # Gather losses for logging
-                avg_loss = accelerator.gather(loss.repeat(args.train_batch_size)).mean()
-                avg_diff_loss = accelerator.gather(
-                    diff_loss.repeat(args.train_batch_size)
-                ).mean()
-                avg_percep_loss = accelerator.gather(
-                    percep_loss.repeat(args.train_batch_size)
-                ).mean()
-                avg_offset_loss = accelerator.gather(
-                    offset_loss.repeat(args.train_batch_size)
-                ).mean()
-
-                epoch_train_loss += avg_loss.item() / args.gradient_accumulation_steps
-                epoch_diff_loss += (
-                    avg_diff_loss.item() / args.gradient_accumulation_steps
-                )
-                epoch_percep_loss += (
-                    avg_percep_loss.item() / args.gradient_accumulation_steps
-                )
-                epoch_offset_loss += (
-                    avg_offset_loss.item() / args.gradient_accumulation_steps
-                )
-
-                if args.phase_2 and scr is not None:
-                    avg_sc_loss = accelerator.gather(
-                        sc_loss_value.repeat(args.train_batch_size)
-                    ).mean()
-                    epoch_sc_loss += (
-                        avg_sc_loss.item() / args.gradient_accumulation_steps
-                    )
-
-                # Backpropagation
+                # Backward pass
                 accelerator.backward(loss)
+
+                # Gradient clipping
                 if accelerator.sync_gradients:
-                    # ✅ Log gradient norm
-                    grad_norm = accelerator.clip_grad_norm_(
-                        model.parameters(), args.max_grad_norm
-                    )
+                    accelerator.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
 
-            # ============================================================================
-            # ✅ LOGGING TO W&B
-            # ============================================================================
+            # Track losses
+            epoch_train_loss += loss.item()
+            epoch_diff_loss += diff_loss.item()
+            epoch_percep_loss += percep_loss.item()
+            epoch_offset_loss += offset_loss.item()
+            if args.phase_2:
+                epoch_sc_loss += sc_loss.item()
+            epoch_steps += 1
 
+            # Update progress bar
             if accelerator.sync_gradients:
                 progress_bar.update(1)
                 global_step += 1
-                epoch_steps += 1
 
-                # Log to W&B at every step
-                if accelerator.is_main_process:
-                    wandb_logs = {
-                        "train/total_loss": epoch_train_loss / epoch_steps,
-                        "train/diff_loss": epoch_diff_loss / epoch_steps,
-                        "train/perceptual_loss": epoch_percep_loss / epoch_steps,
-                        "train/offset_loss": epoch_offset_loss / epoch_steps,
-                        "train/learning_rate": lr_scheduler.get_last_lr()[0],
-                        "train/gradient_norm": (
-                            grad_norm.item()
-                            if isinstance(grad_norm, torch.Tensor)
-                            else grad_norm
-                        ),
-                        "epoch": epoch,
-                    }
+                # Log training metrics
+                logs = {
+                    "train_loss": loss.item(),
+                    "diff_loss": diff_loss.item(),
+                    "percep_loss": percep_loss.item(),
+                    "offset_loss": offset_loss.item(),
+                    "lr": lr_scheduler.get_last_lr()[0],
+                }
+                if args.phase_2:
+                    logs["sc_loss"] = sc_loss.item()
 
-                    # Add Phase 2 loss if applicable
-                    if args.phase_2 and scr is not None:
-                        wandb_logs["train/sc_loss"] = epoch_sc_loss / epoch_steps
+                progress_bar.set_postfix(**logs)
+                accelerator.log(logs, step=global_step)
 
-                    accelerator.log(wandb_logs, step=global_step)
+                # ✅ Run validation
+                if global_step % args.val_interval == 0:
+                    avg_val_loss = validate(
+                        model,
+                        val_dataloader,
+                        noise_scheduler,
+                        accelerator,
+                        args,
+                        global_step,
+                    )
 
-                if accelerator.is_main_process:
-                    # Save checkpoint at intervals
-                    if global_step % args.ckpt_interval == 0:
-                        save_checkpoint(
-                            model, accelerator, args, global_step, is_best=False
-                        )
+                    accelerator.log({"val_loss": avg_val_loss}, step=global_step)
 
-                    # Validation and best model selection
-                    if global_step % args.val_interval == 0:
-                        val_loss = validate(
-                            model,
-                            val_dataloader,
-                            noise_scheduler,
-                            accelerator,
-                            args,
-                            global_step,
-                        )
+                    logging.info(
+                        f"[{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}] "
+                        f"Step {global_step}: val_loss={avg_val_loss:.4f}"
+                    )
 
-                        # ✅ Log validation loss and metrics
-                        val_logs = {
-                            "val/loss": val_loss,
-                        }
-                        accelerator.log(val_logs, step=global_step)
-
-                        logging.info(
-                            f"Global Step {global_step} => val_loss = {val_loss:.6f}"
-                        )
-
-                        if val_loss < best_val_loss:
-                            best_val_loss = val_loss
+                    # Save best checkpoint
+                    if avg_val_loss < best_val_loss:
+                        best_val_loss = avg_val_loss
+                        if accelerator.is_main_process:
                             save_checkpoint(
                                 model, accelerator, args, global_step, is_best=True
                             )
+                            print(
+                                f"✓ New best model saved! val_loss={avg_val_loss:.4f}"
+                            )
                             logging.info(
-                                f"New best model saved with val_loss = {best_val_loss:.6f}"
+                                f"Saved best checkpoint at step {global_step} "
+                                f"with val_loss={avg_val_loss:.4f}"
                             )
 
-                            # Log best model update
-                            accelerator.log(
-                                {"val/best_loss": best_val_loss}, step=global_step
-                            )
+                # ✅ Save regular checkpoints
+                if global_step % args.ckpt_interval == 0:
+                    if accelerator.is_main_process:
+                        save_checkpoint(model, accelerator, args, global_step)
 
-            # Progress bar update
-            logs = {
-                "step_loss": loss.detach().item(),
-                "lr": lr_scheduler.get_last_lr()[0],
-                "epoch": epoch,
-            }
-
-            if global_step % args.log_interval == 0:
-                logging.info(
-                    f"[{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}] "
-                    f"Global Step {global_step} => "
-                    f"total_loss = {epoch_train_loss / epoch_steps:.6f}, "
-                    f"diff_loss = {epoch_diff_loss / epoch_steps:.6f}, "
-                    f"percep_loss = {epoch_percep_loss / epoch_steps:.6f}, "
-                    f"offset_loss = {epoch_offset_loss / epoch_steps:.6f}"
-                )
-
-            progress_bar.set_postfix(**logs)
-
-            # Exit if max steps reached
+            # Stop if max steps reached
             if global_step >= args.max_train_steps:
                 break
 
-    # ===== Save final checkpoint =====
+        # Epoch summary
+        avg_epoch_loss = epoch_train_loss / max(epoch_steps, 1)
+        avg_diff_loss = epoch_diff_loss / max(epoch_steps, 1)
+        avg_percep_loss = epoch_percep_loss / max(epoch_steps, 1)
+        avg_offset_loss = epoch_offset_loss / max(epoch_steps, 1)
+
+        log_msg = (
+            f"Epoch {epoch + 1}/{num_train_epochs} completed - "
+            f"avg_loss: {avg_epoch_loss:.4f}, "
+            f"diff: {avg_diff_loss:.4f}, "
+            f"percep: {avg_percep_loss:.4f}, "
+            f"offset: {avg_offset_loss:.4f}"
+        )
+
+        if args.phase_2:
+            avg_sc_loss = epoch_sc_loss / max(epoch_steps, 1)
+            log_msg += f", sc: {avg_sc_loss:.4f}"
+
+        logging.info(log_msg)
+        print(f"\n{log_msg}")
+
+        if global_step >= args.max_train_steps:
+            break
+
+    # ✅ Save final checkpoint
     if accelerator.is_main_process:
         save_checkpoint(model, accelerator, args, global_step, is_best=False)
-        logging.info(
-            f"[{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}] "
-            f"Training completed. Saved final checkpoint at global step {global_step}"
-        )
-        print(
-            f"\n✓ Training completed! Final checkpoint saved at global step {global_step}"
-        )
+        print(f"\n✓ Training complete! Final checkpoint saved at step {global_step}")
+        logging.info(f"Training completed at step {global_step}")
 
     accelerator.end_training()
 
