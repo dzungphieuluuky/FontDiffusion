@@ -2,6 +2,7 @@
 Create validation/test splits from training data
 ✅ SIMPLIFIED: Creates only train + val (unseen char + unseen style)
 ✅ Parses filenames by codepoint and hash only (no reliance on safe char)
+✅ Copies and filters results_checkpoint.json for each split
 """
 
 import os
@@ -119,6 +120,7 @@ def detect_font_parameter(content_dir: Path, sample_chars: List[str]) -> str:
     print(f"  Defaulting to empty string ('')")
     
     return ""
+
 
 @dataclass
 class ValidationSplitConfig:
@@ -560,6 +562,78 @@ class ValidationSplitCreator:
         else:
             print(f"  ✓ All {total_targets} targets have matching content")
 
+    def _copy_and_filter_checkpoint(
+        self,
+        split_name: str,
+        split_dir: Path,
+        allowed_chars: Set[str],
+        allowed_styles: Set[str],
+    ) -> None:
+        """
+        ✅ NEW: Copy and filter results_checkpoint.json for this split
+        
+        Args:
+            split_name: Name of the split ("train" or "val")
+            split_dir: Directory for this split
+            allowed_chars: Characters included in this split
+            allowed_styles: Styles included in this split
+        """
+        print(f"\n  📋 Filtering results_checkpoint.json for {split_name}...")
+        
+        # Load original checkpoint
+        original_checkpoint_path = self.source_train_dir / "results_checkpoint.json"
+        
+        if not original_checkpoint_path.exists():
+            print(f"    ⚠️  No results_checkpoint.json found in {self.source_train_dir}")
+            print(f"    Skipping checkpoint creation for {split_name}")
+            return
+        
+        try:
+            with open(original_checkpoint_path, "r", encoding="utf-8") as f:
+                original_data = json.load(f)
+        except Exception as e:
+            print(f"    ⚠️  Error loading checkpoint: {e}")
+            return
+        
+        # Filter generations based on allowed chars and styles
+        original_generations = original_data.get("generations", [])
+        filtered_generations = []
+        
+        for gen in tqdm(
+            original_generations,
+            desc="    Filtering",
+            ncols=80,
+            unit="gen",
+            leave=False,
+        ):
+            char = gen.get("character")
+            style = gen.get("style")
+            
+            # Include generation if both char and style are in this split
+            if char in allowed_chars and style in allowed_styles:
+                filtered_generations.append(gen)
+        
+        # Create new checkpoint data
+        split_checkpoint = {
+            "split": split_name,
+            "total_chars": len(allowed_chars),
+            "total_styles": len(allowed_styles),
+            "generations": filtered_generations,
+            "fonts": original_data.get("fonts", []),
+            "metrics": {},  # Reset metrics for this split
+            "original_source": str(self.source_train_dir),
+            "filtered_from": str(original_checkpoint_path),
+        }
+        
+        # Save filtered checkpoint to split directory
+        split_checkpoint_path = split_dir / "results_checkpoint.json"
+        
+        with open(split_checkpoint_path, "w", encoding="utf-8") as f:
+            json.dump(split_checkpoint, f, indent=2, ensure_ascii=False)
+        
+        print(f"    ✓ Saved checkpoint: {len(filtered_generations)}/{len(original_generations)} generations")
+        print(f"    📄 {split_checkpoint_path}")
+
     def create_splits(self) -> None:
         """Create train and val splits"""
         print("\n" + "=" * 60)
@@ -578,6 +652,14 @@ class ValidationSplitCreator:
             "train", self.train_dir, scenarios, valid_pairs
         )
         print(f"  ✓ Copied {train_content} content + {train_target} target (skipped {train_skipped})")
+        
+        # ✅ Copy and filter checkpoint for train split
+        self._copy_and_filter_checkpoint(
+            "train",
+            self.train_dir,
+            set(scenarios["train"]["characters"]),
+            set(scenarios["train"]["styles"]),
+        )
 
         # Create val split
         print(f"\n📁 Creating val split:")
@@ -585,6 +667,14 @@ class ValidationSplitCreator:
             "val", self.val_dir, scenarios, valid_pairs
         )
         print(f"  ✓ Copied {val_content} content + {val_target} target (skipped {val_skipped})")
+        
+        # ✅ Copy and filter checkpoint for val split
+        self._copy_and_filter_checkpoint(
+            "val",
+            self.val_dir,
+            set(scenarios["val"]["characters"]),
+            set(scenarios["val"]["styles"]),
+        )
 
         # Save metadata
         self._save_metadata(scenarios)
@@ -607,6 +697,7 @@ def create_validation_split(
     """
     Create validation splits (train + val only, unseen char + unseen style)
     ✅ Simplified version with no reliance on safe character in filenames
+    ✅ Copies and filters results_checkpoint.json for each split
     """
 
     config = ValidationSplitConfig(
@@ -623,17 +714,24 @@ def create_validation_split(
     print("=" * 60)
     print("\n✅ Created directories:")
     print("  📁 train/ - Training data (seen styles + seen chars)")
+    print("    ├── ContentImage/")
+    print("    ├── TargetImage/")
+    print("    └── results_checkpoint.json")
     print("  📁 val/ - Validation data (unseen styles + unseen chars)")
+    print("    ├── ContentImage/")
+    print("    ├── TargetImage/")
+    print("    └── results_checkpoint.json")
     print("\n💡 Each folder guarantees:")
     print("  ✓ Every target image has matching content image")
     print("  ✓ Parsed by codepoint only (no reliance on safe char)")
+    print("  ✓ Filtered results_checkpoint.json with split-specific data")
 
 
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Create train/val splits with proper matching"
+        description="Create train/val splits with proper matching and checkpoint filtering"
     )
     parser.add_argument(
         "--data_root", type=str, default="data_examples", help="Root data directory"
