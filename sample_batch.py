@@ -1188,24 +1188,25 @@ def _group_chars_by_font(
     style_idx: int,
 ) -> Dict[str, List[str]]:
     """Group characters by font, excluding already processed pairs"""
-    font_to_chars = {}
-
-    for char in characters:
-        # Skip if no font available
+    font_to_chars: Dict[str, List[str]] = {}
+    # Wrap the outer loop with tqdm so you see progress for each character.
+    for char in tqdm(characters, desc="Mapping chars to fonts", unit="char"):
+        # Skip if no font is available for this character.
         if char not in char_to_font:
             continue
 
+        # Get the internal index of the character.
         char_idx = index_manager.get_char_index(char)
 
-        # Skip if pair already exists
+        # Skip if the (char, style) pair already exists.
         if index_manager.pair_exists(char_idx, style_idx):
             continue
 
         font_name = char_to_font[char]
+        # Append the character to the list for its font.
         font_to_chars.setdefault(font_name, []).append(char)
 
     return font_to_chars
-
 
 def _print_checkpoint_status(
     current_style: int,
