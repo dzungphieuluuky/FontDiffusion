@@ -51,7 +51,44 @@ class FontDiffusionDatasetBuilder:
         print(f"✓ Validated directory structure")
         print(f"  Content images: {self.content_dir}")
         print(f"  Target images: {self.target_dir}")
-    
+
+    def _load_images_from_metadata(self, metadata):
+        """Load PIL images from paths in metadata"""
+        dataset_rows = []
+        
+        for gen_info in metadata['generations']:
+            char_idx = gen_info.get('char_index')
+            style_idx = gen_info.get('style_index')
+            
+            # Get paths from metadata
+            content_path = gen_info.get('content_image_path')
+            target_path = gen_info.get('target_image_path')
+            
+            if not (content_path and target_path):
+                continue  # Skip if paths missing
+            
+            if not (os.path.exists(content_path) and os.path.exists(target_path)):
+                print(f"⚠ Missing files for char{char_idx}: {content_path}")
+                continue
+            
+            try:
+                content_img = PILImage.open(content_path).convert('RGB')
+                target_img = PILImage.open(target_path).convert('RGB')
+                
+                dataset_rows.append({
+                    'character': gen_info.get('character'),
+                    'char_index': char_idx,
+                    'style': gen_info.get('style'),
+                    'style_index': style_idx,
+                    'content_image': content_img,
+                    'target_image': target_img,
+                    'font': gen_info.get('font', 'unknown')
+                })
+            except Exception as e:
+                print(f"Error loading images for char{char_idx}: {e}")
+        
+        return dataset_rows
+
     def _load_results_metadata(self) -> Optional[Dict[str, Any]]:
         """
         Load results.json metadata if available
@@ -93,7 +130,7 @@ class FontDiffusionDatasetBuilder:
            
     def build_dataset(self) -> Dataset:
         """
-        Build dataset with structure:
+        Build dataset with structure matching sample_batch.py output:
         {
             'character': str,
             'char_index': int,
@@ -101,8 +138,10 @@ class FontDiffusionDatasetBuilder:
             'style_index': int,
             'content_image': PIL.Image,
             'target_image': PIL.Image,
-            'font': str (optional)
+            'font': str
         }
+        
+        ✅ LOADS IMAGES FROM PATHS in results.json metadata
         """
         print("\n" + "="*60)
         print("BUILDING DATASET")
@@ -113,7 +152,7 @@ class FontDiffusionDatasetBuilder:
         
         dataset_rows: List[Dict[str, Any]] = []
         
-        # Load all content and target images
+        # Load all content and target images from paths
         content_dir = self.data_dir / "ContentImage"
         target_base_dir = self.data_dir / "TargetImage"
         
@@ -124,6 +163,8 @@ class FontDiffusionDatasetBuilder:
         gen_map: Dict[Tuple[int, int], Dict[str, Any]] = {}  # (char_idx, style_idx) -> gen_info
         
         if metadata and 'generations' in metadata:
+            print(f"\n📋 Building index from {len(metadata['generations'])} generation records...")
+            
             for gen_info in metadata['generations']:
                 char_idx = gen_info.get('char_index')
                 style_idx = gen_info.get('style_index')
@@ -131,13 +172,19 @@ class FontDiffusionDatasetBuilder:
                 if char_idx is not None and style_idx is not None:
                     gen_map[(char_idx, style_idx)] = gen_info
         
-        # Iterate through target images
+        # Iterate through style directories
+        print(f"\n🖼️  Loading images from disk...")
+        
         for style_dir in sorted(target_base_dir.iterdir()):
             if not style_dir.is_dir():
                 continue
             
             style_name = style_dir.name  # e.g., "style0"
-            style_idx = int(style_name.replace('style', ''))
+            
+            try:
+                style_idx = int(style_name.replace('style', ''))
+            except ValueError:
+                continue
             
             for target_img_path in sorted(style_dir.glob("*.png")):
                 # Parse filename: style0+char5.png
@@ -158,22 +205,26 @@ class FontDiffusionDatasetBuilder:
                 content_img_path = content_dir / f"char{char_idx}.png"
                 
                 if not content_img_path.exists():
-                    print(f"⚠ Missing content image: {content_img_path}")
+                    tqdm.write(f"⚠ Missing content image: {content_img_path}")
                     continue
                 
-                # Load images
+                if not target_img_path.exists():
+                    tqdm.write(f"⚠ Missing target image: {target_img_path}")
+                    continue
+                
+                # Load images from disk ✅ FIXED
                 try:
-                    content_image = PILImage.open(content_img_path).convert('RGB')
-                    target_image = PILImage.open(target_img_path).convert('RGB')
+                    content_image = PILImage.open(str(content_img_path)).convert('RGB')
+                    target_image = PILImage.open(str(target_img_path)).convert('RGB')
                 except Exception as e:
-                    print(f"⚠ Error loading images for {filename}: {e}")
+                    tqdm.write(f"⚠ Error loading images for {filename}: {e}")
                     continue
                 
-                # Get metadata for this pair
+                # Get metadata for this pair from results.json
                 gen_info = gen_map.get((char_idx, style_idx), {})
                 
                 # Extract information - use gen_info first, then fallback
-                character = gen_info.get('character', '?')
+                character = gen_info.get('character', f'char{char_idx}')
                 font_name = gen_info.get('font', 'unknown')
                 
                 row = {
@@ -181,8 +232,8 @@ class FontDiffusionDatasetBuilder:
                     'char_index': char_idx,
                     'style': style_name,
                     'style_index': style_idx,
-                    'content_image': content_image,
-                    'target_image': target_image,
+                    'content_image': content_image,  # ✅ PIL Image
+                    'target_image': target_image,    # ✅ PIL Image
                     'font': font_name
                 }
                 
@@ -191,8 +242,9 @@ class FontDiffusionDatasetBuilder:
         print(f"✓ Loaded {len(dataset_rows)} samples")
         
         if not dataset_rows:
-            raise ValueError("No samples loaded!")
+            raise ValueError("No samples loaded! Check that images exist in ContentImage/ and TargetImage/")
         
+        # Create HuggingFace dataset ✅ FIXED
         return Dataset.from_dict({
             'character': [r['character'] for r in dataset_rows],
             'char_index': [r['char_index'] for r in dataset_rows],
@@ -201,7 +253,7 @@ class FontDiffusionDatasetBuilder:
             'content_image': [r['content_image'] for r in dataset_rows],
             'target_image': [r['target_image'] for r in dataset_rows],
             'font': [r['font'] for r in dataset_rows],
-        }).cast_column('content_image', HFImage()).cast_column('target_image', HFImage())
+        }).cast_column('content_image', HFImage()).cast_column('target_image', HFImage())    
     
     def push_to_hub(self, dataset: Dataset) -> None:
         """Push dataset to Hugging Face Hub"""
@@ -345,6 +397,22 @@ class FontDiffusionDatasetBuilder:
             local_checkpoint_path = Path(output_path) / "results_checkpoint.json"
             shutil.copy(checkpoint_path, local_checkpoint_path)  # ✅ No local import needed
             print(f"✓ results_checkpoint.json saved to {local_checkpoint_path}")
+
+def validate_generation_record(gen: Dict[str, Any]) -> bool:
+    """Validate generation record has all required fields"""
+    required_fields = [
+        'character', 'char_index', 'style', 'style_index',
+        'font', 'content_image_path', 'target_image_path'
+    ]
+    
+    missing = [f for f in required_fields if f not in gen or gen[f] is None]
+    
+    if missing:
+        print(f"⚠ Missing fields in generation: {missing}")
+        return False
+    
+    return True
+
 
 def create_and_push_dataset(
     data_dir: str,

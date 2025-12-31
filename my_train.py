@@ -2,6 +2,7 @@ import os
 import math
 import time
 import logging
+from pathlib import Path
 from tqdm.auto import tqdm
 
 import torch
@@ -28,6 +29,13 @@ from utils import (save_args_to_yaml,
                    x0_from_epsilon, 
                    reNormalize_img, 
                    normalize_mean_std)
+
+try:
+    from safetensors.torch import load_file as load_safetensors
+    SAFETENSORS_AVAILABLE = True
+except ImportError:
+    SAFETENSORS_AVAILABLE = False
+    print("⚠️  safetensors not installed. Only .pth files will be supported.")
 
 
 logger = get_logger(__name__)
@@ -80,22 +88,165 @@ def validate(model, val_dataloader, noise_scheduler, accelerator, args, global_s
     return avg_val_loss
 
 
+def load_checkpoint_file(checkpoint_path: str, device='cpu'):
+    """
+    Load checkpoint from either .pth or .safetensors format
+    
+    Args:
+        checkpoint_path: Path to checkpoint file (.pth or .safetensors)
+        device: Device to load to
+    
+    Returns:
+        Loaded state dict
+    
+    Raises:
+        FileNotFoundError: If checkpoint doesn't exist
+        ValueError: If unsupported file format
+    """
+    checkpoint_path = str(checkpoint_path)
+    
+    if not os.path.exists(checkpoint_path):
+        raise FileNotFoundError(f"❌ Checkpoint not found: {checkpoint_path}")
+    
+    file_ext = os.path.splitext(checkpoint_path)[1].lower()
+    
+    try:
+        if file_ext == '.safetensors':
+            if not SAFETENSORS_AVAILABLE:
+                raise ValueError(
+                    f"❌ safetensors format not supported.\n"
+                    f"   Install: pip install safetensors\n"
+                    f"   Or use .pth format instead")
+            
+            print(f"  📂 Loading safetensors: {os.path.basename(checkpoint_path)}")
+            state_dict = load_safetensors(checkpoint_path)
+            return state_dict
+        
+        elif file_ext == '.pth':
+            print(f"  📂 Loading .pth: {os.path.basename(checkpoint_path)}")
+            state_dict = torch.load(checkpoint_path, map_location=device)
+            return state_dict
+        
+        else:
+            raise ValueError(
+                f"❌ Unsupported checkpoint format: {file_ext}\n"
+                f"   Supported: .pth, .safetensors\n"
+                f"   Got: {checkpoint_path}")
+    
+    except Exception as e:
+        raise RuntimeError(f"❌ Error loading checkpoint {checkpoint_path}: {e}")
+
+
+def load_phase_1_checkpoint(args, unet, style_encoder, content_encoder):
+    """
+    Load Phase 1 checkpoint (unet, style_encoder, content_encoder)
+    Handles both .pth and .safetensors formats
+    
+    Args:
+        args: Training arguments
+        unet: UNet model to load state into
+        style_encoder: Style encoder model to load state into
+        content_encoder: Content encoder model to load state into
+    """
+    if not args.phase_2:
+        return
+    
+    ckpt_dir = Path(args.phase_1_ckpt_dir)
+    
+    if not ckpt_dir.exists():
+        raise ValueError(f"❌ Phase 1 checkpoint directory not found: {ckpt_dir}")
+    
+    print(f"\n📥 Loading Phase 1 checkpoint from: {ckpt_dir}")
+    print("="*60)
+    
+    # Define checkpoint files to load (try both formats)
+    checkpoint_configs = [
+        ('unet', unet),
+        ('style_encoder', style_encoder),
+        ('content_encoder', content_encoder),
+    ]
+    
+    for model_name, model in checkpoint_configs:
+        # Try .safetensors first, then .pth
+        safetensors_path = ckpt_dir / f"{model_name}.safetensors"
+        pth_path = ckpt_dir / f"{model_name}.pth"
+        
+        checkpoint_path = None
+        
+        if safetensors_path.exists():
+            checkpoint_path = safetensors_path
+        elif pth_path.exists():
+            checkpoint_path = pth_path
+        else:
+            raise FileNotFoundError(
+                f"❌ {model_name} checkpoint not found!\n"
+                f"   Tried: {safetensors_path}\n"
+                f"          {pth_path}")
+        
+        try:
+            state_dict = load_checkpoint_file(str(checkpoint_path))
+            model.load_state_dict(state_dict)
+            print(f"  ✓ {model_name}: {checkpoint_path.name}")
+        except Exception as e:
+            raise RuntimeError(f"❌ Error loading {model_name}: {e}")
+    
+    print("="*60)
+    print("✓ Phase 1 checkpoint loaded successfully\n")
+
+
+def load_scr_checkpoint(scr_ckpt_path: str, scr_model):
+    """
+    Load SCR (Style-Content contrastive) module checkpoint
+    Handles both .pth and .safetensors formats
+    
+    Args:
+        scr_ckpt_path: Path to SCR checkpoint
+        scr_model: SCR model to load state into
+    """
+    scr_ckpt_path = Path(scr_ckpt_path)
+    
+    if not scr_ckpt_path.exists():
+        raise FileNotFoundError(f"❌ SCR checkpoint not found: {scr_ckpt_path}")
+    
+    print(f"📥 Loading SCR module from: {scr_ckpt_path}")
+    
+    try:
+        state_dict = load_checkpoint_file(str(scr_ckpt_path))
+        scr_model.load_state_dict(state_dict)
+        print(f"  ✓ SCR module loaded: {scr_ckpt_path.name}\n")
+    except Exception as e:
+        raise RuntimeError(f"❌ Error loading SCR module: {e}")
+
+
 def save_checkpoint(model, accelerator, args, global_step, is_best=False):
-    """Save model checkpoint"""
+    """Save model checkpoint in both .pth and .safetensors format"""
     if is_best:
         save_dir = f"{args.output_dir}/best_checkpoint"
     else:
         save_dir = f"{args.output_dir}/global_step_{global_step}"
     
     os.makedirs(save_dir, exist_ok=True)
+    
+    # Save as .pth (original format)
     torch.save(model.unet.state_dict(), f"{save_dir}/unet.pth")
     torch.save(model.style_encoder.state_dict(), f"{save_dir}/style_encoder.pth")
     torch.save(model.content_encoder.state_dict(), f"{save_dir}/content_encoder.pth")
     torch.save(model, f"{save_dir}/total_model.pth")
     
+    # ✅ ALSO save as .safetensors if available
+    if SAFETENSORS_AVAILABLE:
+        try:
+            from safetensors.torch import save_file as save_safetensors
+            
+            save_safetensors(model.unet.state_dict(), f"{save_dir}/unet.safetensors")
+            save_safetensors(model.style_encoder.state_dict(), f"{save_dir}/style_encoder.safetensors")
+            save_safetensors(model.content_encoder.state_dict(), f"{save_dir}/content_encoder.safetensors")
+        except Exception as e:
+            print(f"⚠️  Could not save safetensors format: {e}")
+    
     logging.info(f"[{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}] "
                 f"Saved checkpoint at global step {global_step}")
-    print(f"Saved checkpoint at global step {global_step}")
+    print(f"✓ Saved checkpoint at global step {global_step}")
 
 
 def main():
@@ -149,13 +300,14 @@ def main():
     content_encoder = build_content_encoder(args=args)
     noise_scheduler = build_ddpm_scheduler(args)
     
-    # Load Phase 1 checkpoint for Phase 2 training
+    # ✅ FIXED: Load Phase 1 checkpoint with proper error handling
     if args.phase_2:
-        logging.info(f"Loading Phase 1 checkpoint from: {args.phase_1_ckpt_dir}")
-        unet.load_state_dict(torch.load(f"{args.phase_1_ckpt_dir}/unet.pth"))
-        style_encoder.load_state_dict(torch.load(f"{args.phase_1_ckpt_dir}/style_encoder.pth"))
-        content_encoder.load_state_dict(torch.load(f"{args.phase_1_ckpt_dir}/content_encoder.pth"))
-        print("✓ Phase 1 checkpoint loaded successfully")
+        try:
+            load_phase_1_checkpoint(args, unet, style_encoder, content_encoder)
+        except (FileNotFoundError, ValueError, RuntimeError) as e:
+            print(f"\n{e}")
+            logging.error(str(e))
+            raise
 
     model = FontDiffuserModel(
         unet=unet,
@@ -165,11 +317,16 @@ def main():
     # Build content perceptual loss
     perceptual_loss = ContentPerceptualLoss()
 
-    # Load SCR module for Phase 2 supervision
     scr = None
     if args.phase_2:
         scr = build_scr(args=args)
-        scr.load_state_dict(torch.load(args.scr_ckpt_path))
+        try:
+            load_scr_checkpoint(args.scr_ckpt_path, scr)
+        except (FileNotFoundError, RuntimeError) as e:
+            print(f"\n{e}")
+            logging.error(str(e))
+            raise
+        
         scr.requires_grad_(False)
         logging.info(f"Loaded SCR module from: {args.scr_ckpt_path}")
 

@@ -244,21 +244,16 @@ class DatasetExporter:
         return updated_results or {}, updated_checkpoint
     
     def _update_metadata_paths(self, original_metadata: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Update file paths in original metadata to match export directory
-        """
-        metadata = json.loads(json.dumps(original_metadata))  # Deep copy
+        metadata = json.loads(json.dumps(original_metadata))
         
-        # Update generation paths
         for generation in metadata.get('generations', []):
             char_idx = generation.get('char_index', 0)
             style = generation.get('style', 'style0')
             
-            # Update content image path
-            generation['content_image_path'] = f"{self.config.output_dir}/ContentImage/char{char_idx}.png"
-            
-            # Update target image path
-            generation['target_image_path'] = f"{self.config.output_dir}/TargetImage/{style}/{style}+char{char_idx}.png"
+            # Update ALL path fields consistently
+            generation['output_path'] = f"{self.output_dir}/TargetImage/{style}/{style}+char{char_idx}.png"
+            generation['content_image_path'] = f"{self.output_dir}/ContentImage/char{char_idx}.png"
+            generation['target_image_path'] = f"{self.output_dir}/TargetImage/{style}/{style}+char{char_idx}.png"
         
         return metadata
     
