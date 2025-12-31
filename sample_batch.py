@@ -818,12 +818,22 @@ def batch_generate_images(
     index_manager: Optional[ResultsIndexManager] = None,
 ) -> Dict[str, Any]:
     """
-    ✅ SIMPLIFIED: Skip char-to-font mapping, use first available font
+    ✅ FIXED: Font selection moved BEFORE results initialization
     """
+    
+    # ✅ SELECT PRIMARY FONT FIRST (before any results dict creation)
+    font_names = font_manager.get_font_names()
+    if not font_names:
+        raise ValueError("No fonts loaded!")
+    
+    primary_font = font_names[0]
+    print(f"\n{'=' * 70}")
+    print(f"Using font: {primary_font}")
+    print("=" * 70 + "\n")
     
     # ✅ FIXED: Always check for and generate missing content images
     content_dir: str = os.path.join(args.output_dir, "ContentImage")
-    os.makedirs(content_dir, exist_ok=True)  # Ensure directory exists
+    os.makedirs(content_dir, exist_ok=True)
     
     # Find which content images already exist
     existing_content_indices: Set[int] = set()
@@ -833,7 +843,7 @@ def batch_generate_images(
                 idx = int(f.stem.replace("char", ""))
                 existing_content_indices.add(idx)
             except ValueError:
-                pass  # Skip files that don't match pattern
+                pass
     
     # Determine which characters need content images
     chars_needing_content: List[str] = []
@@ -861,7 +871,7 @@ def batch_generate_images(
             else None
         )
 
-    # Initialize results
+    # ✅ NOW Initialize results with correct primary_font
     if resume_results:
         results = resume_results
         print(f"📥 Resuming: {len(index_manager.existing_pairs)} pairs already processed")
@@ -870,7 +880,7 @@ def batch_generate_images(
             "generations": [],
             "metrics": {"lpips": [], "ssim": [], "inference_times": []},
             "dataset_split": args.dataset_split,
-            "fonts": font_manager.get_font_names(),
+            "fonts": [primary_font],  # ✅ Now primary_font is defined!
             "characters": characters,
             "styles": [f"style{i}" for i in range(len(style_paths))],
             "total_chars": len(characters),
@@ -885,8 +895,8 @@ def batch_generate_images(
     print(f"\n{'=' * 70}")
     print(f"{'BATCH IMAGE GENERATION':^70}")
     print("=" * 70)
-    print(f"Font Number:          {len(font_manager.get_font_names())}")
-    print(f"Font Names:           {', '.join(font_manager.get_font_names())}")
+    print(f"Font Number:          {len([primary_font])}")
+    print(f"Font Names:           {primary_font}")
     print(f"Styles:               {len(style_paths)}")
     print(f"Characters:           {len(characters)}")
     print(f"Batch size:           {args.batch_size}")
