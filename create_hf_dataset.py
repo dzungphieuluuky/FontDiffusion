@@ -1,12 +1,11 @@
 """
 Create Hugging Face dataset from generated FontDiffusion images and push to Hub
-Preserves and uploads original results.json metadata
+✅ SIMPLIFIED: Only uses results_checkpoint.json (single source of truth)
 """
 
 import os
 import json
 import shutil
-import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
@@ -27,7 +26,6 @@ class FontDiffusionDatasetConfig:
     push_to_hub: bool = True
     private: bool = False
     token: Optional[str] = None  # HF token for private repos
-    upload_metadata: bool = True  # ✅ Upload original results.json
 
 
 class FontDiffusionDatasetBuilder:
@@ -52,82 +50,38 @@ class FontDiffusionDatasetBuilder:
         print(f"  Content images: {self.content_dir}")
         print(f"  Target images: {self.target_dir}")
 
-    def _load_images_from_metadata(self, metadata):
-        """Load PIL images from paths in metadata"""
-        dataset_rows = []
-        
-        for gen_info in metadata['generations']:
-            char_idx = gen_info.get('char_index')
-            style_idx = gen_info.get('style_index')
-            
-            # Get paths from metadata
-            content_path = gen_info.get('content_image_path')
-            target_path = gen_info.get('target_image_path')
-            
-            if not (content_path and target_path):
-                continue  # Skip if paths missing
-            
-            if not (os.path.exists(content_path) and os.path.exists(target_path)):
-                print(f"⚠ Missing files for char{char_idx}: {content_path}")
-                continue
-            
-            try:
-                content_img = PILImage.open(content_path).convert('RGB')
-                target_img = PILImage.open(target_path).convert('RGB')
-                
-                dataset_rows.append({
-                    'character': gen_info.get('character'),
-                    'char_index': char_idx,
-                    'style': gen_info.get('style'),
-                    'style_index': style_idx,
-                    'content_image': content_img,
-                    'target_image': target_img,
-                    'font': gen_info.get('font', 'unknown')
-                })
-            except Exception as e:
-                print(f"Error loading images for char{char_idx}: {e}")
-        
-        return dataset_rows
-
-    def _load_results_metadata(self) -> Optional[Dict[str, Any]]:
+    def _load_checkpoint_metadata(self) -> Optional[Dict[str, Any]]:
         """
-        Load results.json metadata if available
-        Returns None if file doesn't exist or is corrupted
-        """
-        results_path = self.data_dir / "results.json"
-        if not results_path.exists():
-            print(f"⚠ results.json not found at {results_path}")
-            return None
-        
-        try:
-            with open(results_path, 'r', encoding='utf-8') as f:
-                metadata = json.load(f)
-            print(f"✓ Loaded results.json")
-            return metadata
-        except json.JSONDecodeError as e:
-            print(f"\n⚠ Warning: results.json is corrupted ({e})")
-            print(f"  Proceeding without metadata...")
-            return None  # ✅ Return None instead of raising
-        except Exception as e:
-            print(f"\n⚠ Warning: Could not load results.json ({e})")
-            print(f"  Proceeding without metadata...")
-            return None  # ✅ Return None instead of raising
-    
-    def _get_results_metadata_path(self, metadata_filename: str) -> Optional[Path]:
-        """
-        Get path to original metadata file if it exists
-        
-        Args:
-            metadata_filename: Name of metadata file (e.g., "results.json" or "results_checkpoint.json")
+        Load results_checkpoint.json metadata
+        ✅ Single source of truth for all generation metadata
         
         Returns:
-            Path object if file exists, None otherwise
+            Metadata dict if file exists and is valid, None otherwise
         """
-        results_path = self.data_dir / metadata_filename
-        if results_path.exists():
-            return results_path
-        return None
-           
+        checkpoint_path = self.data_dir / "results_checkpoint.json"
+        
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(
+                f"❌ results_checkpoint.json not found at {checkpoint_path}\n"
+                f"   This file is required! Run sample_batch.py first to generate it."
+            )
+        
+        try:
+            with open(checkpoint_path, 'r', encoding='utf-8') as f:
+                metadata = json.load(f)
+            
+            num_gens = len(metadata.get('generations', []))
+            print(f"✓ Loaded results_checkpoint.json ({num_gens} generations)")
+            return metadata
+            
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"❌ results_checkpoint.json is corrupted: {e}\n"
+                f"   File: {checkpoint_path}"
+            )
+        except Exception as e:
+            raise RuntimeError(f"❌ Error loading results_checkpoint.json: {e}")
+    
     def build_dataset(self) -> Dataset:
         """
         Build dataset with structure matching sample_batch.py output:
@@ -141,41 +95,33 @@ class FontDiffusionDatasetBuilder:
             'font': str
         }
         
-        ✅ LOADS IMAGES FROM PATHS in results.json metadata
+        ✅ Loads images from paths in results_checkpoint.json
         """
         print("\n" + "="*60)
         print("BUILDING DATASET")
         print("="*60)
         
-        # Load metadata (optional)
-        metadata = self._load_results_metadata()
+        # ✅ Load ONLY results_checkpoint.json (required)
+        metadata = self._load_checkpoint_metadata()
         
         dataset_rows: List[Dict[str, Any]] = []
         
-        # Load all content and target images from paths
-        content_dir = self.data_dir / "ContentImage"
-        target_base_dir = self.data_dir / "TargetImage"
+        # Build mapping from generations
+        gen_map: Dict[Tuple[int, int], Dict[str, Any]] = {}
         
-        if not content_dir.exists() or not target_base_dir.exists():
-            raise ValueError(f"Missing required directories in {self.data_dir}")
+        print(f"\n📋 Building index from {len(metadata['generations'])} generation records...")
         
-        # Build mapping from results.json
-        gen_map: Dict[Tuple[int, int], Dict[str, Any]] = {}  # (char_idx, style_idx) -> gen_info
-        
-        if metadata and 'generations' in metadata:
-            print(f"\n📋 Building index from {len(metadata['generations'])} generation records...")
+        for gen_info in metadata['generations']:
+            char_idx = gen_info.get('char_index')
+            style_idx = gen_info.get('style_index')
             
-            for gen_info in metadata['generations']:
-                char_idx = gen_info.get('char_index')
-                style_idx = gen_info.get('style_index')
-                
-                if char_idx is not None and style_idx is not None:
-                    gen_map[(char_idx, style_idx)] = gen_info
+            if char_idx is not None and style_idx is not None:
+                gen_map[(char_idx, style_idx)] = gen_info
         
-        # Iterate through style directories
+        # Iterate through style directories and load images
         print(f"\n🖼️  Loading images from disk...")
         
-        for style_dir in sorted(target_base_dir.iterdir()):
+        for style_dir in sorted(self.target_dir.iterdir()):
             if not style_dir.is_dir():
                 continue
             
@@ -202,7 +148,7 @@ class FontDiffusionDatasetBuilder:
                     continue
                 
                 # Get content image path
-                content_img_path = content_dir / f"char{char_idx}.png"
+                content_img_path = self.content_dir / f"char{char_idx}.png"
                 
                 if not content_img_path.exists():
                     tqdm.write(f"⚠ Missing content image: {content_img_path}")
@@ -212,7 +158,7 @@ class FontDiffusionDatasetBuilder:
                     tqdm.write(f"⚠ Missing target image: {target_img_path}")
                     continue
                 
-                # Load images from disk ✅ FIXED
+                # Load images from disk
                 try:
                     content_image = PILImage.open(str(content_img_path)).convert('RGB')
                     target_image = PILImage.open(str(target_img_path)).convert('RGB')
@@ -220,10 +166,10 @@ class FontDiffusionDatasetBuilder:
                     tqdm.write(f"⚠ Error loading images for {filename}: {e}")
                     continue
                 
-                # Get metadata for this pair from results.json
+                # Get metadata for this pair from checkpoint
                 gen_info = gen_map.get((char_idx, style_idx), {})
                 
-                # Extract information - use gen_info first, then fallback
+                # Extract information
                 character = gen_info.get('character', f'char{char_idx}')
                 font_name = gen_info.get('font', 'unknown')
                 
@@ -232,8 +178,8 @@ class FontDiffusionDatasetBuilder:
                     'char_index': char_idx,
                     'style': style_name,
                     'style_index': style_idx,
-                    'content_image': content_image,  # ✅ PIL Image
-                    'target_image': target_image,    # ✅ PIL Image
+                    'content_image': content_image,
+                    'target_image': target_image,
                     'font': font_name
                 }
                 
@@ -244,7 +190,7 @@ class FontDiffusionDatasetBuilder:
         if not dataset_rows:
             raise ValueError("No samples loaded! Check that images exist in ContentImage/ and TargetImage/")
         
-        # Create HuggingFace dataset ✅ FIXED
+        # Create HuggingFace dataset
         return Dataset.from_dict({
             'character': [r['character'] for r in dataset_rows],
             'char_index': [r['char_index'] for r in dataset_rows],
@@ -253,10 +199,10 @@ class FontDiffusionDatasetBuilder:
             'content_image': [r['content_image'] for r in dataset_rows],
             'target_image': [r['target_image'] for r in dataset_rows],
             'font': [r['font'] for r in dataset_rows],
-        }).cast_column('content_image', HFImage()).cast_column('target_image', HFImage())    
+        }).cast_column('content_image', HFImage()).cast_column('target_image', HFImage())
     
     def push_to_hub(self, dataset: Dataset) -> None:
-        """Push dataset to Hugging Face Hub"""
+        """Push dataset to Hugging Face Hub with metadata"""
         if not self.config.push_to_hub:
             print("\n⊘ Skipping push to Hub (push_to_hub=False)")
             return
@@ -270,6 +216,7 @@ class FontDiffusionDatasetBuilder:
             print(f"Split: {self.config.split}")
             print(f"Private: {self.config.private}")
             
+            # Push dataset
             dataset.push_to_hub(
                 repo_id=self.config.repo_id,
                 split=self.config.split,
@@ -280,89 +227,61 @@ class FontDiffusionDatasetBuilder:
             print(f"\n✓ Successfully pushed dataset to Hub!")
             print(f"  Dataset URL: https://huggingface.co/datasets/{self.config.repo_id}")
             
-            # ✅ Upload original metadata files
-            if self.config.upload_metadata:
-                self._upload_metadata_to_hub()
+            # ✅ Upload results_checkpoint.json
+            self._upload_checkpoint_to_hub()
             
         except Exception as e:
             print(f"\n✗ Error pushing to Hub: {e}")
             raise
     
-    def _upload_metadata_to_hub(self) -> None:
+    def _upload_checkpoint_to_hub(self) -> None:
         """
-        Upload both results.json and results_checkpoint.json to Hub as dataset files
-        Makes metadata accessible when exporting
-        ✅ Handles both files independently with proper existence checks
+        Upload results_checkpoint.json to Hub as dataset file
+        ✅ Makes metadata accessible when exporting
         """
-        # ✅ Get paths and check existence FIRST
-        results_path = self._get_results_metadata_path("results.json")
-        checkpoint_path = self._get_results_metadata_path("results_checkpoint.json")
+        checkpoint_path = self.data_dir / "results_checkpoint.json"
         
-        # If neither exists, skip
-        if not results_path and not checkpoint_path:
-            print("\n⚠ No metadata files (results.json or results_checkpoint.json) found")
-            print("  Skipping metadata upload")
+        if not checkpoint_path.exists():
+            print("\n⚠ results_checkpoint.json not found - skipping upload")
             return
         
         try:
             print("\n" + "="*60)
-            print("UPLOADING ORIGINAL METADATA")
+            print("UPLOADING METADATA")
             print("="*60)
             
             from huggingface_hub import HfApi
             
             api = HfApi()
             
-            # ✅ Upload results.json if it exists
-            if results_path:
-                try:
-                    print(f"\nUploading results.json to {self.config.repo_id}...")
-                    api.upload_file(
-                        path_or_fileobj=str(results_path),
-                        path_in_repo="results.json",
-                        repo_id=self.config.repo_id,
-                        repo_type="dataset",
-                        token=self.config.token,
-                        commit_message=f"Upload original results.json for split '{self.config.split}'"
-                    )
-                    print(f"  ✓ Successfully uploaded results.json!")
-                    print(f"    File: https://huggingface.co/datasets/{self.config.repo_id}/blob/main/results.json")
-                    
-                    # ✅ Log stats using helper method
-                    metadata = self._load_results_metadata()
-                    if metadata:
-                        self._log_metadata_stats(metadata)
-                    
-                except Exception as e:
-                    print(f"  ✗ Error uploading results.json: {e}")
+            print(f"\nUploading results_checkpoint.json to {self.config.repo_id}...")
             
-            # ✅ Upload results_checkpoint.json if it exists
-            if checkpoint_path:
-                try:
-                    print(f"\nUploading results_checkpoint.json to {self.config.repo_id}...")
-                    api.upload_file(
-                        path_or_fileobj=str(checkpoint_path),
-                        path_in_repo="results_checkpoint.json",
-                        repo_id=self.config.repo_id,
-                        repo_type="dataset",
-                        token=self.config.token,
-                        commit_message=f"Upload original results_checkpoint.json for split '{self.config.split}'"
-                    )
-                    print(f"  ✓ Successfully uploaded results_checkpoint.json!")
-                    print(f"    File: https://huggingface.co/datasets/{self.config.repo_id}/blob/main/results_checkpoint.json")
-                    
-                except Exception as e:
-                    print(f"  ✗ Error uploading results_checkpoint.json: {e}")
+            api.upload_file(
+                path_or_fileobj=str(checkpoint_path),
+                path_in_repo="results_checkpoint.json",
+                repo_id=self.config.repo_id,
+                repo_type="dataset",
+                token=self.config.token,
+                commit_message=f"Upload results_checkpoint.json for split '{self.config.split}'"
+            )
+            
+            print(f"  ✓ Successfully uploaded results_checkpoint.json!")
+            print(f"    File: https://huggingface.co/datasets/{self.config.repo_id}/blob/main/results_checkpoint.json")
+            
+            # Log metadata stats
+            with open(checkpoint_path, 'r', encoding='utf-8') as f:
+                metadata = json.load(f)
+            self._log_metadata_stats(metadata)
             
         except ImportError:
             print("\n⚠ huggingface_hub not installed - skipping metadata upload")
             print("  Install with: pip install huggingface_hub")
         except Exception as e:
-            print(f"\n⚠ Warning: Could not upload metadata: {e}")
-            print(f"  You can manually upload files to the Hub repository")
+            print(f"\n⚠ Warning: Could not upload results_checkpoint.json: {e}")
+            print(f"  You can manually upload the file to the Hub repository")
     
     def _log_metadata_stats(self, metadata: Dict[str, Any]) -> None:
-        """✅ Helper method to avoid code duplication"""
+        """Log metadata statistics"""
         try:
             num_generations = len(metadata.get('generations', []))
             num_styles = len(metadata.get('styles', []))
@@ -384,34 +303,15 @@ class FontDiffusionDatasetBuilder:
         dataset.save_to_disk(output_path)
         print(f"✓ Dataset saved to {output_path}")
         
-        # ✅ Also copy metadata files locally (using shutil from top imports)
-        results_path = self._get_results_metadata_path("results.json")
-        checkpoint_path = self._get_results_metadata_path("results_checkpoint.json")
+        # ✅ Copy results_checkpoint.json locally
+        checkpoint_path = self.data_dir / "results_checkpoint.json"
         
-        if results_path:
-            local_results_path = Path(output_path) / "results.json"
-            shutil.copy(results_path, local_results_path)  # ✅ No local import needed
-            print(f"✓ results.json saved to {local_results_path}")
-        
-        if checkpoint_path:
+        if checkpoint_path.exists():
             local_checkpoint_path = Path(output_path) / "results_checkpoint.json"
-            shutil.copy(checkpoint_path, local_checkpoint_path)  # ✅ No local import needed
+            shutil.copy(checkpoint_path, local_checkpoint_path)
             print(f"✓ results_checkpoint.json saved to {local_checkpoint_path}")
-
-def validate_generation_record(gen: Dict[str, Any]) -> bool:
-    """Validate generation record has all required fields"""
-    required_fields = [
-        'character', 'char_index', 'style', 'style_index',
-        'font', 'content_image_path', 'target_image_path'
-    ]
-    
-    missing = [f for f in required_fields if f not in gen or gen[f] is None]
-    
-    if missing:
-        print(f"⚠ Missing fields in generation: {missing}")
-        return False
-    
-    return True
+        else:
+            print(f"⚠ results_checkpoint.json not found - skipping local copy")
 
 
 def create_and_push_dataset(
@@ -421,11 +321,12 @@ def create_and_push_dataset(
     push_to_hub: bool = True,
     private: bool = False,
     token: Optional[str] = None,
-    local_save_path: Optional[str] = None,
-    upload_metadata: bool = True
+    local_save_path: Optional[str] = None
 ) -> Dataset:
     """
     Create FontDiffusion dataset and optionally push to Hub
+    
+    ✅ SIMPLIFIED: Only uses results_checkpoint.json
     
     Args:
         data_dir: Path to data_examples/train directory
@@ -435,7 +336,6 @@ def create_and_push_dataset(
         private: Whether repo should be private
         token: HF token (if None, uses HUGGINGFACE_TOKEN env var)
         local_save_path: Path to save dataset locally
-        upload_metadata: Whether to upload original results.json and results_checkpoint.json
     
     Returns:
         Dataset object
@@ -447,8 +347,7 @@ def create_and_push_dataset(
         split=split,
         push_to_hub=push_to_hub,
         private=private,
-        token=token,
-        upload_metadata=upload_metadata
+        token=token
     )
     
     builder = FontDiffusionDatasetBuilder(config)
@@ -466,76 +365,102 @@ def create_and_push_dataset(
     
     return dataset
 
+
 if __name__ == "__main__":
     import argparse
+    import sys
     
-    parser = argparse.ArgumentParser(description="Create and push FontDiffusion dataset")
+    parser = argparse.ArgumentParser(
+        description="Create and push FontDiffusion dataset",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+EXAMPLES:
+
+1. Create and push to Hub:
+   python create_hf_dataset.py \\
+     --data_dir "my_dataset/train_original" \\
+     --repo_id "username/font-diffusion-data" \\
+     --split "train_original" \\
+     --token "hf_xxxxx"
+
+2. Create locally without pushing:
+   python create_hf_dataset.py \\
+     --data_dir "my_dataset/train" \\
+     --repo_id "username/font-diffusion-data" \\
+     --split "train" \\
+     --no-push
+
+3. Create and save locally:
+   python create_hf_dataset.py \\
+     --data_dir "my_dataset/train" \\
+     --repo_id "username/font-diffusion-data" \\
+     --split "train" \\
+     --local-save "exported_dataset/"
+
+4. Upload multiple splits to same repo:
+   python create_hf_dataset.py \\
+     --data_dir "my_dataset/train_original" \\
+     --repo_id "username/font-diffusion-data" \\
+     --split "train_original" \\
+     --token "hf_xxxxx"
+
+   python create_hf_dataset.py \\
+     --data_dir "my_dataset/train" \\
+     --repo_id "username/font-diffusion-data" \\
+     --split "train" \\
+     --token "hf_xxxxx"
+        """
+    )
+    
     parser.add_argument('--data_dir', type=str, required=True,
-                       help='Path to data_examples/train directory')
+                       help='✅ REQUIRED: Path to data_examples/train directory')
     parser.add_argument('--repo_id', type=str, required=True,
-                       help='Hugging Face repo ID (e.g., username/fontdiffusion-dataset)')
+                       help='✅ REQUIRED: Hugging Face repo ID (e.g., username/fontdiffusion-dataset)')
     parser.add_argument('--split', type=str, default='train',
-                       help='Dataset split name')
+                       help='Dataset split name (default: train)')
     parser.add_argument('--private', action='store_true', default=False,
                        help='Make repository private')
     parser.add_argument('--no-push', action='store_true', default=False,
-                       help='Do not push to Hub')
-    parser.add_argument('--no-metadata', action='store_true', default=False,
-                       help='Do not upload results.json metadata')
+                       help='Do not push to Hub (only create locally)')
     parser.add_argument('--local-save', type=str, default=None,
                        help='Also save dataset locally to this path')
     parser.add_argument('--token', type=str, default=None,
-                       help='Hugging Face token')
+                       help='Hugging Face token (default: uses HUGGINGFACE_TOKEN env var)')
     
     args = parser.parse_args()
     
     print("\n" + "="*60)
     print("FONTDIFFUSION DATASET CREATOR")
     print("="*60)
+    print(f"\n📊 Configuration:")
+    print(f"  Data directory: {args.data_dir}")
+    print(f"  Repository: {args.repo_id}")
+    print(f"  Split: {args.split}")
+    print(f"  Private: {args.private}")
+    print(f"  Push to Hub: {not args.no_push}")
+    if args.local_save:
+        print(f"  Local save: {args.local_save}")
     
-    dataset = create_and_push_dataset(
-        data_dir=args.data_dir,
-        repo_id=args.repo_id,
-        split=args.split,
-        push_to_hub=not args.no_push,
-        private=args.private,
-        token=args.token,
-        local_save_path=args.local_save,
-        upload_metadata=not args.no_metadata  # ✅
-    )
-    
-    print("\n✓ Done!")
-
-
-"""
-USAGE EXAMPLES:
-
-# Upload with original results.json
-python create_hf_dataset.py \
-  --data_dir "my_dataset/train_original" \
-  --repo_id "username/font-diffusion-generated-data" \
-  --split "train_original" \
-  --private \
-  --token "hf_xxxxx"
-
-# Upload without metadata
-python create_hf_dataset.py \
-  --data_dir "my_dataset/train" \
-  --repo_id "username/font-diffusion-generated-data" \
-  --split "train" \
-  --no-metadata
-
-# Save locally and upload
-python create_hf_dataset.py \
-  --data_dir "my_dataset/train" \
-  --repo_id "username/font-diffusion-generated-data" \
-  --split "train" \
-  --local-save "exported_dataset/"
-
-# Upload multiple splits
-python create_hf_dataset.py --data_dir "my_dataset/train_original" --repo_id "username/font-diffusion-generated-data" --split "train_original" --token "hf_xxxxx"
-
-python create_hf_dataset.py --data_dir "my_dataset/train" --repo_id "username/font-diffusion-generated-data" --split "train" --token "hf_xxxxx"
-
-python create_hf_dataset.py --data_dir "my_dataset/val" --repo_id "username/font-diffusion-generated-data" --split "val" --token "hf_xxxxx"
-"""
+    try:
+        dataset = create_and_push_dataset(
+            data_dir=args.data_dir,
+            repo_id=args.repo_id,
+            split=args.split,
+            push_to_hub=not args.no_push,
+            private=args.private,
+            token=args.token,
+            local_save_path=args.local_save
+        )
+        
+        print("\n" + "="*60)
+        print("✅ DATASET CREATION COMPLETE!")
+        print("="*60)
+        
+    except KeyboardInterrupt:
+        print("\n\n⚠️  Creation interrupted by user")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n\n❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
