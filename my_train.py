@@ -457,8 +457,8 @@ def main():
     print(f"\n📂 Discovering images from filesystem...")
     print("=" * 60)
     
-    content_dir = os.path.join(args.data_root, "ContentImage")
-    target_dir = os.path.join(args.data_root, "TargetImage")
+    content_dir = os.path.join(args.data_root, "train", "ContentImage")
+    target_dir = os.path.join(args.data_root, "train", "TargetImage")
     
     content_images = discover_content_images(content_dir)
     target_images = discover_target_images(target_dir)
