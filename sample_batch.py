@@ -1106,6 +1106,21 @@ def main() -> None:
         print("\nLoading FontDiffuser pipeline...")
         pipe: FontDiffuserDPMPipeline = load_fontdiffuser_pipeline(pipeline_args)
 
+        # Add this block to enable torch.compile if requested
+        if getattr(args, "compile", False):
+            import torch
+            print("🔧 Compiling model components with torch.compile...")
+            try:
+                if hasattr(pipe.model, "unet"):
+                    pipe.model.unet = torch.compile(pipe.model.unet)
+                if hasattr(pipe.model, "style_encoder"):
+                    pipe.model.style_encoder = torch.compile(pipe.model.style_encoder)
+                if hasattr(pipe.model, "content_encoder"):
+                    pipe.model.content_encoder = torch.compile(pipe.model.content_encoder)
+                print("✓ Compilation complete.")
+            except Exception as e:
+                print(f"⚠ Compilation failed: {e}")
+
         evaluator: QualityEvaluator = QualityEvaluator(device=args.device)
 
         # Generate images
