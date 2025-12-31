@@ -1544,14 +1544,6 @@ def main() -> None:
             if os.path.exists(existing_checkpoint_path)
             else None
         )
-
-        # Generate content images (ALREADY HAS TQDM)
-        if not resume_results:
-            char_paths: Dict[str, str]
-            char_paths, index_manager = generate_content_images(
-                characters, font_manager, args.output_dir, args, index_manager
-            )
-
         # Create args namespace for pipeline
         pipeline_args: Namespace = create_args_namespace(args)
 
