@@ -1469,7 +1469,7 @@ def main() -> None:
     results: Dict[str, Any] = {}
 
     print("\n" + "=" * 60)
-    print("FONTDIFFUSER - SIMPLIFIED (Only results_checkpoint.json)")
+    print("FONTDIFFUSER BATCH GENERATION SCRIPT")
     print("=" * 60)
 
     try:
