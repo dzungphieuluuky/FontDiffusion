@@ -1,5 +1,6 @@
 """
 Create validation/test splits from training data
+✅ FIXED: Ensures proper matching of content, style, and target images
 Supports multiple validation scenarios:
 1. Seen char + Unseen style
 2. Unseen char + Seen style
@@ -66,12 +67,15 @@ class ValidationSplitCreator:
         self.source_train_dir = source_dir
         print(f"✓ Using source directory: {self.source_train_dir}")
 
-    def analyze_data(self) -> Tuple[List[str], List[str], Dict[str, List[str]]]:
+    def analyze_data(self) -> Tuple[List[str], List[str], Dict[str, List[str]], Dict[Tuple[str, str], bool]]:
         """
-        Analyze training data to get:
+        ✅ ENHANCED: Analyze training data and create a map of valid (char, style) pairs
+        
+        Returns:
         - All styles
-        - All characters
+        - All characters  
         - Character->Style mapping
+        - Valid (char, style) pairs that have target images
         """
         print("\n" + "=" * 60)
         print("ANALYZING TRAINING DATA")
@@ -80,11 +84,13 @@ class ValidationSplitCreator:
         styles = set()
         characters = set()
         char_to_styles = defaultdict(set)  # char -> set of styles
+        valid_pairs = set()  # (char, style) pairs that exist as target images
 
         target_dir = self.source_train_dir / "TargetImage"
+        content_dir = self.source_train_dir / "ContentImage"
 
-        # Scan all style directories
-        for style_folder in target_dir.iterdir():
+        # ✅ Scan all style directories
+        for style_folder in sorted(target_dir.iterdir()):
             if not style_folder.is_dir():
                 continue
 
@@ -92,25 +98,54 @@ class ValidationSplitCreator:
             styles.add(style_name)
 
             # Scan images: style0+char0.png
-            for img_file in style_folder.glob("*.png"):
+            for img_file in sorted(style_folder.glob("*.png")):
                 filename = img_file.stem  # Remove .png
                 if "+" not in filename:
                     continue
 
-                char_part = filename.split("+")[1]  # Get "char0"
-                characters.add(char_part)
-                char_to_styles[char_part].add(style_name)
+                try:
+                    char_part = filename.split("+")[1]  # Get "char0"
+                    characters.add(char_part)
+                    char_to_styles[char_part].add(style_name)
+                    valid_pairs.add((char_part, style_name))
+                except IndexError:
+                    continue
 
         styles_list = sorted(list(styles))
         chars_list = sorted(list(characters))
 
-        print(f"\nFound:")
-        print(f"  Styles: {len(styles_list)} - {styles_list}")
-        print(
-            f"  Characters: {len(chars_list)} - {chars_list[:10]}{'...' if len(chars_list) > 10 else ''}"
-        )
+        # ✅ Validate that all characters have content images
+        print(f"\n✓ Found:")
+        print(f"  Styles: {len(styles_list)}")
+        print(f"  Characters: {len(chars_list)}")
+        print(f"  Valid (char, style) pairs: {len(valid_pairs)}")
 
-        return styles_list, chars_list, dict(char_to_styles)
+        # Check for missing content images
+        missing_content = []
+        for char in chars_list:
+            content_path = content_dir / f"{char}.png"
+            if not content_path.exists():
+                missing_content.append(char)
+
+        if missing_content:
+            print(f"\n⚠️  WARNING: {len(missing_content)} characters missing content images:")
+            print(f"  {missing_content[:10]}{'...' if len(missing_content) > 10 else ''}")
+            print(f"  These will be excluded from splits")
+            
+            # Remove characters with missing content images
+            for char in missing_content:
+                del char_to_styles[char]
+                characters.discard(char)
+                # Remove all pairs with this character
+                valid_pairs = {(c, s) for c, s in valid_pairs if c != char}
+            
+            chars_list = sorted(list(characters))
+
+        print(f"\n✓ After validation:")
+        print(f"  Characters with content images: {len(chars_list)}")
+        print(f"  Valid (char, style) pairs: {len(valid_pairs)}")
+
+        return styles_list, chars_list, dict(char_to_styles), valid_pairs
 
     def create_validation_scenarios(
         self,
@@ -208,9 +243,18 @@ class ValidationSplitCreator:
         return scenarios
 
     def copy_images_for_split(
-        self, split_name: str, split_dir: Path, scenarios: Dict[str, Dict]
-    ) -> int:
-        """Copy images for a specific split"""
+        self, 
+        split_name: str, 
+        split_dir: Path, 
+        scenarios: Dict[str, Dict],
+        valid_pairs: Set[Tuple[str, str]]
+    ) -> Tuple[int, int, int]:
+        """
+        ✅ ENHANCED: Copy images for a specific split with validation
+        
+        Returns:
+            (content_copied, target_copied, skipped_pairs)
+        """
         split_config = scenarios[split_name]
         allowed_styles = set(split_config["styles"])
         allowed_chars = set(split_config["characters"])
@@ -225,44 +269,118 @@ class ValidationSplitCreator:
         for style in allowed_styles:
             (split_target_dir / style).mkdir(exist_ok=True)
 
-        # Copy content images
+        # ============================================================================
+        # Step 1: Identify valid pairs for this split
+        # ============================================================================
+        split_valid_pairs = set()
+        for char, style in valid_pairs:
+            if char in allowed_chars and style in allowed_styles:
+                split_valid_pairs.add((char, style))
+
+        if not split_valid_pairs:
+            print(f"  ⚠️  No valid pairs found for {split_name}")
+            return 0, 0, 0
+
+        print(f"  Valid pairs: {len(split_valid_pairs)}")
+
+        # Extract unique chars and styles from valid pairs
+        chars_in_split = {char for char, style in split_valid_pairs}
+        styles_in_split = {style for char, style in split_valid_pairs}
+
+        print(f"  Unique chars in valid pairs: {len(chars_in_split)}")
+        print(f"  Unique styles in valid pairs: {len(styles_in_split)}")
+
+        # ============================================================================
+        # Step 2: Copy content images for characters that have target images
+        # ============================================================================
         source_content_dir = self.source_train_dir / "ContentImage"
         content_copied = 0
 
-        for char in allowed_chars:
+        print(f"\n  📥 Copying content images...")
+        for char in tqdm(chars_in_split, desc="  Content", ncols=80, unit="char", leave=False):
             src_path = source_content_dir / f"{char}.png"
             dst_path = split_content_dir / f"{char}.png"
 
-            if src_path.exists() and src_path.resolve() != dst_path.resolve():
+            if not src_path.exists():
+                tqdm.write(f"    ⚠️  Missing content image: {src_path}")
+                continue
+
+            if src_path.resolve() != dst_path.resolve():
                 shutil.copy2(src_path, dst_path)
                 content_copied += 1
 
-        # Copy target images
+        # ============================================================================
+        # Step 3: Copy target images only for valid (char, style) pairs
+        # ============================================================================
         source_target_dir = self.source_train_dir / "TargetImage"
-        copied_count = 0
+        target_copied = 0
+        skipped_pairs = 0
 
-        for style in allowed_styles:
+        print(f"  📥 Copying target images...")
+        for char, style in tqdm(split_valid_pairs, desc="  Target", ncols=80, unit="pair", leave=False):
             style_dir = source_target_dir / style
             if not style_dir.exists():
+                skipped_pairs += 1
                 continue
 
-            for img_file in style_dir.glob("*.png"):
-                filename = img_file.stem
+            # Find the target image: style0+charX.png
+            target_filename = f"{style}+{char}.png"
+            src_path = style_dir / target_filename
+
+            if not src_path.exists():
+                tqdm.write(f"    ⚠️  Missing target image: {src_path}")
+                skipped_pairs += 1
+                continue
+
+            dst_path = split_target_dir / style / target_filename
+
+            if src_path.resolve() != dst_path.resolve():
+                shutil.copy2(src_path, dst_path)
+                target_copied += 1
+
+        # ============================================================================
+        # Step 4: Validate split (optional but recommended)
+        # ============================================================================
+        print(f"\n  🔍 Validating split...")
+        self._validate_split(split_dir)
+
+        return content_copied, target_copied, skipped_pairs
+
+    def _validate_split(self, split_dir: Path) -> None:
+        """
+        ✅ NEW: Validate that every target image has corresponding content image
+        """
+        content_dir = split_dir / "ContentImage"
+        target_dir = split_dir / "TargetImage"
+
+        missing_pairs = 0
+        total_targets = 0
+
+        for style_folder in target_dir.iterdir():
+            if not style_folder.is_dir():
+                continue
+
+            for target_file in style_folder.glob("*.png"):
+                total_targets += 1
+                filename = target_file.stem
+                
                 if "+" not in filename:
                     continue
 
                 char_part = filename.split("+")[1]
-                if char_part in allowed_chars:
-                    dst_path = split_target_dir / style / img_file.name
+                content_path = content_dir / f"{char_part}.png"
 
-                    if img_file.resolve() != dst_path.resolve():
-                        shutil.copy2(img_file, dst_path)
-                        copied_count += 1
+                if not content_path.exists():
+                    missing_pairs += 1
+                    tqdm.write(f"    ❌ Validation failed: {target_file.name} missing {char_part}.png")
 
-        print(f"  ✓ Copied {copied_count} target images")
-        print(f"  ✓ Copied {content_copied} content images")
-
-        return copied_count
+        if missing_pairs > 0:
+            print(f"  ⚠️  VALIDATION ERROR: {missing_pairs}/{total_targets} targets missing content images!")
+            raise ValueError(
+                f"Split validation failed: {missing_pairs} target images have no matching content images"
+            )
+        else:
+            print(f"  ✓ Validation passed: All {total_targets} targets have matching content images")
 
     def create_splits(self) -> None:
         """Create all splits"""
@@ -270,8 +388,8 @@ class ValidationSplitCreator:
         print("CREATING DATA SPLITS")
         print("=" * 60)
 
-        # Analyze data
-        styles, characters, char_to_styles = self.analyze_data()
+        # ✅ Analyze data and get valid pairs
+        styles, characters, char_to_styles, valid_pairs = self.analyze_data()
 
         # Create scenarios
         scenarios = self.create_validation_scenarios(styles, characters, char_to_styles)
@@ -281,7 +399,10 @@ class ValidationSplitCreator:
 
         # Train split
         print("\n📁 Train split:")
-        self.copy_images_for_split("train", self.train_dir, scenarios)
+        train_content, train_target, train_skipped = self.copy_images_for_split(
+            "train", self.train_dir, scenarios, valid_pairs
+        )
+        print(f"  ✓ Copied {train_content} content + {train_target} target images (skipped {train_skipped})")
 
         # Validation splits
         if self.config.create_scenarios:
@@ -294,7 +415,10 @@ class ValidationSplitCreator:
             for val_scenario in val_scenarios:
                 print(f"\n📁 {val_scenario}:")
                 scenario_dir = self.data_root / val_scenario
-                self.copy_images_for_split(val_scenario, scenario_dir, scenarios)
+                val_content, val_target, val_skipped = self.copy_images_for_split(
+                    val_scenario, scenario_dir, scenarios, valid_pairs
+                )
+                print(f"  ✓ Copied {val_content} content + {val_target} target images (skipped {val_skipped})")
         else:
             # Create simple val directory (combination of all unseen)
             print(f"\n📁 val (all unseen):")
@@ -306,11 +430,17 @@ class ValidationSplitCreator:
                     + scenarios["val_unseen_style_seen_char"]["characters"],
                 }
             }
-            self.copy_images_for_split("val", self.val_dir, val_combined_scenarios)
+            val_content, val_target, val_skipped = self.copy_images_for_split(
+                "val", self.val_dir, val_combined_scenarios, valid_pairs
+            )
+            print(f"  ✓ Copied {val_content} content + {val_target} target images (skipped {val_skipped})")
 
         # Test split
         print(f"\n📁 test:")
-        self.copy_images_for_split("test", self.test_dir, scenarios)
+        test_content, test_target, test_skipped = self.copy_images_for_split(
+            "test", self.test_dir, scenarios, valid_pairs
+        )
+        print(f"  ✓ Copied {test_content} content + {test_target} target images (skipped {test_skipped})")
 
         # Save scenario metadata
         self._save_scenario_metadata(scenarios)
@@ -333,7 +463,8 @@ def create_validation_split(
     random_seed: int = 42,
 ) -> None:
     """
-    Create validation splits
+    Create validation splits with proper validation
+    ✅ Ensures every (char, style) pair has both content and target images
 
     Args:
         data_root: Root data directory
@@ -359,23 +490,28 @@ def create_validation_split(
     print("=" * 60)
 
     if create_scenarios:
-        print("\nCreated directories:")
-        print("  📁 train/ - Original training data")
+        print("\n✅ Created directories with validated pairs:")
+        print("  📁 train/ - Training data (matched content + targets)")
         print("  📁 val_seen_style_unseen_char/ - Test new characters")
         print("  📁 val_unseen_style_seen_char/ - Test new styles")
         print("  📁 val_unseen_both/ - Test full generalization")
         print("  📁 test/ - Hold-out test set")
     else:
-        print("\nCreated directories:")
-        print("  📁 train/ - Training data")
-        print("  📁 val/ - Validation data (combined unseen)")
-        print("  📁 test/ - Test data")
+        print("\n✅ Created directories with validated pairs:")
+        print("  📁 train/ - Training data (matched content + targets)")
+        print("  📁 val/ - Validation data (matched content + targets)")
+        print("  📁 test/ - Test data (matched content + targets)")
+    
+    print("\n💡 Each folder guarantees:")
+    print("  ✓ For every charX+styleY.png target, charX.png content exists")
+    print("  ✓ No orphaned target images without content")
+    print("  ✓ No unused content images without targets")
 
 
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Create validation splits")
+    parser = argparse.ArgumentParser(description="Create validation splits with proper matching")
     parser.add_argument(
         "--data_root", type=str, default="data_examples", help="Root data directory"
     )
@@ -399,18 +535,26 @@ if __name__ == "__main__":
     print("FONTDIFFUSION VALIDATION SPLIT CREATOR")
     print("=" * 60)
 
-    create_validation_split(
-        data_root=args.data_root,
-        val_split_ratio=args.val_ratio,
-        test_split_ratio=args.test_ratio,
-        create_scenarios=args.scenarios,
-        random_seed=args.seed,
-    )
+    try:
+        create_validation_split(
+            data_root=args.data_root,
+            val_split_ratio=args.val_ratio,
+            test_split_ratio=args.test_split_ratio,
+            create_scenarios=args.scenarios,
+            random_seed=args.seed,
+        )
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
+        import sys
+        sys.exit(1)
 
-"""Example
-python create_validation_split.py \
-  --data_root data_examples \
-  --val_ratio 0.2 \
-  --test_ratio 0.1 \
+"""
+Example usage:
+python create_validation_split.py \\
+  --data_root data_examples \\
+  --val_ratio 0.2 \\
+  --test_ratio 0.1 \\
   --seed 42
 """
