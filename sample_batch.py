@@ -503,16 +503,39 @@ def load_characters(
             len(all_lines) if end_line is None else min(len(all_lines), end_line)
         )
 
+        # ✅ ADD VALIDATION
+        if start_idx >= len(all_lines):
+            raise ValueError(
+                f"❌ start_line ({start_line}) exceeds file length ({len(all_lines)} lines)\n"
+                f"   Your file only has {len(all_lines)} lines, but you're trying to start at line {start_line}."
+            )
+
+        if start_idx >= end_idx:
+            raise ValueError(
+                f"❌ Invalid line range: start_line={start_line}, end_line={end_line}\n"
+                f"   File has {len(all_lines)} lines.\n"
+                f"   Computed range [{start_idx}:{end_idx}] is empty.\n"
+                f"   Make sure start_line <= end_line and both are within file bounds."
+            )
+
         print(
-            f"Loading characters from lines {start_line} to {end_idx} (total: {len(all_lines)} lines)"
+            f"📖 Loading characters from file: {characters_arg}"
+        )
+        print(
+            f"   Lines {start_line} to {end_idx} (total file: {len(all_lines)} lines)"
+        )
+        print(
+            f"   Processing {end_idx - start_idx} lines..."
         )
 
         for line_num, line in tqdm(
             enumerate(all_lines[start_idx:end_idx], start=start_line),
             total=(end_idx - start_idx),
             desc="📖 Reading character file",
-            ncols=80,
+            ncols=100,
             unit="line",
+            bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
+            colour="cyan",
         ):
             char: str = line.strip()
             if not char:
@@ -532,9 +555,15 @@ def load_characters(
                 )
             chars.append(c)
 
-    print(f"Successfully loaded {len(chars)} single characters.")
-    return chars
+    # ✅ ADD FINAL CHECK
+    if not chars:
+        raise ValueError(
+            f"❌ No valid characters loaded!\n"
+            f"   Check your character file or line range (start={start_line}, end={end_line})"
+        )
 
+    print(f"✅ Successfully loaded {len(chars)} single characters.")
+    return chars
 
 def load_style_images(style_images_arg: str) -> List[Tuple[str, str]]:
     """
