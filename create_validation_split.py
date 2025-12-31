@@ -539,7 +539,7 @@ if __name__ == "__main__":
         create_validation_split(
             data_root=args.data_root,
             val_split_ratio=args.val_ratio,
-            test_split_ratio=args.test_split_ratio,
+            test_split_ratio=args.test_ratio,
             create_scenarios=args.scenarios,
             random_seed=args.seed,
         )

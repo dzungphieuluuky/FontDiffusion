@@ -820,8 +820,39 @@ def batch_generate_images(
     """
     ✅ SIMPLIFIED: Skip char-to-font mapping, use first available font
     """
-
-    # Initialize index manager
+    
+    # ✅ FIXED: Always check for and generate missing content images
+    content_dir: str = os.path.join(args.output_dir, "ContentImage")
+    os.makedirs(content_dir, exist_ok=True)  # Ensure directory exists
+    
+    # Find which content images already exist
+    existing_content_indices: Set[int] = set()
+    if os.path.exists(content_dir):
+        for f in Path(content_dir).glob("char*.png"):
+            try:
+                idx = int(f.stem.replace("char", ""))
+                existing_content_indices.add(idx)
+            except ValueError:
+                pass  # Skip files that don't match pattern
+    
+    # Determine which characters need content images
+    chars_needing_content: List[str] = []
+    for char in characters:
+        char_idx = index_manager.get_char_index(char) if index_manager else len(chars_needing_content)
+        if char_idx not in existing_content_indices:
+            chars_needing_content.append(char)
+    
+    # Always generate missing content images
+    if chars_needing_content:
+        print(f"\n🔄 Generating {len(chars_needing_content)} missing content images...")
+        char_paths: Dict[str, str]
+        char_paths, index_manager = generate_content_images(
+            chars_needing_content, font_manager, args.output_dir, args, index_manager
+        )
+    elif characters:
+        print(f"\n✅ All {len(characters)} content images already exist")
+    
+    # Initialize index manager if not provided
     if index_manager is None:
         existing_checkpoint_path = os.path.join(output_dir, "results_checkpoint.json")
         index_manager = ResultsIndexManager(
