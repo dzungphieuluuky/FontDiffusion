@@ -307,6 +307,74 @@ class QualityEvaluator:
         except Exception as e:
             logging.info(f"Error saving image to {path}: {e}")
 
+def load_characters(characters_arg: str, start_line: int = 1, end_line: Optional[int] = None) -> List[str]:
+    chars: List[str] = []
+    if os.path.isfile(characters_arg):
+        with open(characters_arg, "r", encoding="utf-8") as f:
+            all_lines: List[str] = f.readlines()
+        start_idx: int = max(0, start_line - 1)
+        end_idx: int = len(all_lines) if end_line is None else min(len(all_lines), end_line)
+        if start_idx >= len(all_lines):
+            raise ValueError(
+                f"❌ start_line ({start_line}) exceeds file length ({len(all_lines)} lines)\n"
+                f"   Your file only has {len(all_lines)} lines, but you're trying to start at line {start_line}."
+            )
+        if start_idx >= end_idx:
+            raise ValueError(
+                f"❌ Invalid line range: start_line={start_line}, end_line={end_line}\n"
+                f"   File has {len(all_lines)} lines.\n"
+                f"   Computed range [{start_idx}:{end_idx}] is empty.\n"
+                f"   Make sure start_line <= end_line and both are within file bounds."
+            )
+        logging.info(f"📖 Loading characters from file: {characters_arg}")
+        logging.info(f"   Lines {start_line} to {end_idx} (total file: {len(all_lines)} lines)")
+        logging.info(f"   Processing {end_idx - start_idx} lines...")
+        for line_num, line in tqdm(enumerate(all_lines[start_idx:end_idx], start=start_line), total=(end_idx - start_idx), desc="📖 Reading character file", colour="green"):
+            char: str = line.strip()
+            if not char:
+                continue
+            if len(char) != 1:
+                logging.info(f"Warning: Skipping line {line_num}: expected 1 char, got {len(char)}: '{char}'")
+                continue
+            chars.append(char)
+    else:
+        for c in [x.strip() for x in characters_arg.split(",") if x.strip()]:
+            if len(c) != 1:
+                raise ValueError(f"Invalid character in argument: '{c}' (must be single char)")
+            chars.append(c)
+    if not chars:
+        raise ValueError(
+            f"❌ No valid characters loaded!\n"
+            f"   Check your character file or line range (start={start_line}, end={end_line})"
+        )
+    logging.info(f"✅ Successfully loaded {len(chars)} single characters.")
+    return chars
+
+
+def load_style_images(style_images_arg: str) -> List[Tuple[str, str]]:
+    if os.path.isdir(style_images_arg):
+        image_exts: Set[str] = {".jpg", ".jpeg", ".png", ".bmp"}
+        style_paths: List[str] = [
+            os.path.join(style_images_arg, f)
+            for f in os.listdir(style_images_arg)
+            if os.path.splitext(f)[1].lower() in image_exts
+        ]
+        style_paths.sort()
+        logging.info(f"\n📂 Loading {len(style_paths)} style images from directory...")
+        verified_paths = []
+        for path in tqdm(style_paths, desc="✓ Verifying style images", colour="green"):
+            if os.path.isfile(path):
+                style_name = os.path.splitext(os.path.basename(path))[0]
+                verified_paths.append((path, style_name))
+        return verified_paths
+    else:
+        style_paths: List[str] = [p.strip() for p in style_images_arg.split(",")]
+        result = []
+        for path in style_paths:
+            style_name = os.path.splitext(os.path.basename(path))[0]
+            result.append((path, style_name))
+        return result
+
 
 def parse_args() -> Namespace:
     """Parse command line arguments"""
@@ -375,6 +443,20 @@ def parse_args() -> Namespace:
         "--batch_size", type=int, default=4, help="Batch size for generation"
     )
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
+
+    # ✅ Image size arguments - MUST be before optimization flags
+    parser.add_argument(
+        "--style_image_size",
+        type=int,
+        default=96,
+        help="Style image size (will be converted to tuple)",
+    )
+    parser.add_argument(
+        "--content_image_size",
+        type=int,
+        default=96,
+        help="Content image size (will be converted to tuple)",
+    )
 
     # Optimization flags
     parser.add_argument(
@@ -451,79 +533,46 @@ def parse_args() -> Namespace:
         help="Dataset split name (e.g., train_original, val)",
     )
 
+    # ✅ DPM-Solver arguments
+    parser.add_argument(
+        "--order", type=int, default=2, help="DPM-Solver order"
+    )
+    parser.add_argument(
+        "--algorithm_type",
+        type=str,
+        default="dpmsolver++",
+        help="Algorithm type",
+    )
+    parser.add_argument(
+        "--skip_type",
+        type=str,
+        default="time_uniform",
+        help="Skip type",
+    )
+    parser.add_argument(
+        "--method", type=str, default="multistep", help="Method"
+    )
+    parser.add_argument(
+        "--t_start", type=float, default=1.0, help="t_start"
+    )
+    parser.add_argument(
+        "--t_end", type=float, default=1e-3, help="t_end"
+    )
+    parser.add_argument(
+        "--content_encoder_downsample_size",
+        type=int,
+        default=3,
+        help="Content encoder downsample size",
+    )
+    parser.add_argument(
+        "--correcting_x0_fn", type=str, default=None, help="Correcting x0 function"
+    )
+
     return parser.parse_args()
-
-def load_characters(characters_arg: str, start_line: int = 1, end_line: Optional[int] = None) -> List[str]:
-    chars: List[str] = []
-    if os.path.isfile(characters_arg):
-        with open(characters_arg, "r", encoding="utf-8") as f:
-            all_lines: List[str] = f.readlines()
-        start_idx: int = max(0, start_line - 1)
-        end_idx: int = len(all_lines) if end_line is None else min(len(all_lines), end_line)
-        if start_idx >= len(all_lines):
-            raise ValueError(
-                f"❌ start_line ({start_line}) exceeds file length ({len(all_lines)} lines)\n"
-                f"   Your file only has {len(all_lines)} lines, but you're trying to start at line {start_line}."
-            )
-        if start_idx >= end_idx:
-            raise ValueError(
-                f"❌ Invalid line range: start_line={start_line}, end_line={end_line}\n"
-                f"   File has {len(all_lines)} lines.\n"
-                f"   Computed range [{start_idx}:{end_idx}] is empty.\n"
-                f"   Make sure start_line <= end_line and both are within file bounds."
-            )
-        logging.info(f"📖 Loading characters from file: {characters_arg}")
-        logging.info(f"   Lines {start_line} to {end_idx} (total file: {len(all_lines)} lines)")
-        logging.info(f"   Processing {end_idx - start_idx} lines...")
-        for line_num, line in tqdm(enumerate(all_lines[start_idx:end_idx], start=start_line), total=(end_idx - start_idx), desc="📖 Reading character file", colour="green"):
-            char: str = line.strip()
-            if not char:
-                continue
-            if len(char) != 1:
-                logging.info(f"Warning: Skipping line {line_num}: expected 1 char, got {len(char)}: '{char}'")
-                continue
-            chars.append(char)
-    else:
-        for c in [x.strip() for x in characters_arg.split(",") if x.strip()]:
-            if len(c) != 1:
-                raise ValueError(f"Invalid character in argument: '{c}' (must be single char)")
-            chars.append(c)
-    if not chars:
-        raise ValueError(
-            f"❌ No valid characters loaded!\n"
-            f"   Check your character file or line range (start={start_line}, end={end_line})"
-        )
-    logging.info(f"✅ Successfully loaded {len(chars)} single characters.")
-    return chars
-
-
-def load_style_images(style_images_arg: str) -> List[Tuple[str, str]]:
-    if os.path.isdir(style_images_arg):
-        image_exts: Set[str] = {".jpg", ".jpeg", ".png", ".bmp"}
-        style_paths: List[str] = [
-            os.path.join(style_images_arg, f)
-            for f in os.listdir(style_images_arg)
-            if os.path.splitext(f)[1].lower() in image_exts
-        ]
-        style_paths.sort()
-        logging.info(f"\n📂 Loading {len(style_paths)} style images from directory...")
-        verified_paths = []
-        for path in tqdm(style_paths, desc="✓ Verifying style images", colour="green"):
-            if os.path.isfile(path):
-                style_name = os.path.splitext(os.path.basename(path))[0]
-                verified_paths.append((path, style_name))
-        return verified_paths
-    else:
-        style_paths: List[str] = [p.strip() for p in style_images_arg.split(",")]
-        result = []
-        for path in style_paths:
-            style_name = os.path.splitext(os.path.basename(path))[0]
-            result.append((path, style_name))
-        return result
 
 
 def create_args_namespace(args: Namespace) -> Namespace:
-    """Create args namespace for FontDiffuser pipeline"""
+    """Create args namespace for FontDiffuser pipeline with proper validation"""
 
     try:
         from configs.fontdiffuser import get_parser
@@ -533,26 +582,74 @@ def create_args_namespace(args: Namespace) -> Namespace:
     except Exception:
         default_args: Namespace = Namespace()
 
-    # Override with user arguments
+    # Copy all attributes from input args
     for key, value in vars(args).items():
         setattr(default_args, key, value)
 
-    # Ensure image sizes are tuples
-    if not hasattr(default_args, "style_image_size"):
+    # ✅ CRITICAL: Ensure style_image_size is a valid tuple
+    if not hasattr(default_args, "style_image_size") or default_args.style_image_size is None:
         default_args.style_image_size = (96, 96)
     elif isinstance(default_args.style_image_size, int):
-        default_args.style_image_size = (
-            default_args.style_image_size,
-            default_args.style_image_size,
+        if default_args.style_image_size <= 0:
+            logging.warning(
+                f"Invalid style_image_size: {default_args.style_image_size}, using default (96, 96)"
+            )
+            default_args.style_image_size = (96, 96)
+        else:
+            default_args.style_image_size = (
+                default_args.style_image_size,
+                default_args.style_image_size,
+            )
+    elif isinstance(default_args.style_image_size, (list, tuple)):
+        if len(default_args.style_image_size) != 2:
+            logging.warning(
+                f"Invalid style_image_size length: {len(default_args.style_image_size)}, using default (96, 96)"
+            )
+            default_args.style_image_size = (96, 96)
+        else:
+            default_args.style_image_size = tuple(default_args.style_image_size)
+    else:
+        logging.warning(
+            f"Invalid style_image_size type: {type(default_args.style_image_size)}, using default (96, 96)"
         )
+        default_args.style_image_size = (96, 96)
 
-    if not hasattr(default_args, "content_image_size"):
+    # ✅ CRITICAL: Ensure content_image_size is a valid tuple
+    if not hasattr(default_args, "content_image_size") or default_args.content_image_size is None:
         default_args.content_image_size = (96, 96)
     elif isinstance(default_args.content_image_size, int):
-        default_args.content_image_size = (
-            default_args.content_image_size,
-            default_args.content_image_size,
+        if default_args.content_image_size <= 0:
+            logging.warning(
+                f"Invalid content_image_size: {default_args.content_image_size}, using default (96, 96)"
+            )
+            default_args.content_image_size = (96, 96)
+        else:
+            default_args.content_image_size = (
+                default_args.content_image_size,
+                default_args.content_image_size,
+            )
+    elif isinstance(default_args.content_image_size, (list, tuple)):
+        if len(default_args.content_image_size) != 2:
+            logging.warning(
+                f"Invalid content_image_size length: {len(default_args.content_image_size)}, using default (96, 96)"
+            )
+            default_args.content_image_size = (96, 96)
+        else:
+            default_args.content_image_size = tuple(default_args.content_image_size)
+    else:
+        logging.warning(
+            f"Invalid content_image_size type: {type(default_args.content_image_size)}, using default (96, 96)"
         )
+        default_args.content_image_size = (96, 96)
+
+    # ✅ Validate both sizes are positive
+    if default_args.style_image_size[0] <= 0 or default_args.style_image_size[1] <= 0:
+        logging.warning("style_image_size must be positive, using (96, 96)")
+        default_args.style_image_size = (96, 96)
+
+    if default_args.content_image_size[0] <= 0 or default_args.content_image_size[1] <= 0:
+        logging.warning("content_image_size must be positive, using (96, 96)")
+        default_args.content_image_size = (96, 96)
 
     # Set required attributes
     default_args.demo = False
@@ -563,7 +660,9 @@ def create_args_namespace(args: Namespace) -> Namespace:
     default_args.resolution = 96
 
     # Generation parameters
-    default_args.algorithm_type = getattr(default_args, "algorithm_type", "dpmsolver++")
+    default_args.algorithm_type = getattr(
+        default_args, "algorithm_type", "dpmsolver++"
+    )
     default_args.guidance_type = getattr(
         default_args, "guidance_type", "classifier-free"
     )
@@ -577,6 +676,11 @@ def create_args_namespace(args: Namespace) -> Namespace:
     default_args.content_encoder_downsample_size = getattr(
         default_args, "content_encoder_downsample_size", 3
     )
+
+    if default_args.is_main_process:
+        logging.info(f"\n✅ Image size configuration:")
+        logging.info(f"   style_image_size:   {default_args.style_image_size}")
+        logging.info(f"   content_image_size: {default_args.content_image_size}")
 
     return default_args
 
