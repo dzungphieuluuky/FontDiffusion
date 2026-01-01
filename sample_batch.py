@@ -43,6 +43,13 @@ logging.basicConfig(
     handlers=[TqdmLoggingHandler()],
 )
 
+HF_TQDM_CONFIG = {
+    "ncols": 100,
+    "ascii": False,
+    "bar_format": "{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
+    "colour": "#2196f3",
+}
+
 # Import evaluation metrics
 try:
     import lpips
@@ -767,12 +774,8 @@ def generate_content_images(
     for char in tqdm(
         characters,
         desc="📸 Generating content images",
-        ncols=120,
-        unit="char",
-        bar_format="{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
-        colour="blue",
-        dynamic_ncols=True,
-    ):
+        **HF_TQDM_CONFIG,
+        ):
         found_font = None
         for font_name in font_names:
             if font_manager.is_char_in_font(font_name, char):
