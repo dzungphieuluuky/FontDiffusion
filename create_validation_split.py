@@ -39,7 +39,17 @@ logging.basicConfig(
 
 
 def compute_file_hash(char: str, style: str, font: str = "") -> str:
-    """Compute deterministic hash for a (character, style, font) combination"""
+    """
+    Compute deterministic hash for a (character, style, font) combination
+
+    Args:
+        char: Unicode character
+        style: Style name
+        font: Font name (optional)
+
+    Returns:
+        8-character hash string
+    """
     content = f"{char}_{style}_{font}"
     return hashlib.sha256(content.encode("utf-8")).hexdigest()[:8]
 
@@ -48,20 +58,31 @@ def get_content_filename(char: str, font: str = "") -> str:
     """
     Get content image filename for character
     Format: {unicode_codepoint}_{char}_{hash}.png
+    Example: U+4E00_中_a1b2c3d4.png
     """
     codepoint = f"U+{ord(char):04X}"
     hash_val = compute_file_hash(char, "", font)
-    return f"{codepoint}_{char}_{hash_val}.png"
+    # Sanitize char for filename (replace problematic characters)
+    safe_char = char if char.isprintable() and char not in '<>:"/\\|?*' else ""
+    if safe_char:
+        return f"{codepoint}_{safe_char}_{hash_val}.png"
+    else:
+        return f"{codepoint}_{hash_val}.png"
 
 
 def get_target_filename(char: str, style: str, font: str = "") -> str:
     """
     Get target image filename
     Format: {unicode_codepoint}_{char}_{style}_{hash}.png
+    Example: U+4E00_中_style0_a1b2c3d4.png
     """
     codepoint = f"U+{ord(char):04X}"
     hash_val = compute_file_hash(char, style, font)
-    return f"{codepoint}_{char}_{style}_{hash_val}.png"
+    safe_char = char if char.isprintable() and char not in '<>:"/\\|?*' else ""
+    if safe_char:
+        return f"{codepoint}_{safe_char}_{style}_{hash_val}.png"
+    else:
+        return f"{codepoint}_{style}_{hash_val}.png"
 
 
 def parse_content_filename(filename: str) -> Optional[Tuple[str, str]]:
