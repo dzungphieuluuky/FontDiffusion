@@ -841,9 +841,9 @@ def batch_generate_images(
     os.makedirs(target_base_dir, exist_ok=True)
 
     # Print configuration
-    logging.info(f"\n{'=' * 70}")
-    logging.info(f"{'BATCH IMAGE GENERATION':^70}")
-    logging.info("=" * 70)
+    logging.info(f"\n{'=' * 60}")
+    logging.info(f"{'BATCH IMAGE GENERATION':^60}")
+    logging.info("=" * 60)
     logging.info(f"Fonts:                {len(font_manager.get_font_names())}")
     logging.info(f"Styles:               {len(style_paths_with_names)}")
     logging.info(f"Characters:           {len(characters)}")
@@ -852,7 +852,7 @@ def batch_generate_images(
         f"Existing generations: {len(generation_tracker.generations)} unique pairs"
     )
     logging.info(f"Existing hashes:      {len(generation_tracker.generated_hashes)}")
-    logging.info("=" * 70 + "\n")
+    logging.info("=" * 60 + "\n")
 
     # Use first font for all characters
     font_names = font_manager.get_font_names()
@@ -861,7 +861,7 @@ def batch_generate_images(
 
     primary_font = font_names[0]
     logging.info(f"Using font: {primary_font}")
-    logging.info("=" * 70 + "\n")
+    logging.info("=" * 60 + "\n")
 
     # Initialize counters
     generated_count = 0
@@ -1120,9 +1120,9 @@ def _print_generation_summary(
     """Print final generation summary"""
     elapsed = time.time() - start_time
 
-    logging.info("\n" + "=" * 70)
-    logging.info(f"{'GENERATION COMPLETE':^70}")
-    logging.info("=" * 70)
+    logging.info("\n" + "=" * 60)
+    logging.info(f"{'GENERATION COMPLETE':^60}")
+    logging.info("=" * 60)
     logging.info(f"\nPair Statistics:")
     logging.info(f"  Total possible:     {total}")
     logging.info(f"  Generated (new):    {generated}")
@@ -1135,7 +1135,7 @@ def _print_generation_summary(
         if generated > 0
         else "  Avg per pair:       N/A"
     )
-    logging.info("=" * 70)
+    logging.info("=" * 60)
 
 
 def evaluate_results(
@@ -1152,9 +1152,9 @@ def evaluate_results(
         )
         return results
 
-    logging.info("\n" + "=" * 70)
-    logging.info(f"{'EVALUATING GENERATED IMAGES':^70}")
-    logging.info("=" * 70)
+    logging.info("\n" + "=" * 60)
+    logging.info(f"{'EVALUATING GENERATED IMAGES':^60}")
+    logging.info("=" * 60)
 
     lpips_scores: List[float] = []
     ssim_scores: List[float] = []
@@ -1269,14 +1269,14 @@ def evaluate_results(
         except Exception as e:
             logging.info(f"  ⚠ Error computing FID: {e}")
 
-    logging.info("\n" + "=" * 70)
-    logging.info(f"{'EVALUATION SUMMARY':^70}")
-    logging.info("=" * 70)
+    logging.info("\n" + "=" * 60)
+    logging.info(f"{'EVALUATION SUMMARY':^60}")
+    logging.info("=" * 60)
     logging.info(f"Evaluated pairs:    {evaluated_pairs}")
     logging.info(f"Missing GT images:  {missing_gt}")
     logging.info(f"LPIPS samples:      {len(lpips_scores)}")
     logging.info(f"SSIM samples:       {len(ssim_scores)}")
-    logging.info("=" * 70)
+    logging.info("=" * 60)
 
     return results
 
@@ -1289,9 +1289,9 @@ def log_to_wandb(results: Dict[str, Any], args: Namespace) -> None:
         return
 
     try:
-        logging.info("\n" + "=" * 70)
-        logging.info(f"{'LOGGING TO WEIGHTS & BIASES':^70}")
-        logging.info("=" * 70)
+        logging.info("\n" + "=" * 60)
+        logging.info(f"{'LOGGING TO WEIGHTS & BIASES':^60}")
+        logging.info("=" * 60)
 
         # Initialize wandb
         run_name = (
@@ -1437,7 +1437,7 @@ def log_to_wandb(results: Dict[str, Any], args: Namespace) -> None:
         logging.info("\n✓ Successfully logged to Weights & Biases")
         logging.info(f"  Project: {args.wandb_project}")
         logging.info(f"  Run: {run_name}")
-        logging.info("=" * 70)
+        logging.info("=" * 60)
 
     except Exception as e:
         logging.info(f"\n⚠ Error logging to wandb: {e}")
