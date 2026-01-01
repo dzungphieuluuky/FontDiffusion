@@ -11,8 +11,7 @@ import hashlib
 
 from datasets import Dataset, load_dataset
 from PIL import Image as PILImage
-from tqdm import tqdm
-import json
+from huggingface_hub.utils import tqdmimport json
 import os
 
 

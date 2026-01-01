@@ -15,8 +15,7 @@ import torch
 from datasets import Dataset, DatasetDict, Image as HFImage
 from PIL import Image as PILImage
 import pyarrow.parquet as pq
-from tqdm import tqdm
-
+from huggingface_hub.utils import tqdm, tqdm_stream_file
 
 def compute_file_hash(char: str, style: str, font: str = "") -> str:
     """
@@ -137,7 +136,7 @@ class FontDiffusionDatasetBuilder:
 
         print(f"\n🖼️  Loading {len(generations)} image pairs...")
 
-        for gen in tqdm(generations, desc="Loading images", ncols=100, unit="pair"):
+        for gen in tqdm_stream_file(generations, desc="Loading images", ncols=100, unit="pair"):
             char = gen.get("character")
             style = gen.get("style")
             font = gen.get("font", "unknown")
