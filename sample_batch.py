@@ -769,7 +769,8 @@ def generate_content_images(
             char_path: str = os.path.join(content_dir, content_filename)
 
             content_img.save(char_path)
-            print(f"  \n✓ Saved content image for '{char}' at {char_path}")
+            print()
+            print(f"    ✓ Saved content image for '{char}' at {char_path}")
             char_paths[char] = char_path
         except Exception as e:
             tqdm.write(f"  ✗ Error generating '{char}': {e}")
