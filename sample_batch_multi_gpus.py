@@ -375,7 +375,6 @@ def load_style_images(style_images_arg: str) -> List[Tuple[str, str]]:
             result.append((path, style_name))
         return result
 
-
 def parse_args() -> Namespace:
     """Parse command line arguments"""
     parser: ArgumentParser = argparse.ArgumentParser(
@@ -437,14 +436,14 @@ def parse_args() -> Namespace:
         "--num_inference_steps", type=int, default=15, help="Number of inference steps"
     )
     parser.add_argument(
-        "--guidance_scale", type=float, default=7.5, help="Guidance scale"
+        "--guidance_scale", type=float, default=7.5, help="Guidance scale"  # ✅ ADDED
     )
     parser.add_argument(
         "--batch_size", type=int, default=4, help="Batch size for generation"
     )
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
-    # ✅ Image size arguments - MUST be before optimization flags
+    # ✅ Image size arguments
     parser.add_argument(
         "--style_image_size",
         type=int,
@@ -664,7 +663,7 @@ def create_args_namespace(args: Namespace, accelerator: Optional[Accelerator] = 
         default_args, "algorithm_type", "dpmsolver++"
     )
     default_args.guidance_type = getattr(
-        default_args, "guidance_type", "classifier-free"
+        default_args, "guidance_type", "classifier-free"  # ✅ ADDED
     )
     default_args.method = getattr(default_args, "method", "multistep")
     default_args.order = getattr(default_args, "order", 2)
@@ -1020,7 +1019,7 @@ def sampling_batch_optimized(
             available_chars,
             desc=f"  📸 Preparing {font_name}",
             colour="cyan",
-            disable=not torch.cuda.is_available(),
+            # ✅ REMOVED: disable=not torch.cuda.is_available()
         ):
             try:
                 content_image: Image.Image = ttf2im(font=font, char=char)
@@ -1089,7 +1088,6 @@ def sampling_batch_optimized(
         import traceback
         traceback.print_exc()
         return None, None, None
-
 
 def _print_checkpoint_status(
     current_style: int,
