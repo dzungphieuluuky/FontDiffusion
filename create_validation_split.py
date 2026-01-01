@@ -95,13 +95,13 @@ def parse_content_filename(filename: str) -> Optional[Tuple[str, str]]:
 def parse_target_filename(filename: str) -> Optional[Tuple[str, str, str]]:
     """
     Parse target filename: U+XXXX_{char}_{style}_{hash}.png
-    Correctly handles styles with underscores like 'ref_trien', 'my_style_2', etc.
+    Correctly handles styles with underscores like 'ref_trien', 'ref_1', etc.
     Hash is always the last 8 hex characters before .png
     Returns: (char, style, hash) or None if parse fails
     
     Examples:
+    - U+212B0_𡊰_ref_1_4dcacde4.png → ('𡊰', 'ref_1', '4dcacde4')
     - U+200E9_𠃩_ref_trien_fdf6dcd1.png → ('𠃩', 'ref_trien', 'fdf6dcd1')
-    - U+2693E_𦤾_ref_1_bc1ad149.png → ('𦤾', 'ref_1', 'bc1ad149')
     """
     if not filename.endswith('.png'):
         return None
@@ -131,11 +131,11 @@ def parse_target_filename(filename: str) -> Optional[Tuple[str, str, str]]:
         
         # parts[0] = codepoint (U+XXXX)
         # parts[1] = character itself
-        # parts[2:-1] = style parts (can have underscores)
+        # parts[2:-1] = style parts (can have multiple underscores)
         # parts[-1] = hash
         
         # Extract style (everything after char, before hash)
-        style_parts = parts[2:4]
+        style_parts = parts[2:-1]
         
         if not style_parts:  # No style found
             return None
@@ -145,7 +145,7 @@ def parse_target_filename(filename: str) -> Optional[Tuple[str, str, str]]:
         return (char, style, hash_val)
     except (ValueError, OverflowError, IndexError):
         return None
-    
+        
 @dataclass
 class ValidationSplitConfig:
     """Configuration for validation split creation"""
