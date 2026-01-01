@@ -70,7 +70,6 @@ def compute_file_hash(char: str, style: str, font: str = "") -> str:
     content = f"{char}_{style}_{font}"
     return hashlib.sha256(content.encode("utf-8")).hexdigest()[:8]
 
-
 def parse_content_filename(filename: str) -> Optional[str]:
     """
     Parse content filename to extract character
@@ -79,7 +78,11 @@ def parse_content_filename(filename: str) -> Optional[str]:
     Returns:
         Character string or None if parsing fails
     """
-    parts = filename.replace(".png", "").split("_")
+    if not filename.endswith(".png"):
+        return None
+
+    stem = filename[:-4]  # Remove .png
+    parts = stem.split("_")
 
     if len(parts) < 2:
         return None
@@ -93,7 +96,21 @@ def parse_content_filename(filename: str) -> Optional[str]:
         # Decode character from codepoint
         char_code = int(codepoint.replace("U+", ""), 16)
         char = chr(char_code)
-        return char
+        
+        # Validate: parts[1] should be the character itself (if present)
+        # or it could be directly the hash
+        # Format: U+XXXX_char_hash.png or U+XXXX_hash.png
+        
+        if len(parts) >= 3:
+            # Likely format: U+XXXX_char_hash.png
+            # parts[1] = char, parts[2] = hash
+            return char
+        elif len(parts) == 2:
+            # Format: U+XXXX_hash.png
+            return char
+        else:
+            return None
+            
     except (ValueError, OverflowError):
         return None
 
@@ -101,12 +118,16 @@ def parse_content_filename(filename: str) -> Optional[str]:
 def parse_target_filename(filename: str) -> Optional[Tuple[str, str]]:
     """
     Parse target filename to extract character and style
-    Format: U+XXXX_[char]_style_hash.png or U+XXXX_style_hash.png
+    Format: U+XXXX_char_style_hash.png or U+XXXX_style_hash.png
 
     Returns:
         (character, style) tuple or None if parsing fails
     """
-    parts = filename.replace(".png", "").split("_")
+    if not filename.endswith(".png"):
+        return None
+
+    stem = filename[:-4]  # Remove .png
+    parts = stem.split("_")
 
     if len(parts) < 3:
         return None
@@ -121,34 +142,44 @@ def parse_target_filename(filename: str) -> Optional[Tuple[str, str]]:
         char_code = int(codepoint.replace("U+", ""), 16)
         char = chr(char_code)
 
-        # Hash is always last part
+        # Hash is always the last part (8 hex characters)
         hash_val = parts[-1]
+        
+        # Validate hash is 8 hex chars
+        if len(hash_val) != 8 or not all(c in '0123456789abcdef' for c in hash_val.lower()):
+            return None
 
-        # Check if safe char is present (second part)
+        # parts[0] = codepoint (U+XXXX)
+        # parts[1] = character itself (optional, if printable)
+        # parts[2:-1] = style parts (can have underscores)
+        # parts[-1] = hash
+
+        # Check if parts[1] is the character (safe version of char)
         safe_char = char if char.isprintable() and char not in '<>:"/\\|?*' else ""
-
+        
         if len(parts) >= 4 and parts[1] == safe_char:
             # Format: U+XXXX_char_style_hash
-            style = "_".join(parts[2:-1])
+            # Extract style from parts[2:-1]
+            style_parts = parts[2:-1]
         else:
             # Format: U+XXXX_style_hash
-            style = "_".join(parts[1:-1])
+            # Extract style from parts[1:-1]
+            style_parts = parts[1:-1]
 
+        if not style_parts:
+            return None
+
+        style = "_".join(style_parts)
         return char, style
 
     except (ValueError, OverflowError, IndexError):
         return None
 
 
-# ============================================================================
-# Dynamic path discovery (filesystem-based)
-# ============================================================================
-
-
 def discover_content_images(content_dir: str) -> Dict[str, str]:
     """
     Discover content images from actual filesystem
-    ✅ Uses hash-based naming
+    ✅ Uses hash-based naming: U+XXXX_[char]_hash.png
 
     Returns:
         Dict mapping character -> image_path
@@ -161,22 +192,31 @@ def discover_content_images(content_dir: str) -> Dict[str, str]:
 
     print(f"\n🔍 Discovering content images from {content_dir}...")
 
+    png_files = sorted(content_path.glob("*.png"))
+    
+    if not png_files:
+        raise ValueError(f"No PNG files found in {content_dir}")
+
     for img_file in tqdm(
-        sorted(content_path.glob("*.png")),
-        desc="Scanning content",
+        png_files,
+        desc="  Scanning content",
         ncols=100,
         unit="file",
     ):
         char = parse_content_filename(img_file.name)
 
         if char is None:
+            tqdm.write(f"    ⚠️  Failed to parse: {img_file.name}")
             continue
 
         # Store by character (not index)
+        if char in char_images:
+            tqdm.write(f"    ⚠️  Duplicate character '{char}': {img_file.name}")
+        
         char_images[char] = str(img_file)
 
     if not char_images:
-        raise ValueError(f"No content images found in {content_dir}")
+        raise ValueError(f"No valid content images found in {content_dir}")
 
     print(f"  ✓ Found {len(char_images)} content images")
     return char_images
@@ -185,7 +225,7 @@ def discover_content_images(content_dir: str) -> Dict[str, str]:
 def discover_target_images(target_dir: str) -> Dict[Tuple[str, str], str]:
     """
     Discover target images from actual filesystem
-    ✅ Uses hash-based naming
+    ✅ Uses hash-based naming: U+XXXX_[char]_style_hash.png
 
     Returns:
         Dict mapping (character, style) -> image_path
@@ -199,35 +239,53 @@ def discover_target_images(target_dir: str) -> Dict[Tuple[str, str], str]:
     print(f"\n🔍 Discovering target images from {target_dir}...")
 
     # Iterate through style directories
-    for style_dir in tqdm(
-        sorted(target_path.iterdir()), desc="Scanning styles", ncols=100, unit="dir"
-    ):
-        if not style_dir.is_dir():
-            continue
+    style_dirs = sorted([d for d in target_path.iterdir() if d.is_dir()])
+    
+    if not style_dirs:
+        raise ValueError(f"No style directories found in {target_dir}")
 
+    for style_dir in tqdm(
+        style_dirs, 
+        desc="  Scanning styles", 
+        ncols=100, 
+        unit="dir"
+    ):
         style_name = style_dir.name
 
         # Find target images in this style directory
-        for img_file in style_dir.glob("*.png"):
+        png_files = sorted(style_dir.glob("*.png"))
+        
+        if not png_files:
+            tqdm.write(f"    ⚠️  No images in style '{style_name}'")
+            continue
+
+        for img_file in png_files:
             parsed = parse_target_filename(img_file.name)
 
             if parsed is None:
+                tqdm.write(f"    ⚠️  Failed to parse: {img_file.name}")
                 continue
 
             char, parsed_style = parsed
 
-            # Validate style matches directory
+            # ✅ Validate style matches directory
             if parsed_style != style_name:
                 tqdm.write(
-                    f"  ⚠️  Style mismatch: {img_file.name} has style '{parsed_style}' "
-                    f"but is in directory '{style_name}'"
+                    f"    ⚠️  Style mismatch: {img_file.name}\n"
+                    f"        Extracted: '{parsed_style}', Expected: '{style_name}'"
                 )
                 continue
 
+            # Check for duplicates
+            if (char, style_name) in target_images:
+                tqdm.write(
+                    f"    ⚠️  Duplicate ({char}, {style_name}): {img_file.name}"
+                )
+            
             target_images[(char, style_name)] = str(img_file)
 
     if not target_images:
-        raise ValueError(f"No target images found in {target_dir}")
+        raise ValueError(f"No valid target images found in {target_dir}")
 
     print(f"  ✓ Found {len(target_images)} target images")
     return target_images
@@ -238,9 +296,9 @@ def validate_image_paths(
     target_images: Dict[Tuple[str, str], str],
 ) -> None:
     """
-    ✅ Validate that all content images have corresponding targets
+    ✅ Validate that all target images have corresponding content images
     """
-    print(f"\n📋 Validating image paths...")
+    print(f"\n📋 Validating image pairs...")
 
     # Find which characters have content images
     content_chars = set(content_images.keys())
@@ -252,10 +310,10 @@ def validate_image_paths(
     existing_styles = set(style for char, style in existing_pairs)
     target_chars = set(char for char, style in existing_pairs)
 
-    print(f"  Content images: {len(content_chars)} characters")
-    print(f"  Target images: {len(target_images)} (char, style) pairs")
-    print(f"  Unique styles: {len(existing_styles)}")
-    print(f"  Unique characters in targets: {len(target_chars)}")
+    print(f"  Content images:      {len(content_chars)} characters")
+    print(f"  Target images:       {len(target_images)} (char, style) pairs")
+    print(f"  Unique styles:       {len(existing_styles)}")
+    print(f"  Unique chars in targets: {len(target_chars)}")
 
     # Find mismatches
     missing_content = target_chars - content_chars
@@ -264,15 +322,19 @@ def validate_image_paths(
     if missing_content:
         print(f"  ⚠️  {len(missing_content)} target chars missing content images")
         # Show sample
-        sample = list(missing_content)[:5]
-        print(f"      Examples: {sample}")
+        sample = sorted(list(missing_content))[:5]
+        print(f"      Examples: {[f'{c} (U+{ord(c):04X})' for c in sample]}")
 
     if unused_content:
         print(f"  ⚠️  {len(unused_content)} content images have no targets")
         # Show sample
-        sample = list(unused_content)[:5]
-        print(f"      Examples: {sample}")
+        sample = sorted(list(unused_content))[:5]
+        print(f"      Examples: {[f'{c} (U+{ord(c):04X})' for c in sample]}")
 
+    # Only warn if there are actual mismatches
+    if not missing_content and not unused_content:
+        print(f"  ✅ All content images have corresponding targets!")
+        
 
 def get_args():
     parser = get_parser()
