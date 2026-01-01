@@ -180,6 +180,8 @@ def discover_content_images(content_dir: str) -> Dict[str, str]:
     """
     Discover content images from actual filesystem
     ✅ Uses hash-based naming: U+XXXX_[char]_hash.png
+    ✅ Handles case-insensitive file extensions
+    ✅ Provides detailed diagnostics
 
     Returns:
         Dict mapping character -> image_path
@@ -187,16 +189,57 @@ def discover_content_images(content_dir: str) -> Dict[str, str]:
     char_images = {}
     content_path = Path(content_dir)
 
+    # ✅ Debug: Check if path exists and print actual path
     if not content_path.exists():
+        print(f"\n❌ ERROR: ContentImage directory not found!")
+        print(f"   Expected: {content_path.resolve()}")
+        print(f"   Does not exist: {not content_path.exists()}")
+        print(f"   Is absolute: {content_path.is_absolute()}")
         raise FileNotFoundError(f"ContentImage directory not found: {content_dir}")
 
     print(f"\n🔍 Discovering content images from {content_dir}...")
+    print(f"   Full path: {content_path.resolve()}")
 
-    png_files = sorted(content_path.glob("*.png"))
+    # ✅ Handle case-insensitive extensions (.png, .PNG, .Png, etc.)
+    png_files = sorted(
+        list(content_path.glob("*.png")) + 
+        list(content_path.glob("*.PNG")) + 
+        list(content_path.glob("*.Png")) +
+        list(content_path.glob("*.pNg"))
+    )
     
-    if not png_files:
-        raise ValueError(f"No PNG files found in {content_dir}")
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_png_files = []
+    for f in png_files:
+        if f.name.lower() not in seen:
+            seen.add(f.name.lower())
+            unique_png_files.append(f)
+    png_files = sorted(unique_png_files)
 
+    if not png_files:
+        # ✅ More detailed error message
+        print(f"\n❌ ERROR: No PNG files found in {content_dir}")
+        print(f"   Directory contents:")
+        if content_path.exists():
+            items = list(content_path.iterdir())
+            if items:
+                for item in sorted(items)[:10]:  # Show first 10 items
+                    item_type = "DIR" if item.is_dir() else "FILE"
+                    print(f"     [{item_type}] {item.name}")
+                if len(items) > 10:
+                    print(f"     ... and {len(items) - 10} more items")
+            else:
+                print(f"     (directory is empty)")
+        raise ValueError(
+            f"No PNG files found in {content_dir}\n"
+            f"   Expected format: U+XXXX_[char]_hash.png\n"
+            f"   Check that images are actually present in this directory"
+        )
+
+    print(f"  📊 Found {len(png_files)} PNG files, parsing...")
+
+    failed_files = []
     for img_file in tqdm(
         png_files,
         desc="  Scanning content",
@@ -206,19 +249,36 @@ def discover_content_images(content_dir: str) -> Dict[str, str]:
         char = parse_content_filename(img_file.name)
 
         if char is None:
+            failed_files.append(img_file.name)
             tqdm.write(f"    ⚠️  Failed to parse: {img_file.name}")
             continue
 
         # Store by character (not index)
         if char in char_images:
-            tqdm.write(f"    ⚠️  Duplicate character '{char}': {img_file.name}")
-        
-        char_images[char] = str(img_file)
+            tqdm.write(
+                f"    ⚠️  Duplicate character '{char}' (U+{ord(char):04X}): {img_file.name}\n"
+                f"        Previous: {char_images[char]}\n"
+                f"        Current:  {img_file}"
+            )
+        else:
+            char_images[char] = str(img_file)
 
     if not char_images:
+        print(f"\n❌ ERROR: No valid content images found!")
+        print(f"   Total PNG files: {len(png_files)}")
+        print(f"   Failed to parse: {len(failed_files)}")
+        if failed_files:
+            print(f"   Failed examples:")
+            for fname in failed_files[:5]:
+                print(f"     - {fname}")
         raise ValueError(f"No valid content images found in {content_dir}")
 
-    print(f"  ✓ Found {len(char_images)} content images")
+    print(f"  ✓ Found {len(char_images)} valid content images")
+    
+    # ✅ Show sample of parsed characters
+    sample_chars = sorted(list(char_images.keys()))[:5]
+    print(f"    Sample characters: {[f'{c} (U+{ord(c):04X})' for c in sample_chars]}")
+    
     return char_images
 
 
@@ -226,6 +286,8 @@ def discover_target_images(target_dir: str) -> Dict[Tuple[str, str], str]:
     """
     Discover target images from actual filesystem
     ✅ Uses hash-based naming: U+XXXX_[char]_style_hash.png
+    ✅ Handles case-insensitive file extensions
+    ✅ Provides detailed diagnostics
 
     Returns:
         Dict mapping (character, style) -> image_path
@@ -233,17 +295,31 @@ def discover_target_images(target_dir: str) -> Dict[Tuple[str, str], str]:
     target_images = {}
     target_path = Path(target_dir)
 
+    # ✅ Debug: Check if path exists
     if not target_path.exists():
+        print(f"\n❌ ERROR: TargetImage directory not found!")
+        print(f"   Expected: {target_path.resolve()}")
         raise FileNotFoundError(f"TargetImage directory not found: {target_dir}")
 
     print(f"\n🔍 Discovering target images from {target_dir}...")
+    print(f"   Full path: {target_path.resolve()}")
 
     # Iterate through style directories
     style_dirs = sorted([d for d in target_path.iterdir() if d.is_dir()])
     
     if not style_dirs:
+        print(f"\n❌ ERROR: No style directories found in {target_dir}")
+        print(f"   Directory contents:")
+        items = list(target_path.iterdir())
+        for item in sorted(items)[:10]:
+            item_type = "DIR" if item.is_dir() else "FILE"
+            print(f"     [{item_type}] {item.name}")
         raise ValueError(f"No style directories found in {target_dir}")
 
+    print(f"  📊 Found {len(style_dirs)} style directories")
+
+    failed_styles = {}
+    
     for style_dir in tqdm(
         style_dirs, 
         desc="  Scanning styles", 
@@ -252,18 +328,35 @@ def discover_target_images(target_dir: str) -> Dict[Tuple[str, str], str]:
     ):
         style_name = style_dir.name
 
-        # Find target images in this style directory
-        png_files = sorted(style_dir.glob("*.png"))
+        # ✅ Handle case-insensitive extensions
+        png_files = sorted(
+            list(style_dir.glob("*.png")) +
+            list(style_dir.glob("*.PNG")) +
+            list(style_dir.glob("*.Png")) +
+            list(style_dir.glob("*.pNg"))
+        )
         
+        # Remove duplicates
+        seen = set()
+        unique_png_files = []
+        for f in png_files:
+            if f.name.lower() not in seen:
+                seen.add(f.name.lower())
+                unique_png_files.append(f)
+        png_files = sorted(unique_png_files)
+
         if not png_files:
             tqdm.write(f"    ⚠️  No images in style '{style_name}'")
+            failed_styles[style_name] = 0
             continue
 
+        failed_count = 0
         for img_file in png_files:
             parsed = parse_target_filename(img_file.name)
 
             if parsed is None:
                 tqdm.write(f"    ⚠️  Failed to parse: {img_file.name}")
+                failed_count += 1
                 continue
 
             char, parsed_style = parsed
@@ -271,25 +364,78 @@ def discover_target_images(target_dir: str) -> Dict[Tuple[str, str], str]:
             # ✅ Validate style matches directory
             if parsed_style != style_name:
                 tqdm.write(
-                    f"    ⚠️  Style mismatch: {img_file.name}\n"
+                    f"    ⚠️  Style mismatch in '{style_name}': {img_file.name}\n"
                     f"        Extracted: '{parsed_style}', Expected: '{style_name}'"
                 )
+                failed_count += 1
                 continue
 
             # Check for duplicates
             if (char, style_name) in target_images:
                 tqdm.write(
-                    f"    ⚠️  Duplicate ({char}, {style_name}): {img_file.name}"
+                    f"    ⚠️  Duplicate ({char} U+{ord(char):04X}, {style_name}): {img_file.name}"
                 )
-            
-            target_images[(char, style_name)] = str(img_file)
+            else:
+                target_images[(char, style_name)] = str(img_file)
+
+        if failed_count > 0:
+            failed_styles[style_name] = failed_count
 
     if not target_images:
+        print(f"\n❌ ERROR: No valid target images found!")
+        print(f"   Total style directories: {len(style_dirs)}")
+        print(f"   Failed to parse by style:")
+        for style, count in failed_styles.items():
+            print(f"     - {style}: {count} failed")
         raise ValueError(f"No valid target images found in {target_dir}")
 
-    print(f"  ✓ Found {len(target_images)} target images")
+    print(f"  ✓ Found {len(target_images)} valid target images")
+    
+    # ✅ Show statistics
+    unique_styles = set(style for char, style in target_images.keys())
+    unique_chars = set(char for char, style in target_images.keys())
+    print(f"    Unique styles: {len(unique_styles)}")
+    print(f"    Unique characters: {len(unique_chars)}")
+    
     return target_images
 
+def diagnose_image_discovery(data_root: str) -> None:
+    """Diagnose image discovery issues"""
+    print("\n" + "=" * 70)
+    print("🔧 IMAGE DISCOVERY DIAGNOSTICS")
+    print("=" * 70)
+    
+    content_dir = os.path.join(data_root, "train", "ContentImage")
+    target_dir = os.path.join(data_root, "train", "TargetImage")
+    
+    print(f"\n📁 Content Directory: {content_dir}")
+    print(f"   Exists: {os.path.exists(content_dir)}")
+    print(f"   Is directory: {os.path.isdir(content_dir)}")
+    print(f"   Absolute path: {os.path.abspath(content_dir)}")
+    
+    if os.path.exists(content_dir):
+        items = os.listdir(content_dir)
+        print(f"   Items: {len(items)}")
+        png_count = len([f for f in items if f.lower().endswith('.png')])
+        print(f"   PNG files: {png_count}")
+        print(f"   Sample files:")
+        for f in sorted(items)[:5]:
+            print(f"     - {f}")
+    
+    print(f"\n📁 Target Directory: {target_dir}")
+    print(f"   Exists: {os.path.exists(target_dir)}")
+    print(f"   Is directory: {os.path.isdir(target_dir)}")
+    print(f"   Absolute path: {os.path.abspath(target_dir)}")
+    
+    if os.path.exists(target_dir):
+        subdirs = [d for d in os.listdir(target_dir) if os.path.isdir(os.path.join(target_dir, d))]
+        print(f"   Style directories: {len(subdirs)}")
+        for subdir in sorted(subdirs)[:5]:
+            subdir_path = os.path.join(target_dir, subdir)
+            png_files = [f for f in os.listdir(subdir_path) if f.lower().endswith('.png')]
+            print(f"     - {subdir}: {len(png_files)} images")
+    
+    print("=" * 70 + "\n")
 
 def validate_image_paths(
     content_images: Dict[str, str],
@@ -334,7 +480,7 @@ def validate_image_paths(
     # Only warn if there are actual mismatches
     if not missing_content and not unused_content:
         print(f"  ✅ All content images have corresponding targets!")
-        
+
 
 def get_args():
     parser = get_parser()
@@ -624,6 +770,9 @@ def main():
 
     content_dir = os.path.join(args.data_root, "train", "ContentImage")
     target_dir = os.path.join(args.data_root, "train", "TargetImage")
+
+    # ✅ Add diagnostics before discovery
+    diagnose_image_discovery(args.data_root)
 
     content_images = discover_content_images(content_dir)
     target_images = discover_target_images(target_dir)
