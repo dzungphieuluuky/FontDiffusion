@@ -70,6 +70,7 @@ def compute_file_hash(char: str, style: str, font: str = "") -> str:
     content = f"{char}_{style}_{font}"
     return hashlib.sha256(content.encode("utf-8")).hexdigest()[:8]
 
+
 def parse_content_filename(filename: str) -> Optional[str]:
     """
     Parse content filename to extract character
@@ -96,11 +97,11 @@ def parse_content_filename(filename: str) -> Optional[str]:
         # Decode character from codepoint
         char_code = int(codepoint.replace("U+", ""), 16)
         char = chr(char_code)
-        
+
         # Validate: parts[1] should be the character itself (if present)
         # or it could be directly the hash
         # Format: U+XXXX_char_hash.png or U+XXXX_hash.png
-        
+
         if len(parts) >= 3:
             # Likely format: U+XXXX_char_hash.png
             # parts[1] = char, parts[2] = hash
@@ -110,7 +111,7 @@ def parse_content_filename(filename: str) -> Optional[str]:
             return char
         else:
             return None
-            
+
     except (ValueError, OverflowError):
         return None
 
@@ -144,9 +145,11 @@ def parse_target_filename(filename: str) -> Optional[Tuple[str, str]]:
 
         # Hash is always the last part (8 hex characters)
         hash_val = parts[-1]
-        
+
         # Validate hash is 8 hex chars
-        if len(hash_val) != 8 or not all(c in '0123456789abcdef' for c in hash_val.lower()):
+        if len(hash_val) != 8 or not all(
+            c in "0123456789abcdef" for c in hash_val.lower()
+        ):
             return None
 
         # parts[0] = codepoint (U+XXXX)
@@ -156,7 +159,7 @@ def parse_target_filename(filename: str) -> Optional[Tuple[str, str]]:
 
         # Check if parts[1] is the character (safe version of char)
         safe_char = char if char.isprintable() and char not in '<>:"/\\|?*' else ""
-        
+
         if len(parts) >= 4 and parts[1] == safe_char:
             # Format: U+XXXX_char_style_hash
             # Extract style from parts[2:-1]
@@ -202,12 +205,12 @@ def discover_content_images(content_dir: str) -> Dict[str, str]:
 
     # ✅ Handle case-insensitive extensions (.png, .PNG, .Png, etc.)
     png_files = sorted(
-        list(content_path.glob("*.png")) + 
-        list(content_path.glob("*.PNG")) + 
-        list(content_path.glob("*.Png")) +
-        list(content_path.glob("*.pNg"))
+        list(content_path.glob("*.png"))
+        + list(content_path.glob("*.PNG"))
+        + list(content_path.glob("*.Png"))
+        + list(content_path.glob("*.pNg"))
     )
-    
+
     # Remove duplicates while preserving order
     seen = set()
     unique_png_files = []
@@ -274,11 +277,11 @@ def discover_content_images(content_dir: str) -> Dict[str, str]:
         raise ValueError(f"No valid content images found in {content_dir}")
 
     print(f"  ✓ Found {len(char_images)} valid content images")
-    
+
     # ✅ Show sample of parsed characters
     sample_chars = sorted(list(char_images.keys()))[:5]
     print(f"    Sample characters: {[f'{c} (U+{ord(c):04X})' for c in sample_chars]}")
-    
+
     return char_images
 
 
@@ -306,7 +309,7 @@ def discover_target_images(target_dir: str) -> Dict[Tuple[str, str], str]:
 
     # Iterate through style directories
     style_dirs = sorted([d for d in target_path.iterdir() if d.is_dir()])
-    
+
     if not style_dirs:
         print(f"\n❌ ERROR: No style directories found in {target_dir}")
         print(f"   Directory contents:")
@@ -319,23 +322,18 @@ def discover_target_images(target_dir: str) -> Dict[Tuple[str, str], str]:
     print(f"  📊 Found {len(style_dirs)} style directories")
 
     failed_styles = {}
-    
-    for style_dir in tqdm(
-        style_dirs, 
-        desc="  Scanning styles", 
-        ncols=100, 
-        unit="dir"
-    ):
+
+    for style_dir in tqdm(style_dirs, desc="  Scanning styles", ncols=100, unit="dir"):
         style_name = style_dir.name
 
         # ✅ Handle case-insensitive extensions
         png_files = sorted(
-            list(style_dir.glob("*.png")) +
-            list(style_dir.glob("*.PNG")) +
-            list(style_dir.glob("*.Png")) +
-            list(style_dir.glob("*.pNg"))
+            list(style_dir.glob("*.png"))
+            + list(style_dir.glob("*.PNG"))
+            + list(style_dir.glob("*.Png"))
+            + list(style_dir.glob("*.pNg"))
         )
-        
+
         # Remove duplicates
         seen = set()
         unique_png_files = []
@@ -390,52 +388,60 @@ def discover_target_images(target_dir: str) -> Dict[Tuple[str, str], str]:
         raise ValueError(f"No valid target images found in {target_dir}")
 
     print(f"  ✓ Found {len(target_images)} valid target images")
-    
+
     # ✅ Show statistics
     unique_styles = set(style for char, style in target_images.keys())
     unique_chars = set(char for char, style in target_images.keys())
     print(f"    Unique styles: {len(unique_styles)}")
     print(f"    Unique characters: {len(unique_chars)}")
-    
+
     return target_images
+
 
 def diagnose_image_discovery(data_root: str) -> None:
     """Diagnose image discovery issues"""
     print("\n" + "=" * 70)
     print("🔧 IMAGE DISCOVERY DIAGNOSTICS")
     print("=" * 70)
-    
+
     content_dir = os.path.join(data_root, "train", "ContentImage")
     target_dir = os.path.join(data_root, "train", "TargetImage")
-    
+
     print(f"\n📁 Content Directory: {content_dir}")
     print(f"   Exists: {os.path.exists(content_dir)}")
     print(f"   Is directory: {os.path.isdir(content_dir)}")
     print(f"   Absolute path: {os.path.abspath(content_dir)}")
-    
+
     if os.path.exists(content_dir):
         items = os.listdir(content_dir)
         print(f"   Items: {len(items)}")
-        png_count = len([f for f in items if f.lower().endswith('.png')])
+        png_count = len([f for f in items if f.lower().endswith(".png")])
         print(f"   PNG files: {png_count}")
         print(f"   Sample files:")
         for f in sorted(items)[:5]:
             print(f"     - {f}")
-    
+
     print(f"\n📁 Target Directory: {target_dir}")
     print(f"   Exists: {os.path.exists(target_dir)}")
     print(f"   Is directory: {os.path.isdir(target_dir)}")
     print(f"   Absolute path: {os.path.abspath(target_dir)}")
-    
+
     if os.path.exists(target_dir):
-        subdirs = [d for d in os.listdir(target_dir) if os.path.isdir(os.path.join(target_dir, d))]
+        subdirs = [
+            d
+            for d in os.listdir(target_dir)
+            if os.path.isdir(os.path.join(target_dir, d))
+        ]
         print(f"   Style directories: {len(subdirs)}")
         for subdir in sorted(subdirs)[:5]:
             subdir_path = os.path.join(target_dir, subdir)
-            png_files = [f for f in os.listdir(subdir_path) if f.lower().endswith('.png')]
+            png_files = [
+                f for f in os.listdir(subdir_path) if f.lower().endswith(".png")
+            ]
             print(f"     - {subdir}: {len(png_files)} images")
-    
+
     print("=" * 70 + "\n")
+
 
 def validate_image_paths(
     content_images: Dict[str, str],

@@ -27,6 +27,7 @@ from argparse import Namespace, ArgumentParser
 from src.dpm_solver.pipeline_dpm_solver import FontDiffuserDPMPipeline
 from utilities import *
 
+
 class TqdmLoggingHandler(logging.Handler):
     def emit(self, record):
         try:
@@ -110,17 +111,17 @@ def get_content_filename(char: str, font: str = "") -> str:
     """
     Get content image filename for character
     Format: {unicode_codepoint}_{char}_{hash}.png or U+XXXX_{hash}.png
-    
+
     ✅ CORRECTED: Character is included in filename ONLY if it's in the font
     Uses is_char_in_font() for actual coverage check, not isprintable()
     """
     codepoint = f"U+{ord(char):04X}"
     hash_val = compute_file_hash(char, "", font)
-    
+
     # ✅ Filesystem-safe characters (remove problematic ones only)
     filesystem_unsafe = '<>:"/\\|?*'
     safe_char = char if char not in filesystem_unsafe else ""
-    
+
     if safe_char:
         return f"{codepoint}_{safe_char}_{hash_val}.png"
     else:
@@ -131,22 +132,22 @@ def get_target_filename(char: str, style: str, font: str = "") -> str:
     """
     Get target image filename
     Format: {unicode_codepoint}_{char}_{style}_{hash}.png or U+XXXX_{style}_{hash}.png
-    
+
     ✅ CORRECTED: Character is included in filename ONLY if it's in the font
     Uses is_char_in_font() for actual coverage check, not isprintable()
     """
     codepoint = f"U+{ord(char):04X}"
     hash_val = compute_file_hash(char, style, font)
-    
+
     # ✅ Filesystem-safe characters (remove problematic ones only)
     filesystem_unsafe = '<>:"/\\|?*'
     safe_char = char if char not in filesystem_unsafe else ""
-    
+
     if safe_char:
         return f"{codepoint}_{safe_char}_{style}_{hash_val}.png"
     else:
         return f"{codepoint}_{style}_{hash_val}.png"
-    
+
 
 class FontManager:
     """Manages multiple font files"""
@@ -871,18 +872,20 @@ def batch_generate_images(
     # ✅ CORRECTED: Extract ALL unique characters and styles from checkpoint
     all_chars_in_checkpoint: Set[str] = set()
     all_styles_in_checkpoint: Set[str] = set()
-    
+
     for gen in generation_tracker.generations:
         all_chars_in_checkpoint.add(gen.get("character", ""))
         all_styles_in_checkpoint.add(gen.get("style", ""))
-    
+
     # ✅ Add current session's chars
     all_chars_in_checkpoint.update(char_paths.keys())
-    
+
     # ✅ Add current session's styles (only those that were actually generated)
-    for (style_path, style_name) in style_paths_with_names:
+    for style_path, style_name in style_paths_with_names:
         # Check if this style has any generations
-        if any(gen.get("style") == style_name for gen in generation_tracker.generations):
+        if any(
+            gen.get("style") == style_name for gen in generation_tracker.generations
+        ):
             all_styles_in_checkpoint.add(style_name)
 
     # Initialize results from tracker
@@ -892,9 +895,9 @@ def batch_generate_images(
         "dataset_split": args.dataset_split,
         "fonts": font_manager.get_font_names(),
         "characters": sorted(list(all_chars_in_checkpoint)),  # ✅ ALL accumulated chars
-        "styles": sorted(list(all_styles_in_checkpoint)),     # ✅ ONLY generated styles
-        "total_chars": len(all_chars_in_checkpoint),          # ✅ ALL accumulated char count
-        "total_styles": len(all_styles_in_checkpoint),        # ✅ ONLY generated style count
+        "styles": sorted(list(all_styles_in_checkpoint)),  # ✅ ONLY generated styles
+        "total_chars": len(all_chars_in_checkpoint),  # ✅ ALL accumulated char count
+        "total_styles": len(all_styles_in_checkpoint),  # ✅ ONLY generated style count
     }
 
     # Setup directories
@@ -910,7 +913,9 @@ def batch_generate_images(
     logging.info(f"Characters (input):   {len(characters)}")
     logging.info(f"Characters (content): {len(char_paths)}")
     logging.info(f"Batch size:           {args.batch_size}")
-    logging.info(f"Previously generated: {len(generation_tracker.generations)} unique pairs")
+    logging.info(
+        f"Previously generated: {len(generation_tracker.generations)} unique pairs"
+    )
     logging.info(f"Unique chars seen:    {len(all_chars_in_checkpoint)}")  # ✅ NEW
     logging.info(f"Unique styles used:   {len(all_styles_in_checkpoint)}")  # ✅ NEW
     logging.info("=" * 60 + "\n")
@@ -981,19 +986,22 @@ def batch_generate_images(
                         )
                         failed_count += 1
                         continue
-                    
+
                     # ✅ Generate filename (character inclusion determined by filesystem safety, not printability)
-                    target_filename = get_target_filename(char, style_name, primary_font)
-                    
+                    target_filename = get_target_filename(
+                        char, style_name, primary_font
+                    )
+
                     # ✅ Validate filename format
                     import re
+
                     expected_pattern = r"U\+[0-9A-F]{4,5}.*_[0-9a-f]{8}\.png"
                     if not re.match(expected_pattern, target_filename):
                         raise ValueError(
                             f"Invalid filename format: {target_filename}\n"
                             f"  Expected: U+XXXX_[optional_char]_style_hash.png"
                         )
-                    
+
                     img_path = os.path.join(style_dir, target_filename)
 
                     content_filename = get_content_filename(char, primary_font)
@@ -1014,23 +1022,25 @@ def batch_generate_images(
                         "content_image_path": content_path_rel,
                         "target_image_path": target_path_rel,
                         "content_hash": compute_file_hash(char, "", primary_font),
-                        "target_hash": compute_file_hash(char, style_name, primary_font),
+                        "target_hash": compute_file_hash(
+                            char, style_name, primary_font
+                        ),
                         "content_filename": content_filename,  # ✅ Add actual filename
-                        "target_filename": target_filename,    # ✅ Add actual filename
+                        "target_filename": target_filename,  # ✅ Add actual filename
                     }
 
                     results["generations"].append(generation_record)
                     generation_tracker.add_generation(generation_record)
-                    
+
                     all_chars_in_checkpoint.add(char)
                     all_styles_in_checkpoint.add(style_name)
                     results["characters"] = sorted(list(all_chars_in_checkpoint))
                     results["styles"] = sorted(list(all_styles_in_checkpoint))
                     results["total_chars"] = len(all_chars_in_checkpoint)
                     results["total_styles"] = len(all_styles_in_checkpoint)
-                    
+
                     generated_count += 1
-                    
+
                 except ValueError as e:
                     logging.error(f"    ✗ Invalid filename for '{char}': {e}")
                     failed_count += 1
@@ -1077,6 +1087,7 @@ def batch_generate_images(
     )
 
     return results
+
 
 def sampling_batch_optimized(
     args: Namespace,

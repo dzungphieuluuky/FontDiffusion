@@ -50,6 +50,7 @@ enable_progress_bars()
 
 try:
     import lpips
+
     LPIPS_AVAILABLE: bool = True
 except ImportError:
     logging.info("Warning: lpips not available. Install with: pip install lpips")
@@ -57,20 +58,27 @@ except ImportError:
 
 try:
     from pytorch_fid import fid_score
+
     FID_AVAILABLE: bool = True
 except ImportError:
-    logging.info("Warning: pytorch-fid not available. Install with: pip install pytorch-fid")
+    logging.info(
+        "Warning: pytorch-fid not available. Install with: pip install pytorch-fid"
+    )
     FID_AVAILABLE: bool = False
 
 try:
     from skimage.metrics import structural_similarity as ssim
+
     SSIM_AVAILABLE: bool = True
 except ImportError:
-    logging.info("Warning: scikit-image not available. Install with: pip install scikit-image")
+    logging.info(
+        "Warning: scikit-image not available. Install with: pip install scikit-image"
+    )
     SSIM_AVAILABLE: bool = False
 
 try:
     import wandb
+
     WANDB_AVAILABLE: bool = True
 except ImportError:
     logging.info("Warning: wandb not available. Install with: pip install wandb")
@@ -118,6 +126,7 @@ class FontManager:
     def _load_fonts(self, ttf_path: str) -> None:
         if "*" in ttf_path:
             import glob
+
             font_files: List[str] = glob.glob(ttf_path)
             if not font_files:
                 raise ValueError(f"No font files found for pattern: {ttf_path}")
@@ -193,7 +202,9 @@ class FontManager:
         font_path: str = self.get_font_path(font_name)
         return is_char_in_font(font_path, char)
 
-    def get_available_chars_for_font(self, font_name: str, characters: List[str]) -> List[str]:
+    def get_available_chars_for_font(
+        self, font_name: str, characters: List[str]
+    ) -> List[str]:
         return [char for char in characters if self.is_char_in_font(font_name, char)]
 
 
@@ -228,13 +239,16 @@ class GenerationTracker:
                 self.generated_hashes.add(target_hash)
                 unique_generations.append(gen)
             self.generations = unique_generations
-            logging.info(f"✓ Loaded checkpoint: {len(self.generations)} unique generations")
+            logging.info(
+                f"✓ Loaded checkpoint: {len(self.generations)} unique generations"
+            )
             if duplicate_count > 0:
                 logging.info(f"  ⚠️  Removed {duplicate_count} duplicate entries")
             logging.info(f"  Total raw entries: {len(raw_generations)}")
         except Exception as e:
             logging.info(f"⚠ Error loading checkpoint: {e}")
             import traceback
+
             traceback.print_exc()
 
     def is_generated(self, char: str, style: str, font: str = "") -> bool:
@@ -267,8 +281,12 @@ class QualityEvaluator:
         if not LPIPS_AVAILABLE or self.lpips_fn is None:
             return -1.0
         try:
-            img1_tensor: torch.Tensor = (self.transform_to_tensor(img1).unsqueeze(0).to(self.device) * 2 - 1)
-            img2_tensor: torch.Tensor = (self.transform_to_tensor(img2).unsqueeze(0).to(self.device) * 2 - 1)
+            img1_tensor: torch.Tensor = (
+                self.transform_to_tensor(img1).unsqueeze(0).to(self.device) * 2 - 1
+            )
+            img2_tensor: torch.Tensor = (
+                self.transform_to_tensor(img2).unsqueeze(0).to(self.device) * 2 - 1
+            )
             with torch.inference_mode():
                 lpips_value: float = self.lpips_fn(img1_tensor, img2_tensor).item()
             return lpips_value
@@ -307,13 +325,18 @@ class QualityEvaluator:
         except Exception as e:
             logging.info(f"Error saving image to {path}: {e}")
 
-def load_characters(characters_arg: str, start_line: int = 1, end_line: Optional[int] = None) -> List[str]:
+
+def load_characters(
+    characters_arg: str, start_line: int = 1, end_line: Optional[int] = None
+) -> List[str]:
     chars: List[str] = []
     if os.path.isfile(characters_arg):
         with open(characters_arg, "r", encoding="utf-8") as f:
             all_lines: List[str] = f.readlines()
         start_idx: int = max(0, start_line - 1)
-        end_idx: int = len(all_lines) if end_line is None else min(len(all_lines), end_line)
+        end_idx: int = (
+            len(all_lines) if end_line is None else min(len(all_lines), end_line)
+        )
         if start_idx >= len(all_lines):
             raise ValueError(
                 f"❌ start_line ({start_line}) exceeds file length ({len(all_lines)} lines)\n"
@@ -327,20 +350,31 @@ def load_characters(characters_arg: str, start_line: int = 1, end_line: Optional
                 f"   Make sure start_line <= end_line and both are within file bounds."
             )
         logging.info(f"📖 Loading characters from file: {characters_arg}")
-        logging.info(f"   Lines {start_line} to {end_idx} (total file: {len(all_lines)} lines)")
+        logging.info(
+            f"   Lines {start_line} to {end_idx} (total file: {len(all_lines)} lines)"
+        )
         logging.info(f"   Processing {end_idx - start_idx} lines...")
-        for line_num, line in tqdm(enumerate(all_lines[start_idx:end_idx], start=start_line), total=(end_idx - start_idx), desc="📖 Reading character file", colour="green"):
+        for line_num, line in tqdm(
+            enumerate(all_lines[start_idx:end_idx], start=start_line),
+            total=(end_idx - start_idx),
+            desc="📖 Reading character file",
+            colour="green",
+        ):
             char: str = line.strip()
             if not char:
                 continue
             if len(char) != 1:
-                logging.info(f"Warning: Skipping line {line_num}: expected 1 char, got {len(char)}: '{char}'")
+                logging.info(
+                    f"Warning: Skipping line {line_num}: expected 1 char, got {len(char)}: '{char}'"
+                )
                 continue
             chars.append(char)
     else:
         for c in [x.strip() for x in characters_arg.split(",") if x.strip()]:
             if len(c) != 1:
-                raise ValueError(f"Invalid character in argument: '{c}' (must be single char)")
+                raise ValueError(
+                    f"Invalid character in argument: '{c}' (must be single char)"
+                )
             chars.append(c)
     if not chars:
         raise ValueError(
@@ -374,6 +408,7 @@ def load_style_images(style_images_arg: str) -> List[Tuple[str, str]]:
             style_name = os.path.splitext(os.path.basename(path))[0]
             result.append((path, style_name))
         return result
+
 
 def parse_args() -> Namespace:
     """Parse command line arguments"""
@@ -533,9 +568,7 @@ def parse_args() -> Namespace:
     )
 
     # ✅ DPM-Solver arguments
-    parser.add_argument(
-        "--order", type=int, default=2, help="DPM-Solver order"
-    )
+    parser.add_argument("--order", type=int, default=2, help="DPM-Solver order")
     parser.add_argument(
         "--algorithm_type",
         type=str,
@@ -548,15 +581,9 @@ def parse_args() -> Namespace:
         default="time_uniform",
         help="Skip type",
     )
-    parser.add_argument(
-        "--method", type=str, default="multistep", help="Method"
-    )
-    parser.add_argument(
-        "--t_start", type=float, default=1.0, help="t_start"
-    )
-    parser.add_argument(
-        "--t_end", type=float, default=1e-3, help="t_end"
-    )
+    parser.add_argument("--method", type=str, default="multistep", help="Method")
+    parser.add_argument("--t_start", type=float, default=1.0, help="t_start")
+    parser.add_argument("--t_end", type=float, default=1e-3, help="t_end")
     parser.add_argument(
         "--content_encoder_downsample_size",
         type=int,
@@ -570,7 +597,9 @@ def parse_args() -> Namespace:
     return parser.parse_args()
 
 
-def create_args_namespace(args: Namespace, accelerator: Optional[Accelerator] = None) -> Namespace:
+def create_args_namespace(
+    args: Namespace, accelerator: Optional[Accelerator] = None
+) -> Namespace:
     """Create args namespace for FontDiffuser pipeline with proper validation"""
 
     try:
@@ -586,7 +615,10 @@ def create_args_namespace(args: Namespace, accelerator: Optional[Accelerator] = 
         setattr(default_args, key, value)
 
     # ✅ CRITICAL: Ensure style_image_size is a valid tuple
-    if not hasattr(default_args, "style_image_size") or default_args.style_image_size is None:
+    if (
+        not hasattr(default_args, "style_image_size")
+        or default_args.style_image_size is None
+    ):
         default_args.style_image_size = (96, 96)
     elif isinstance(default_args.style_image_size, int):
         if default_args.style_image_size <= 0:
@@ -614,7 +646,10 @@ def create_args_namespace(args: Namespace, accelerator: Optional[Accelerator] = 
         default_args.style_image_size = (96, 96)
 
     # ✅ CRITICAL: Ensure content_image_size is a valid tuple
-    if not hasattr(default_args, "content_image_size") or default_args.content_image_size is None:
+    if (
+        not hasattr(default_args, "content_image_size")
+        or default_args.content_image_size is None
+    ):
         default_args.content_image_size = (96, 96)
     elif isinstance(default_args.content_image_size, int):
         if default_args.content_image_size <= 0:
@@ -646,15 +681,22 @@ def create_args_namespace(args: Namespace, accelerator: Optional[Accelerator] = 
         logging.warning("style_image_size must be positive, using (96, 96)")
         default_args.style_image_size = (96, 96)
 
-    if default_args.content_image_size[0] <= 0 or default_args.content_image_size[1] <= 0:
+    if (
+        default_args.content_image_size[0] <= 0
+        or default_args.content_image_size[1] <= 0
+    ):
         logging.warning("content_image_size must be positive, using (96, 96)")
         default_args.content_image_size = (96, 96)
 
     # ✅ Log the final confirmed values
     if accelerator and accelerator.is_main_process:
         logging.info(f"✅ Image size configuration:")
-        logging.info(f"   style_image_size:   {default_args.style_image_size} (type: {type(default_args.style_image_size).__name__})")
-        logging.info(f"   content_image_size: {default_args.content_image_size} (type: {type(default_args.content_image_size).__name__})")
+        logging.info(
+            f"   style_image_size:   {default_args.style_image_size} (type: {type(default_args.style_image_size).__name__})"
+        )
+        logging.info(
+            f"   content_image_size: {default_args.content_image_size} (type: {type(default_args.content_image_size).__name__})"
+        )
 
     # Set required attributes
     default_args.demo = False
@@ -665,9 +707,7 @@ def create_args_namespace(args: Namespace, accelerator: Optional[Accelerator] = 
     default_args.resolution = 96
 
     # Generation parameters
-    default_args.algorithm_type = getattr(
-        default_args, "algorithm_type", "dpmsolver++"
-    )
+    default_args.algorithm_type = getattr(default_args, "algorithm_type", "dpmsolver++")
     default_args.guidance_type = getattr(
         default_args, "guidance_type", "classifier-free"
     )
@@ -683,6 +723,7 @@ def create_args_namespace(args: Namespace, accelerator: Optional[Accelerator] = 
     )
 
     return default_args
+
 
 def save_checkpoint(results: Dict[str, Any], output_dir: str) -> None:
     try:
@@ -708,23 +749,28 @@ def generate_content_images(
     if accelerator.is_main_process:
         os.makedirs(content_dir, exist_ok=True)
     accelerator.wait_for_everyone()
-    
+
     font_names: List[str] = font_manager.get_font_names()
     if not font_names:
         raise ValueError("No fonts loaded")
-    
+
     if accelerator.is_main_process:
         logging.info(f"{'=' * 60}")
         logging.info(f"Generating Content Images")
         logging.info(f"Using {len(font_names)} fonts")
         logging.info(f"Characters: {len(characters)}")
         logging.info("=" * 60)
-    
+
     char_paths: Dict[str, str] = {}
     chars_without_fonts: List[str] = []
-    
+
     with accelerator.split_between_processes(characters) as local_chars:
-        for char in tqdm(local_chars, desc=f"📸 GPU {accelerator.process_index}", colour="magenta", disable=not accelerator.is_local_main_process):
+        for char in tqdm(
+            local_chars,
+            desc=f"📸 GPU {accelerator.process_index}",
+            colour="magenta",
+            disable=not accelerator.is_local_main_process,
+        ):
             found_font = None
             for font_name in font_names:
                 if font_manager.is_char_in_font(font_name, char):
@@ -743,11 +789,11 @@ def generate_content_images(
             except Exception as e:
                 if accelerator.is_local_main_process:
                     logging.info(f"  ✗ Error generating '{char}': {e}")
-    
+
     accelerator.wait_for_everyone()
     all_char_paths = gather_object([char_paths])
     all_chars_without_fonts = gather_object([chars_without_fonts])
-    
+
     if accelerator.is_main_process:
         merged_char_paths = {}
         merged_without_fonts = []
@@ -755,10 +801,12 @@ def generate_content_images(
             merged_char_paths.update(paths)
         for chars in all_chars_without_fonts:
             merged_without_fonts.extend(chars)
-        
+
         logging.info(f"✓ Generated {len(merged_char_paths)} content images")
         if merged_without_fonts:
-            logging.info(f"⚠ {len(merged_without_fonts)} characters not found in any font")
+            logging.info(
+                f"⚠ {len(merged_without_fonts)} characters not found in any font"
+            )
         logging.info("=" * 60)
         return merged_char_paths
     else:
@@ -780,46 +828,52 @@ def batch_generate_images(
         logging.info(f"{'=' * 60}")
         logging.info(f"{'GENERATING CONTENT IMAGES':^60}")
         logging.info("=" * 60)
-    
-    char_paths = generate_content_images(characters, font_manager, output_dir, generation_tracker, accelerator)
-    
+
+    char_paths = generate_content_images(
+        characters, font_manager, output_dir, generation_tracker, accelerator
+    )
+
     if accelerator.is_main_process and not char_paths:
         raise ValueError("No content images generated!")
-    
+
     # ✅ CORRECTED: Extract ALL unique characters and styles from checkpoint
     all_chars_in_checkpoint: Set[str] = set()
     all_styles_in_checkpoint: Set[str] = set()
-    
+
     for gen in generation_tracker.generations:
         all_chars_in_checkpoint.add(gen.get("character", ""))
         all_styles_in_checkpoint.add(gen.get("style", ""))
-    
+
     # ✅ Add current session's chars
     all_chars_in_checkpoint.update(char_paths.keys())
-    
+
     # ✅ Add current session's styles (only those that were actually generated)
-    for (style_path, style_name) in style_paths_with_names:
+    for style_path, style_name in style_paths_with_names:
         # Check if this style has any generations
-        if any(gen.get("style") == style_name for gen in generation_tracker.generations):
+        if any(
+            gen.get("style") == style_name for gen in generation_tracker.generations
+        ):
             all_styles_in_checkpoint.add(style_name)
-    
+
     # Initialize results from tracker
     results = {
-        "generations": generation_tracker.generations.copy() if accelerator.is_main_process else [],
+        "generations": (
+            generation_tracker.generations.copy() if accelerator.is_main_process else []
+        ),
         "metrics": {"lpips": [], "ssim": [], "inference_times": []},
         "dataset_split": args.dataset_split,
         "fonts": font_manager.get_font_names(),
         "characters": sorted(list(all_chars_in_checkpoint)),  # ✅ ALL accumulated chars
-        "styles": sorted(list(all_styles_in_checkpoint)),     # ✅ ONLY generated styles
-        "total_chars": len(all_chars_in_checkpoint),          # ✅ ALL accumulated char count
-        "total_styles": len(all_styles_in_checkpoint),        # ✅ ONLY generated style count
+        "styles": sorted(list(all_styles_in_checkpoint)),  # ✅ ONLY generated styles
+        "total_chars": len(all_chars_in_checkpoint),  # ✅ ALL accumulated char count
+        "total_styles": len(all_styles_in_checkpoint),  # ✅ ONLY generated style count
     }
-    
+
     target_base_dir = os.path.join(output_dir, "TargetImage")
     if accelerator.is_main_process:
         os.makedirs(target_base_dir, exist_ok=True)
     accelerator.wait_for_everyone()
-    
+
     if accelerator.is_main_process:
         logging.info(f"{'=' * 60}")
         logging.info(f"{'BATCH IMAGE GENERATION':^60}")
@@ -830,36 +884,46 @@ def batch_generate_images(
         logging.info(f"Characters (content): {len(char_paths)}")
         logging.info(f"Batch size:           {args.batch_size}")
         logging.info(f"Num GPUs:             {accelerator.num_processes}")
-        logging.info(f"Previously generated: {len(generation_tracker.generations)} unique pairs")
+        logging.info(
+            f"Previously generated: {len(generation_tracker.generations)} unique pairs"
+        )
         logging.info(f"Unique chars seen:    {len(all_chars_in_checkpoint)}")  # ✅ NEW
         logging.info(f"Unique styles used:   {len(all_styles_in_checkpoint)}")  # ✅ NEW
         logging.info("=" * 60 + "\n")
-    
+
     font_names = font_manager.get_font_names()
     if not font_names:
         raise ValueError("No fonts loaded!")
     primary_font = font_names[0]
-    
+
     if accelerator.is_main_process:
         logging.info(f"Using font: {primary_font}")
         logging.info("=" * 60 + "\n")
-    
+
     generated_count = 0
     skipped_count = 0
     failed_count = 0
     generation_start_time = time.time()
-    
+
     with accelerator.split_between_processes(style_paths_with_names) as local_styles:
-        for style_idx, (style_path, style_name) in enumerate(tqdm(local_styles, desc=f"🎨 GPU {accelerator.process_index}", disable=not accelerator.is_local_main_process)):
+        for style_idx, (style_path, style_name) in enumerate(
+            tqdm(
+                local_styles,
+                desc=f"🎨 GPU {accelerator.process_index}",
+                disable=not accelerator.is_local_main_process,
+            )
+        ):
             style_dir = os.path.join(target_base_dir, style_name)
             os.makedirs(style_dir, exist_ok=True)
-            
+
             try:
                 # Filter characters that haven't been generated yet
                 chars_to_generate = [
                     char
                     for char in characters
-                    if not generation_tracker.is_generated(char, style_name, primary_font)
+                    if not generation_tracker.is_generated(
+                        char, style_name, primary_font
+                    )
                 ]
 
                 if not chars_to_generate:
@@ -877,7 +941,12 @@ def batch_generate_images(
 
                 # Sample batch
                 images, valid_chars, batch_time = sampling_batch_optimized(
-                    args, pipe, chars_to_generate, style_path, font_manager, primary_font
+                    args,
+                    pipe,
+                    chars_to_generate,
+                    style_path,
+                    font_manager,
+                    primary_font,
                 )
 
                 if images is None:
@@ -917,12 +986,14 @@ def batch_generate_images(
                             "content_image_path": content_path_rel,
                             "target_image_path": target_path_rel,
                             "content_hash": compute_file_hash(char, "", primary_font),
-                            "target_hash": compute_file_hash(char, style_name, primary_font),
+                            "target_hash": compute_file_hash(
+                                char, style_name, primary_font
+                            ),
                         }
 
                         results["generations"].append(generation_record)
                         generation_tracker.add_generation(generation_record)
-                        
+
                         # ✅ Update accumulated chars and styles in results
                         all_chars_in_checkpoint.add(char)
                         all_styles_in_checkpoint.add(style_name)
@@ -930,7 +1001,7 @@ def batch_generate_images(
                         results["styles"] = sorted(list(all_styles_in_checkpoint))
                         results["total_chars"] = len(all_chars_in_checkpoint)
                         results["total_styles"] = len(all_styles_in_checkpoint)
-                        
+
                         generated_count += 1
 
                     # Track inference time
@@ -962,6 +1033,7 @@ def batch_generate_images(
                 if accelerator.is_local_main_process:
                     logging.info(f"  ✗ {style_name}: {e}")
                     import traceback
+
                     traceback.print_exc()
                 failed_count += len(chars_to_generate)
 
@@ -979,6 +1051,7 @@ def batch_generate_images(
         )
 
     return results
+
 
 def sampling_batch_optimized(
     args: Namespace,
@@ -1050,7 +1123,10 @@ def sampling_batch_optimized(
 
             # ✅ Ensure dm_size is a tuple
             if isinstance(args.content_image_size, int):
-                dm_size: Tuple[int, int] = (args.content_image_size, args.content_image_size)
+                dm_size: Tuple[int, int] = (
+                    args.content_image_size,
+                    args.content_image_size,
+                )
             elif isinstance(args.content_image_size, (list, tuple)):
                 dm_size: Tuple[int, int] = tuple(args.content_image_size)
             else:
@@ -1093,9 +1169,11 @@ def sampling_batch_optimized(
     except Exception as e:
         logging.info(f"    ✗ Error in batch sampling: {e}")
         import traceback
+
         traceback.print_exc()
         return None, None, None
-    
+
+
 def _print_checkpoint_status(
     current_style: int,
     total_styles: int,
@@ -1444,6 +1522,7 @@ def log_to_wandb(results: Dict[str, Any], args: Namespace) -> None:
     except Exception as e:
         logging.info(f"⚠ Error logging to wandb: {e}")
         import traceback
+
         traceback.print_exc()
 
 
@@ -1507,6 +1586,7 @@ def main() -> None:
 
         if getattr(args, "compile", False) and accelerator.is_main_process:
             import torch
+
             logging.info("🔧 Compiling model components with torch.compile...")
             try:
                 if hasattr(pipe.model, "unet"):
@@ -1578,6 +1658,7 @@ def main() -> None:
         if accelerator.is_main_process:
             logging.info(f"✗ Fatal error: {e}")
             import traceback
+
             traceback.print_exc()
 
             if "results" in locals() and results:

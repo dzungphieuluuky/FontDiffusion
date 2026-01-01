@@ -42,6 +42,7 @@ logging.basicConfig(
 # UTILITY FUNCTIONS - For filename parsing and hashing
 # ============================================================================
 
+
 def compute_file_hash(char: str, style: str, font: str = "") -> str:
     """
     Compute deterministic hash for a (character, style, font) combination
@@ -62,7 +63,7 @@ def parse_content_filename(filename: str) -> Optional[str]:
     """
     Parse content filename to extract character only
     Format: U+XXXX_{char}_{hash}.png or U+XXXX_{hash}.png
-    
+
     Returns: character or None if parse fails
     """
     if not filename.endswith(".png"):
@@ -91,7 +92,7 @@ def parse_target_filename(filename: str) -> Optional[Tuple[str, str]]:
     """
     Parse target filename to extract character and style
     Format: U+XXXX_{char}_{style}_{hash}.png
-    
+
     Returns: (char, style) or None if parse fails
     """
     if not filename.endswith(".png"):
@@ -111,20 +112,21 @@ def parse_target_filename(filename: str) -> Optional[Tuple[str, str]]:
     try:
         char_code = int(codepoint.replace("U+", ""), 16)
         char = chr(char_code)
-        
+
         # parts[0] = codepoint
         # parts[1] = character
         # parts[2:-1] = style parts
         # parts[-1] = hash
-        
+
         style_parts = parts[2:-1]
         if not style_parts:
             return None
-        
+
         style = "_".join(style_parts)
         return (char, style)
     except (ValueError, OverflowError, IndexError):
         return None
+
 
 @dataclass
 class ValidationSplitConfig:
@@ -138,6 +140,7 @@ class ValidationSplitConfig:
 # ============================================================================
 # MAIN CLASS - ValidationSplitCreator
 # ============================================================================
+
 
 class ValidationSplitCreator:
     """Create train/val splits with proper checkpoint filtering"""
@@ -177,7 +180,7 @@ class ValidationSplitCreator:
         """
         ✅ CORRECTED: Analyze by scanning actual files and matching content↔target pairs
         ✅ With detailed diagnostics to find missing images
-        
+
         Returns:
             - content_files: {char -> file_path}
             - target_files: {(char, style) -> file_path}
@@ -213,10 +216,10 @@ class ValidationSplitCreator:
         total_targets = 0
         style_mismatch_count = 0
         parse_error_count = 0
-        
+
         style_mismatch_details = defaultdict(list)
         unparseable_files = []  # ✅ Collect unparseable files for later diagnosis
-        
+
         for style_folder in tqdm(
             sorted(target_dir.iterdir()),
             desc="Styles",
@@ -229,26 +232,30 @@ class ValidationSplitCreator:
 
             for img_file in style_folder.glob("*.png"):
                 parsed = parse_target_filename(img_file.name)
-                
+
                 # Save parse errors file path for diagnosis
                 if parsed is None:
                     parse_error_count += 1
-                    unparseable_files.append({
-                        "folder": style_name,
-                        "filename": img_file.name,
-                    })
+                    unparseable_files.append(
+                        {
+                            "folder": style_name,
+                            "filename": img_file.name,
+                        }
+                    )
                     continue
-                
+
                 char, style = parsed
 
                 # ✅ Validate style matches folder
                 if style != style_name:
                     style_mismatch_count += 1
-                    style_mismatch_details[style_name].append({
-                        "filename": img_file.name,
-                        "extracted_style": style,
-                        "folder_style": style_name,
-                    })
+                    style_mismatch_details[style_name].append(
+                        {
+                            "filename": img_file.name,
+                            "extracted_style": style,
+                            "folder_style": style_name,
+                        }
+                    )
                     continue  # ✅ Skip this file
 
                 target_files[(char, style)] = str(img_file)
@@ -256,7 +263,7 @@ class ValidationSplitCreator:
                 total_targets += 1
 
         logging.info(f"  ✓ Found {total_targets} valid target images")
-        
+
         # ✅ Print parse error diagnostics
         if parse_error_count > 0:
             logging.info(f"⚠️  PARSE ERROR DIAGNOSTICS:")
@@ -265,7 +272,7 @@ class ValidationSplitCreator:
             for item in unparseable_files[:10]:
                 logging.info(f"    Folder: {item['folder']}")
                 logging.info(f"    File:   {item['filename']}")
-                stem = item['filename'][:-4]
+                stem = item["filename"][:-4]
                 parts = stem.split("_")
                 logging.info(f"    Parts:  {parts} (count: {len(parts)})")
             if len(unparseable_files) > 10:
@@ -275,10 +282,16 @@ class ValidationSplitCreator:
             unparseable_txt_path = self.data_root / "unparseable_files.txt"
             with open(unparseable_txt_path, "w", encoding="utf-8") as f:
                 for item in unparseable_files:
-                    abs_path = str((self.source_train_dir / "TargetImage" / item["folder"] / item["filename"]).resolve())
+                    abs_path = str(
+                        (
+                            self.source_train_dir
+                            / "TargetImage"
+                            / item["folder"]
+                            / item["filename"]
+                        ).resolve()
+                    )
                     f.write(abs_path + "\n")
             logging.info(f"✓ Exported unparseable file list to {unparseable_txt_path}")
-
 
         # ✅ Print style mismatch diagnostics
         if style_mismatch_count > 0:
@@ -289,7 +302,9 @@ class ValidationSplitCreator:
                 logging.info(f"    Mismatch count: {len(mismatches)}")
                 for mismatch in mismatches[:3]:
                     logging.info(f"      - {mismatch['filename']}")
-                    logging.info(f"        Extracted: '{mismatch['extracted_style']}' vs Expected: '{mismatch['folder_style']}'")
+                    logging.info(
+                        f"        Extracted: '{mismatch['extracted_style']}' vs Expected: '{mismatch['folder_style']}'"
+                    )
                 if len(mismatches) > 3:
                     logging.info(f"      ... and {len(mismatches) - 3} more")
 
@@ -298,7 +313,7 @@ class ValidationSplitCreator:
         valid_pairs: Dict[Tuple[str, str], bool] = {}
         missing_content_count = 0
 
-        for (char, style) in tqdm(
+        for char, style in tqdm(
             target_files.keys(),
             desc="Validating pairs",
             ncols=100,
@@ -329,22 +344,34 @@ class ValidationSplitCreator:
         logging.info(f"Missing content images:      {missing_content_count:,}")
         logging.info(f"Final valid pairs:           {len(valid_target_files):,}")
         logging.info(f"=" * 70)
-        
+
         # ✅ Calculate and show loss
         expected_total = total_targets
         lost_to_parse_error = parse_error_count
         lost_to_style_mismatch = style_mismatch_count
         lost_to_missing_content = missing_content_count
-        total_lost = lost_to_parse_error + lost_to_style_mismatch + lost_to_missing_content
-        
+        total_lost = (
+            lost_to_parse_error + lost_to_style_mismatch + lost_to_missing_content
+        )
+
         if total_lost > 0:
             logging.info(f"⚠️  IMAGE LOSS BREAKDOWN:")
             logging.info(f"  Total scanned:          {expected_total:,}")
-            logging.info(f"  Lost to parse errors:   {lost_to_parse_error:,} ({lost_to_parse_error*100/expected_total:.2f}%)")
-            logging.info(f"  Lost to style mismatch: {lost_to_style_mismatch:,} ({lost_to_style_mismatch*100/expected_total:.2f}%)")
-            logging.info(f"  Lost to missing content:{lost_to_missing_content:,} ({lost_to_missing_content*100/expected_total:.2f}%)")
-            logging.info(f"  Total lost:             {total_lost:,} ({total_lost*100/expected_total:.2f}%)")
-            logging.info(f"  Usable for split:       {len(valid_target_files):,} ({len(valid_target_files)*100/expected_total:.2f}%)")
+            logging.info(
+                f"  Lost to parse errors:   {lost_to_parse_error:,} ({lost_to_parse_error*100/expected_total:.2f}%)"
+            )
+            logging.info(
+                f"  Lost to style mismatch: {lost_to_style_mismatch:,} ({lost_to_style_mismatch*100/expected_total:.2f}%)"
+            )
+            logging.info(
+                f"  Lost to missing content:{lost_to_missing_content:,} ({lost_to_missing_content*100/expected_total:.2f}%)"
+            )
+            logging.info(
+                f"  Total lost:             {total_lost:,} ({total_lost*100/expected_total:.2f}%)"
+            )
+            logging.info(
+                f"  Usable for split:       {len(valid_target_files):,} ({len(valid_target_files)*100/expected_total:.2f}%)"
+            )
 
         return content_files, valid_target_files, dict(char_to_styles)
 
@@ -454,7 +481,7 @@ class ValidationSplitCreator:
                 continue
 
             src_path = Path(content_files[char])
-            
+
             if not src_path.exists():
                 tqdm.write(f"    ⚠️  Source not found: {src_path}")
                 skipped += 1
@@ -486,7 +513,7 @@ class ValidationSplitCreator:
                 continue
 
             src_path = Path(target_path_str)
-            
+
             if not src_path.exists():
                 tqdm.write(f"    ⚠️  Source not found: {src_path}")
                 skipped += 1
@@ -605,7 +632,7 @@ class ValidationSplitCreator:
         logging.info("\n📁 CREATING TRAIN SPLIT...")
         train_chars = set(scenarios["train"]["characters"])
         train_styles = set(scenarios["train"]["styles"])
-        
+
         self.copy_images_for_split(
             "train", self.train_dir, scenarios, content_files, target_files
         )
@@ -621,7 +648,7 @@ class ValidationSplitCreator:
         logging.info(f"📁 CREATING VAL SPLIT...")
         val_chars = set(scenarios["val"]["characters"])
         val_styles = set(scenarios["val"]["styles"])
-        
+
         self.copy_images_for_split(
             "val", self.val_dir, scenarios, content_files, target_files
         )
@@ -649,6 +676,7 @@ class ValidationSplitCreator:
 # ============================================================================
 # ENTRY POINT
 # ============================================================================
+
 
 def create_validation_split(
     data_root: str,

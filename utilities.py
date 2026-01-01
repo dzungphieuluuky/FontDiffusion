@@ -11,6 +11,7 @@ from typing import Any, Dict
 # TQDM CONFIGURATION - Reusable across the file
 # ============================================================================
 
+
 def get_tqdm_config(
     total: Optional[int] = None,
     desc: str = "",
@@ -21,11 +22,11 @@ def get_tqdm_config(
 ) -> Dict[str, Any]:
     """
     Get standardized tqdm configuration
-    
+
     ✅ unit_scale=True: Automatically scales to KB, MB, GB, etc.
     ✅ total: Number of items (from loop)
     ✅ Updates automatically as items are processed
-    
+
     Args:
         total: Total number of items to process
         desc: Description/label for the progress bar
@@ -33,10 +34,10 @@ def get_tqdm_config(
         ncols: Width of progress bar (default: 100)
         unit_scale: Enable automatic scaling (default: True)
         unit_divisor: Divisor for unit scaling (1000 for decimal, 1024 for binary)
-    
+
     Returns:
         Dict of tqdm configuration that can be unpacked with **
-    
+
     Example:
         for item in tqdm(items, **get_tqdm_config(
             total=len(items),
@@ -186,6 +187,7 @@ def convert_checkpoint_folder(
 
     print(f"\n✓ Conversion complete!")
     return output_dir
+
 
 if __name__ == "__main__":
     import argparse

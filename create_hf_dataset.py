@@ -23,6 +23,7 @@ from utilities import get_tqdm_config
 # UTILITY FUNCTIONS
 # ============================================================================
 
+
 def compute_file_hash(char: str, style: str, font: str = "") -> str:
     """
     Compute deterministic hash for a (character, style, font) combination
@@ -44,16 +45,16 @@ def get_content_filename(char: str, font: str = "") -> str:
     Get content image filename for character
     Format: {unicode_codepoint}_{char}_{hash}.png or U+XXXX_{hash}.png
     Example: U+4E00_中_a1b2c3d4.png
-    
+
     ✅ CORRECTED: Uses filesystem safety check, not isprintable()
     """
     codepoint = f"U+{ord(char):04X}"
     hash_val = compute_file_hash(char, "", font)
-    
+
     # ✅ Filesystem-safe characters (remove problematic ones only)
     filesystem_unsafe = '<>:"/\\|?*'
     safe_char = char if char not in filesystem_unsafe else ""
-    
+
     if safe_char:
         return f"{codepoint}_{safe_char}_{hash_val}.png"
     else:
@@ -65,16 +66,16 @@ def get_target_filename(char: str, style: str, font: str = "") -> str:
     Get target image filename
     Format: {unicode_codepoint}_{char}_{style}_{hash}.png or U+XXXX_{style}_{hash}.png
     Example: U+4E00_中_style0_a1b2c3d4.png
-    
+
     ✅ CORRECTED: Uses filesystem safety check, not isprintable()
     """
     codepoint = f"U+{ord(char):04X}"
     hash_val = compute_file_hash(char, style, font)
-    
+
     # ✅ Filesystem-safe characters (remove problematic ones only)
     filesystem_unsafe = '<>:"/\\|?*'
     safe_char = char if char not in filesystem_unsafe else ""
-    
+
     if safe_char:
         return f"{codepoint}_{safe_char}_{style}_{hash_val}.png"
     else:
@@ -84,6 +85,7 @@ def get_target_filename(char: str, style: str, font: str = "") -> str:
 # ============================================================================
 # MAIN CLASS
 # ============================================================================
+
 
 @dataclass
 class FontDiffusionDatasetConfig:
@@ -165,7 +167,7 @@ class FontDiffusionDatasetBuilder:
                 total=len(generations),
                 desc="Loading image pairs",
                 unit="pair",
-            )
+            ),
         ):
             char = gen.get("character")
             style = gen.get("style")
@@ -189,9 +191,7 @@ class FontDiffusionDatasetBuilder:
                 content_image = PILImage.open(content_path).convert("RGB")
                 target_image = PILImage.open(target_path).convert("RGB")
             except Exception as e:
-                tqdm.write(
-                    f"⚠️  Error loading pair ({char}, {style}): {e}"
-                )
+                tqdm.write(f"⚠️  Error loading pair ({char}, {style}): {e}")
                 continue
 
             row = {
@@ -267,6 +267,7 @@ class FontDiffusionDatasetBuilder:
 # ============================================================================
 # ENTRY POINT
 # ============================================================================
+
 
 def create_and_push_dataset(
     data_dir: str,
