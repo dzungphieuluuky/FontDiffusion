@@ -571,7 +571,7 @@ def parse_args() -> Namespace:
     return parser.parse_args()
 
 
-def create_args_namespace(args: Namespace) -> Namespace:
+def create_args_namespace(args: Namespace, accelerator: Optional[Accelerator] = None) -> Namespace:
     """Create args namespace for FontDiffuser pipeline with proper validation"""
 
     try:
@@ -677,7 +677,8 @@ def create_args_namespace(args: Namespace) -> Namespace:
         default_args, "content_encoder_downsample_size", 3
     )
 
-    if default_args.is_main_process:
+    # ✅ Only log if we have accelerator and are on main process
+    if accelerator and accelerator.is_main_process:
         logging.info(f"\n✅ Image size configuration:")
         logging.info(f"   style_image_size:   {default_args.style_image_size}")
         logging.info(f"   content_image_size: {default_args.content_image_size}")
