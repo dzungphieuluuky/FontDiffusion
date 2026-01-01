@@ -29,7 +29,7 @@ from accelerate.logging import get_logger
 from accelerate.utils import set_seed
 from diffusers.optimization import get_scheduler
 
-from dataset.font_dataset import FontDataset
+from dataset.my_font_dataset import MyFontDataset
 from dataset.collate_fn import CollateFN
 from configs.fontdiffuser import get_parser
 from src import (
@@ -864,7 +864,7 @@ def main():
         ]
     )
 
-    train_font_dataset = FontDataset(
+    train_font_dataset = MyFontDataset(
         args=args,
         phase="train",
         transforms=[content_transforms, style_transforms, target_transforms],
@@ -912,7 +912,7 @@ def main():
         ]
     )
 
-    val_font_dataset = FontDataset(
+    val_font_dataset = MyFontDataset(
         args=args,
         phase="val",
         transforms=[
