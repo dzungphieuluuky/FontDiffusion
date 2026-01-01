@@ -126,13 +126,6 @@ def parse_target_filename(filename: str) -> Optional[Tuple[str, str]]:
     except (ValueError, OverflowError, IndexError):
         return None
 
-
-# ⚠️ DELETE: get_content_filename() - UNUSED (file paths are already obtained)
-# ⚠️ DELETE: get_target_filename() - UNUSED (file paths are already obtained)
-# ⚠️ DELETE: find_content_image_by_char() - UNUSED (not called anywhere)
-# ⚠️ DELETE: find_target_image_by_char_style() - UNUSED (not called anywhere)
-
-
 @dataclass
 class ValidationSplitConfig:
     """Configuration for validation split creation"""

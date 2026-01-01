@@ -1177,7 +1177,7 @@ def _print_generation_summary(
     """Print final generation summary"""
     elapsed = time.time() - start_time
 
-    logging.info("\n" + "=" * 60)
+    logging.info("=" * 60)
     logging.info(f"{'GENERATION COMPLETE':^60}")
     logging.info("=" * 60)
     logging.info(f"\nPair Statistics:")
@@ -1209,7 +1209,7 @@ def evaluate_results(
         )
         return results
 
-    logging.info("\n" + "=" * 60)
+    logging.info("=" * 60)
     logging.info(f"{'EVALUATING GENERATED IMAGES':^60}")
     logging.info("=" * 60)
 
@@ -1326,7 +1326,7 @@ def evaluate_results(
         except Exception as e:
             logging.info(f"  ⚠ Error computing FID: {e}")
 
-    logging.info("\n" + "=" * 60)
+    logging.info("=" * 60)
     logging.info(f"{'EVALUATION SUMMARY':^60}")
     logging.info("=" * 60)
     logging.info(f"Evaluated pairs:    {evaluated_pairs}")
@@ -1346,7 +1346,7 @@ def log_to_wandb(results: Dict[str, Any], args: Namespace) -> None:
         return
 
     try:
-        logging.info("\n" + "=" * 60)
+        logging.info("=" * 60)
         logging.info(f"{'LOGGING TO WEIGHTS & BIASES':^60}")
         logging.info("=" * 60)
 
@@ -1508,7 +1508,7 @@ def main() -> None:
     args: Namespace = parse_args()
     results: Dict[str, Any] = {}
 
-    logging.info("\n" + "=" * 60)
+    logging.info("=" * 60)
     logging.info("FONTDIFFUSER SYNTHESIS DATA GENERATION MAGIC")
     logging.info("=" * 60)
 
@@ -1600,7 +1600,7 @@ def main() -> None:
         if args.use_wandb:
             log_to_wandb(results, args)
 
-        logging.info("\n" + "=" * 60)
+        logging.info("=" * 60)
         logging.info("✅ GENERATION COMPLETE!")
         logging.info("=" * 60)
         logging.info(f"\nOutput structure:")
