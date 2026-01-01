@@ -85,10 +85,41 @@ def get_target_filename(char: str, style: str, font: str = "") -> str:
         return f"{codepoint}_{style}_{hash_val}.png"
 
 
-def parse_content_filename(filename: str) -> Optional[Tuple[str, str]]:
+def parse_content_filename(filename: str) -> Optional[str]:
     """
-    Parse content filename: U+XXXX_{char}_{hash}.png
-    Returns: (char, hash) or None if parse fails
+    Parse content filename to extract character only
+    Format: U+XXXX_{char}_{hash}.png or U+XXXX_{hash}.png
+    
+    Returns: character or None if parse fails
+    """
+    if not filename.endswith(".png"):
+        return None
+
+    stem = filename[:-4]  # Remove .png
+    parts = stem.split("_")
+
+    if len(parts) < 2:
+        return None
+
+    codepoint = parts[0]
+
+    if not codepoint.startswith("U+"):
+        return None
+
+    try:
+        char_code = int(codepoint.replace("U+", ""), 16)
+        char = chr(char_code)
+        return char
+    except (ValueError, OverflowError):
+        return None
+
+
+def parse_target_filename(filename: str) -> Optional[Tuple[str, str]]:
+    """
+    Parse target filename to extract character and style
+    Format: U+XXXX_{char}_{style}_{hash}.png
+    
+    Returns: (char, style) or None if parse fails
     """
     if not filename.endswith(".png"):
         return None
@@ -100,7 +131,6 @@ def parse_content_filename(filename: str) -> Optional[Tuple[str, str]]:
         return None
 
     codepoint = parts[0]
-    hash_val = parts[-1]
 
     if not codepoint.startswith("U+"):
         return None
@@ -108,67 +138,54 @@ def parse_content_filename(filename: str) -> Optional[Tuple[str, str]]:
     try:
         char_code = int(codepoint.replace("U+", ""), 16)
         char = chr(char_code)
-        return (char, hash_val)
-    except (ValueError, OverflowError):
-        return None
-
-
-def parse_target_filename(filename: str) -> Optional[Tuple[str, str, str]]:
-    """
-    Parse target filename: U+XXXX_{char}_{style}_{hash}.png
-    Handles styles that are purely numeric (e.g., '1', '2') or alphanumeric (e.g., 'hanhthu1')
-    Hash is always the last 8 hex characters before .png
-    Returns: (char, style, hash) or None if parse fails
-
-    Examples:
-    - U+212B0_𡊰_1_4dcacde4.png → ('𡊰', '1', '4dcacde4')
-    - U+200E9_𠃩_hanhthu1_fdf6dcd1.png → ('𠃩', 'hanhthu1', 'fdf6dcd1')
-    """
-    if not filename.endswith(".png"):
-        return None
-
-    stem = filename[:-4]  # Remove .png
-    parts = stem.split("_")
-
-    # Need at least: codepoint, char, style_part, hash (4 parts minimum)
-    if len(parts) < 4:
-        return None
-
-    codepoint = parts[0]
-
-    if not codepoint.startswith("U+"):
-        return None
-
-    try:
-        char_code = int(codepoint.replace("U+", ""), 16)
-        char = chr(char_code)
-
-        # The hash is always 8 hex characters and is the LAST part
-        hash_val = parts[-1]
-
-        # Validate hash is 8 hex chars
-        if len(hash_val) != 8 or not all(
-            c in "0123456789abcdef" for c in hash_val.lower()
-        ):
-            return None
-
-        # parts[0] = codepoint (U+XXXX)
-        # parts[1] = character itself
-        # parts[2:-1] = style parts (can be numeric like '1' or alphanumeric like 'hanhthu1')
+        
+        # parts[0] = codepoint
+        # parts[1] = character
+        # parts[2:-1] = style parts
         # parts[-1] = hash
-
-        # Extract style (everything after char, before hash)
+        
         style_parts = parts[2:-1]
-
-        if not style_parts:  # No style found
+        if not style_parts:
             return None
-
+        
         style = "_".join(style_parts)
-
-        return (char, style, hash_val)
+        return (char, style)
     except (ValueError, OverflowError, IndexError):
         return None
 
+
+def find_content_image_by_char(
+    content_dir: Path, char: str
+) -> Optional[Path]:
+    """
+    Find content image for a character by scanning directory
+    Matches by codepoint and character, IGNORING hash
+    """
+    codepoint = f"U+{ord(char):04X}"
+    safe_char = char if char.isprintable() and char not in '<>:"/\\|?*' else ""
+    
+    # Look for files matching: U+XXXX_char_*.png
+    for img_file in content_dir.glob("*.png"):
+        parsed_char = parse_content_filename(img_file.name)
+        if parsed_char == char:
+            return img_file
+    
+    return None
+
+
+def find_target_image_by_char_style(
+    style_dir: Path, char: str, style: str
+) -> Optional[Path]:
+    """
+    Find target image for (char, style) by scanning directory
+    Matches by codepoint, character, and style, IGNORING hash
+    """
+    for img_file in style_dir.glob("*.png"):
+        parsed = parse_target_filename(img_file.name)
+        if parsed and parsed[0] == char and parsed[1] == style:
+            return img_file
+    
+    return None
 
 @dataclass
 class ValidationSplitConfig:
@@ -210,109 +227,6 @@ class ValidationSplitCreator:
 
         self.source_train_dir: Path = source_dir
         logging.info(f"✓ Using source directory: {self.source_train_dir}")
-
-    def analyze_data(
-        self,
-    ) -> Tuple[Dict[str, str], Dict[Tuple[str, str], str], Dict[str, List[str]]]:
-        """
-        ✅ CORRECTED: Analyze by scanning actual files and matching content↔target pairs
-
-        Returns:
-        - content_files: {char -> hash} (what content images exist)
-        - target_files: {(char, style) -> hash} (what target images exist with their hash)
-        - char_to_styles: {char -> [styles]} (which styles exist for each char)
-        """
-        logging.info("\n" + "=" * 70)
-        logging.info("ANALYZING TRAINING DATA")
-        logging.info("=" * 70)
-
-        content_dir : Path = self.source_train_dir / "ContentImage"
-        target_dir: Path = self.source_train_dir / "TargetImage"
-
-        content_files: Dict[str, str] = {}  # char -> hash
-        target_files: Dict[Tuple[str, str], str] = {}  # (char, style) -> hash
-        char_to_styles: Dict[str, List[str]] = defaultdict(set)
-
-        # Scan content images
-        logging.info("\n🔍 Scanning content images...")
-        if content_dir.exists():
-            for img_file in tqdm(
-                list(content_dir.glob("*.png")),
-                desc="Content images",
-                unit="img",
-            ):
-                result = parse_content_filename(img_file.name)
-                if result:
-                    char, hash_val = result
-                    content_files[char] = hash_val
-
-        logging.info(f"  ✓ Found {len(content_files)} content images")
-
-        # Scan target images
-        logging.info("\n🔍 Scanning target images...")
-        total_targets = 0
-        for style_folder in tqdm(
-            sorted(target_dir.iterdir()),
-            desc="Styles",
-            unit="style",
-        ):
-            if not style_folder.is_dir():
-                continue
-
-            style_name = style_folder.name
-
-            for img_file in style_folder.glob("*.png"):
-                result : Optional[Tuple[str, str, str]] = parse_target_filename(img_file.name)
-                if result:
-                    char, style, hash_val = result
-
-                    # Validate style matches folder
-                    if style != style_name:
-                        logging.info(
-                            f"  ⚠️  Style mismatch. Found file: {img_file.name} "
-                            f"(extracted '{style}' != folder '{style_name}')"
-                        )
-                        continue
-
-                    target_files[(char, style)] = hash_val
-                    char_to_styles[char].add(style)
-                    total_targets += 1
-
-        logging.info(f"  ✓ Found {total_targets} target images")
-
-        # Validate content↔target pairing
-        logging.info("\n🔍 Validating content ↔ target pairs...")
-        valid_pairs: Dict[Tuple[str, str], bool] = {}
-        missing_count = 0
-
-        for (char, style), target_hash in tqdm(
-            target_files.items(),
-            desc="Validating pairs",
-            ncols=100,
-            unit="pair",
-        ):
-            if char not in content_files:
-                tqdm.write(f"  ⚠️  Missing content for: {char} (style: {style})")
-                missing_count += 1
-                valid_pairs[(char, style)] = False
-            else:
-                valid_pairs[(char, style)] = True
-
-        # Filter to only valid pairs
-        valid_target_files = {
-            pair: hash_val
-            for pair, hash_val in target_files.items()
-            if valid_pairs.get(pair, False)
-        }
-
-        logging.info(f"\n✅ Summary:")
-        logging.info(f"  Content images: {len(content_files)}")
-        logging.info(f"  Target images: {len(target_files)}")
-        logging.info(f"  Valid pairs: {len(valid_target_files)}")
-        if missing_count > 0:
-            logging.info(f"  Missing content: {missing_count}")
-
-        return content_files, valid_target_files, dict(char_to_styles)
 
     def create_simple_splits(
         self,
@@ -379,13 +293,117 @@ class ValidationSplitCreator:
 
         return scenarios
 
+    def analyze_data(
+        self,
+    ) -> Tuple[Dict[str, str], Dict[Tuple[str, str], str], Dict[str, List[str]]]:
+        """
+        ✅ CORRECTED: Analyze by scanning actual files and matching content↔target pairs
+        ✅ IGNORES hash - only matches by (codepoint, char) and (codepoint, char, style)
+
+        Returns:
+        - content_files: {char -> file_path}
+        - target_files: {(char, style) -> file_path}
+        - char_to_styles: {char -> [styles]}
+        """
+        logging.info("\n" + "=" * 70)
+        logging.info("ANALYZING TRAINING DATA")
+        logging.info("=" * 70)
+
+        content_dir: Path = self.source_train_dir / "ContentImage"
+        target_dir: Path = self.source_train_dir / "TargetImage"
+
+        content_files: Dict[str, str] = {}  # char -> file_path
+        target_files: Dict[Tuple[str, str], str] = {}  # (char, style) -> file_path
+        char_to_styles: Dict[str, List[str]] = defaultdict(set)
+
+        # Scan content images
+        logging.info("\n🔍 Scanning content images...")
+        if content_dir.exists():
+            for img_file in tqdm(
+                list(content_dir.glob("*.png")),
+                desc="Content images",
+                unit="img",
+            ):
+                char = parse_content_filename(img_file.name)
+                if char:
+                    content_files[char] = str(img_file)
+
+        logging.info(f"  ✓ Found {len(content_files)} content images")
+
+        # Scan target images
+        logging.info("\n🔍 Scanning target images...")
+        total_targets = 0
+        for style_folder in tqdm(
+            sorted(target_dir.iterdir()),
+            desc="Styles",
+            unit="style",
+        ):
+            if not style_folder.is_dir():
+                continue
+
+            style_name = style_folder.name
+
+            for img_file in style_folder.glob("*.png"):
+                parsed = parse_target_filename(img_file.name)
+                if parsed:
+                    char, style = parsed
+
+                    # ✅ Validate style matches folder
+                    if style != style_name:
+                        logging.info(
+                            f"  ⚠️  Style mismatch. File: {img_file.name} "
+                            f"(extracted '{style}' != folder '{style_name}')"
+                        )
+                        continue
+
+                    target_files[(char, style)] = str(img_file)
+                    char_to_styles[char].add(style)
+                    total_targets += 1
+
+        logging.info(f"  ✓ Found {total_targets} target images")
+
+        # Validate content↔target pairing
+        logging.info("\n🔍 Validating content ↔ target pairs...")
+        valid_pairs: Dict[Tuple[str, str], bool] = {}
+        missing_count = 0
+
+        for (char, style) in tqdm(
+            target_files.keys(),
+            desc="Validating pairs",
+            ncols=100,
+            unit="pair",
+        ):
+            if char not in content_files:
+                tqdm.write(f"  ⚠️  Missing content for: {char} (U+{ord(char):04X}) (style: {style})")
+                missing_count += 1
+                valid_pairs[(char, style)] = False
+            else:
+                valid_pairs[(char, style)] = True
+
+        # Filter to only valid pairs
+        valid_target_files = {
+            pair: path
+            for pair, path in target_files.items()
+            if valid_pairs.get(pair, False)
+        }
+
+        logging.info(f"\n✅ Summary:")
+        logging.info(f"  Content images: {len(content_files)}")
+        logging.info(f"  Target images: {len(target_files)}")
+        logging.info(f"  Valid pairs: {len(valid_target_files)}")
+        if missing_count > 0:
+            logging.info(f"  Missing content: {missing_count}")
+
+        return content_files, valid_target_files, dict(char_to_styles)
+
+
     def copy_images_for_split(
         self,
         split_name: str,
         split_dir: Path,
         scenarios: Dict[str, Dict],
-        content_files: Dict[str, str],  # ✅ char -> actual_hash
-        target_files: Dict[Tuple[str, str], str],  # ✅ (char, style) -> actual_hash
+        content_files: Dict[str, str],  # ✅ char -> file_path
+        target_files: Dict[Tuple[str, str], str],  # ✅ (char, style) -> file_path
     ) -> Tuple[int, int, int]:
         """Copy images for a specific split"""
         split_config = scenarios[split_name]
@@ -402,9 +420,6 @@ class ValidationSplitCreator:
         for style in allowed_styles:
             (split_target_dir / style).mkdir(exist_ok=True)
 
-        source_content_dir = self.source_train_dir / "ContentImage"
-        source_target_dir = self.source_train_dir / "TargetImage"
-
         content_copied = 0
         target_copied = 0
         skipped = 0
@@ -419,35 +434,32 @@ class ValidationSplitCreator:
             leave=False,
         ):
             if char not in content_files:
+                tqdm.write(f"    ⚠️  Content image not found for: {char} (U+{ord(char):04X})")
                 skipped += 1
                 continue
 
-            # ✅ Use the ACTUAL hash extracted during analyze_data()
-            actual_hash = content_files[char]
-            codepoint = f"U+{ord(char):04X}"
-            safe_char = char if char.isprintable() and char not in '<>:"/\\|?*' else ""
-            
-            # Reconstruct filename using ACTUAL hash
-            if safe_char:
-                content_filename = f"{codepoint}_{safe_char}_{actual_hash}.png"
-            else:
-                content_filename = f"{codepoint}_{actual_hash}.png"
-
-            src_path = source_content_dir / content_filename
-            dst_path = split_content_dir / content_filename
+            # ✅ Get the actual file path (already found during analyze_data)
+            src_path = Path(content_files[char])
+            dst_path = split_content_dir / src_path.name
 
             if src_path.exists():
                 if src_path.resolve() != dst_path.resolve():
-                    shutil.copy2(src_path, dst_path)
-                content_copied += 1
+                    try:
+                        shutil.copy2(src_path, dst_path)
+                        content_copied += 1
+                    except Exception as e:
+                        tqdm.write(f"    ⚠️  Error copying {src_path.name}: {e}")
+                        skipped += 1
+                else:
+                    content_copied += 1
             else:
-                tqdm.write(f"    ⚠️  Not found: {content_filename}")
+                tqdm.write(f"    ⚠️  Source not found: {src_path}")
                 skipped += 1
 
         # Copy target images
         logging.info(f"  📥 Copying target images for {split_name}...")
-        for (char, style), actual_hash in tqdm(
-            sorted(target_files.items()),
+        for (char, style) in tqdm(
+            sorted(target_files.keys()),
             desc="  Target",
             ncols=80,
             unit="pair",
@@ -457,26 +469,22 @@ class ValidationSplitCreator:
             if char not in allowed_chars or style not in allowed_styles:
                 continue
 
-            # ✅ Use the ACTUAL hash extracted during analyze_data()
-            codepoint = f"U+{ord(char):04X}"
-            safe_char = char if char.isprintable() and char not in '<>:"/\\|?*' else ""
-            
-            # Reconstruct filename using ACTUAL hash
-            if safe_char:
-                target_filename = f"{codepoint}_{safe_char}_{style}_{actual_hash}.png"
-            else:
-                target_filename = f"{codepoint}_{style}_{actual_hash}.png"
-
-            style_dir = source_target_dir / style
-            src_path = style_dir / target_filename
-            dst_path = split_target_dir / style / target_filename
+            # ✅ Get the actual file path (already found during analyze_data)
+            src_path = Path(target_files[(char, style)])
+            dst_path = split_target_dir / style / src_path.name
 
             if src_path.exists():
                 if src_path.resolve() != dst_path.resolve():
-                    shutil.copy2(src_path, dst_path)
-                target_copied += 1
+                    try:
+                        shutil.copy2(src_path, dst_path)
+                        target_copied += 1
+                    except Exception as e:
+                        tqdm.write(f"    ⚠️  Error copying {src_path.name}: {e}")
+                        skipped += 1
+                else:
+                    target_copied += 1
             else:
-                tqdm.write(f"    ⚠️  Not found: {target_filename}")
+                tqdm.write(f"    ⚠️  Source not found: {src_path}")
                 skipped += 1
 
         logging.info(
