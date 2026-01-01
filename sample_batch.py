@@ -15,6 +15,7 @@ import argparse
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Any, Set, Union
 from tqdm import tqdm
+import logging
 
 import numpy as np
 import torch
@@ -25,13 +26,29 @@ from argparse import Namespace, ArgumentParser
 
 from src.dpm_solver.pipeline_dpm_solver import FontDiffuserDPMPipeline
 
+
+class TqdmLoggingHandler(logging.Handler):
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            tqdm.write(msg)
+            self.flush()
+        except Exception:
+            self.handleError(record)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+    handlers=[TqdmLoggingHandler()]
+)
+
 # Import evaluation metrics
 try:
     import lpips
 
     LPIPS_AVAILABLE: bool = True
 except ImportError:
-    print("Warning: lpips not available. Install with: pip install lpips")
+    logging.info("Warning: lpips not available. Install with: pip install lpips")
     LPIPS_AVAILABLE: bool = False
 
 try:
@@ -39,7 +56,7 @@ try:
 
     FID_AVAILABLE: bool = True
 except ImportError:
-    print("Warning: pytorch-fid not available. Install with: pip install pytorch-fid")
+    logging.info("Warning: pytorch-fid not available. Install with: pip install pytorch-fid")
     FID_AVAILABLE: bool = False
 
 try:
@@ -47,7 +64,7 @@ try:
 
     SSIM_AVAILABLE: bool = True
 except ImportError:
-    print("Warning: scikit-image not available. Install with: pip install scikit-image")
+    logging.info("Warning: scikit-image not available. Install with: pip install scikit-image")
     SSIM_AVAILABLE: bool = False
 
 try:
@@ -55,7 +72,7 @@ try:
 
     WANDB_AVAILABLE: bool = True
 except ImportError:
-    print("Warning: wandb not available. Install with: pip install wandb")
+    logging.info("Warning: wandb not available. Install with: pip install wandb")
     WANDB_AVAILABLE: bool = False
 
 # Import FontDiffuser modules
@@ -139,7 +156,7 @@ class FontManager:
                 "font": load_ttf(ttf_path),
                 "name": font_name,
             }
-            print(f"✓ Loaded font: {font_name}")
+            logging.info(f"✓ Loaded font: {font_name}")
 
         elif os.path.isdir(ttf_path):
             # Directory with multiple fonts
@@ -155,9 +172,9 @@ class FontManager:
 
             self.font_paths = sorted(font_files)
 
-            print(f"\n{'=' * 60}")
-            print(f"Loading {len(font_files)} fonts from directory...")
-            print("=" * 60)
+            logging.info(f"\n{'=' * 60}")
+            logging.info(f"Loading {len(font_files)} fonts from directory...")
+            logging.info("=" * 60)
 
             for font_path in self.font_paths:
                 font_name: str = os.path.splitext(os.path.basename(font_path))[0]
@@ -167,12 +184,12 @@ class FontManager:
                         "font": load_ttf(font_path),
                         "name": font_name,
                     }
-                    print(f"✓ Loaded: {font_name}")
+                    logging.info(f"✓ Loaded: {font_name}")
                 except Exception as e:
-                    print(f"✗ Failed to load {font_name}: {e}")
+                    logging.info(f"✗ Failed to load {font_name}: {e}")
 
-            print("=" * 60)
-            print(f"Successfully loaded {len(self.fonts)} fonts\n")
+            logging.info("=" * 60)
+            logging.info(f"Successfully loaded {len(self.fonts)} fonts\n")
         else:
             raise ValueError(f"Invalid ttf_path: {ttf_path}")
 
@@ -265,13 +282,13 @@ class GenerationTracker:
             # ✅ Store only unique generations
             self.generations = unique_generations
 
-            print(f"✓ Loaded checkpoint: {len(self.generations)} unique generations")
+            logging.info(f"✓ Loaded checkpoint: {len(self.generations)} unique generations")
             if duplicate_count > 0:
-                print(f"  ⚠️  Removed {duplicate_count} duplicate entries")
-            print(f"  Total raw entries: {len(raw_generations)}")
+                logging.info(f"  ⚠️  Removed {duplicate_count} duplicate entries")
+            logging.info(f"  Total raw entries: {len(raw_generations)}")
 
         except Exception as e:
-            print(f"⚠ Error loading checkpoint: {e}")
+            logging.info(f"⚠ Error loading checkpoint: {e}")
             import traceback
 
             traceback.print_exc()
@@ -331,7 +348,7 @@ class QualityEvaluator:
 
             return lpips_value
         except Exception as e:
-            print(f"Error computing LPIPS: {e}")
+            logging.info(f"Error computing LPIPS: {e}")
             return -1.0
 
     def compute_ssim(self, img1: Image.Image, img2: Image.Image) -> float:
@@ -347,7 +364,7 @@ class QualityEvaluator:
             ssim_value: float = ssim(img1_gray, img2_gray, data_range=255)
             return ssim_value
         except Exception as e:
-            print(f"Error computing SSIM: {e}")
+            logging.info(f"Error computing SSIM: {e}")
             return -1.0
 
     def compute_fid(self, real_dir: str, fake_dir: str) -> float:
@@ -361,7 +378,7 @@ class QualityEvaluator:
             )
             return fid_value
         except Exception as e:
-            print(f"Error computing FID: {e}")
+            logging.info(f"Error computing FID: {e}")
             return -1.0
 
     def save_image(self, image: Image.Image, path: str) -> None:
@@ -370,7 +387,7 @@ class QualityEvaluator:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             image.save(path)
         except Exception as e:
-            print(f"Error saving image to {path}: {e}")
+            logging.info(f"Error saving image to {path}: {e}")
 
 
 def parse_args() -> Namespace:
@@ -549,11 +566,11 @@ def load_characters(
                 f"   Make sure start_line <= end_line and both are within file bounds."
             )
 
-        print(f"📖 Loading characters from file: {characters_arg}")
-        print(
+        logging.info(f"📖 Loading characters from file: {characters_arg}")
+        logging.info(
             f"   Lines {start_line} to {end_idx} (total file: {len(all_lines)} lines)"
         )
-        print(f"   Processing {end_idx - start_idx} lines...")
+        logging.info(f"   Processing {end_idx - start_idx} lines...")
 
         for line_num, line in tqdm(
             enumerate(all_lines[start_idx:end_idx], start=start_line),
@@ -568,7 +585,7 @@ def load_characters(
             if not char:
                 continue
             if len(char) != 1:
-                tqdm.write(
+                logging.info(
                     f"Warning: Skipping line {line_num}: expected 1 char, got {len(char)}: '{char}'"
                 )
                 continue
@@ -589,7 +606,7 @@ def load_characters(
             f"   Check your character file or line range (start={start_line}, end={end_line})"
         )
 
-    print(f"✅ Successfully loaded {len(chars)} single characters.")
+    logging.info(f"✅ Successfully loaded {len(chars)} single characters.")
     return chars
 
 
@@ -608,7 +625,7 @@ def load_style_images(style_images_arg: str) -> List[Tuple[str, str]]:
         ]
         style_paths.sort()
 
-        print(f"\n📂 Loading {len(style_paths)} style images from directory...")
+        logging.info(f"\n📂 Loading {len(style_paths)} style images from directory...")
         verified_paths = []
         for path in tqdm(
             style_paths,
@@ -708,10 +725,10 @@ def save_checkpoint(results: Dict[str, Any], output_dir: str) -> None:
             json.dump(results, f, indent=2, ensure_ascii=False)
 
         num_gens = len(results.get("generations", []))
-        print(f"  ✅ Saved results_checkpoint.json ({num_gens} generations)")
+        logging.info(f"  ✅ Saved results_checkpoint.json ({num_gens} generations)")
 
     except Exception as e:
-        print(f"  ⚠ Error saving checkpoint: {e}")
+        logging.info(f"  ⚠ Error saving checkpoint: {e}")
 
 
 def generate_content_images(
@@ -731,11 +748,11 @@ def generate_content_images(
     if not font_names:
         raise ValueError("No fonts loaded")
 
-    print(f"\n{'=' * 60}")
-    print(f"Generating Content Images")
-    print(f"Using {len(font_names)} fonts")
-    print(f"Characters: {len(characters)}")
-    print("=" * 60)
+    logging.info(f"\n{'=' * 60}")
+    logging.info(f"Generating Content Images")
+    logging.info(f"Using {len(font_names)} fonts")
+    logging.info(f"Characters: {len(characters)}")
+    logging.info("=" * 60)
 
     char_paths: Dict[str, str] = {}
     chars_without_fonts: List[str] = []
@@ -756,7 +773,7 @@ def generate_content_images(
                 break
 
         if not found_font:
-            tqdm.write(f"  ⚠ Warning: '{char}' not in any font, skipping...")
+            logging.info(f"  ⚠ Warning: '{char}' not in any font, skipping...")
             chars_without_fonts.append(char)
             continue
 
@@ -769,16 +786,15 @@ def generate_content_images(
             char_path: str = os.path.join(content_dir, content_filename)
 
             content_img.save(char_path)
-            print()
-            print(f"    ✓ Saved content image for '{char}' at {char_path}")
+            logging.info(f"    ✓ Saved content image for '{char}' at {char_path}")
             char_paths[char] = char_path
         except Exception as e:
-            tqdm.write(f"  ✗ Error generating '{char}': {e}")
+            logging.info(f"  ✗ Error generating '{char}': {e}")
 
-    print(f"✓ Generated {len(char_paths)} content images")
+    logging.info(f"✓ Generated {len(char_paths)} content images")
     if chars_without_fonts:
-        print(f"⚠ {len(chars_without_fonts)} characters not found in any font")
-    print("=" * 60)
+        logging.info(f"⚠ {len(chars_without_fonts)} characters not found in any font")
+    logging.info("=" * 60)
 
     return char_paths
 
@@ -799,9 +815,9 @@ def batch_generate_images(
     """
 
     # Generate ALL content images first
-    print(f"\n{'=' * 70}")
-    print(f"{'GENERATING CONTENT IMAGES':^70}")
-    print("=" * 70)
+    logging.info(f"\n{'=' * 70}")
+    logging.info(f"{'GENERATING CONTENT IMAGES':^70}")
+    logging.info("=" * 70)
 
     char_paths = generate_content_images(
         characters, font_manager, output_dir, generation_tracker
@@ -827,16 +843,16 @@ def batch_generate_images(
     os.makedirs(target_base_dir, exist_ok=True)
 
     # Print configuration
-    print(f"\n{'=' * 70}")
-    print(f"{'BATCH IMAGE GENERATION':^70}")
-    print("=" * 70)
-    print(f"Fonts:                {len(font_manager.get_font_names())}")
-    print(f"Styles:               {len(style_paths_with_names)}")
-    print(f"Characters:           {len(characters)}")
-    print(f"Batch size:           {args.batch_size}")
-    print(f"Existing generations: {len(generation_tracker.generations)} unique pairs")
-    print(f"Existing hashes:      {len(generation_tracker.generated_hashes)}")
-    print("=" * 70 + "\n")
+    logging.info(f"\n{'=' * 70}")
+    logging.info(f"{'BATCH IMAGE GENERATION':^70}")
+    logging.info("=" * 70)
+    logging.info(f"Fonts:                {len(font_manager.get_font_names())}")
+    logging.info(f"Styles:               {len(style_paths_with_names)}")
+    logging.info(f"Characters:           {len(characters)}")
+    logging.info(f"Batch size:           {args.batch_size}")
+    logging.info(f"Existing generations: {len(generation_tracker.generations)} unique pairs")
+    logging.info(f"Existing hashes:      {len(generation_tracker.generated_hashes)}")
+    logging.info("=" * 70 + "\n")
 
     # Use first font for all characters
     font_names = font_manager.get_font_names()
@@ -844,8 +860,8 @@ def batch_generate_images(
         raise ValueError("No fonts loaded!")
 
     primary_font = font_names[0]
-    print(f"Using font: {primary_font}")
-    print("=" * 70 + "\n")
+    logging.info(f"Using font: {primary_font}")
+    logging.info("=" * 70 + "\n")
 
     # Initialize counters
     generated_count = 0
@@ -877,13 +893,13 @@ def batch_generate_images(
             ]
 
             if not chars_to_generate:
-                tqdm.write(
+                logging.info(
                     f"  ⊘ {style_name}: All characters already generated, skipping"
                 )
                 skipped_count += len(characters)
                 continue
 
-            tqdm.write(
+            logging.info(
                 f"  🔄 {style_name}: Generating {len(chars_to_generate)}/{len(characters)} new images"
             )
 
@@ -893,11 +909,11 @@ def batch_generate_images(
             )
 
             if images is None:
-                tqdm.write(f"  ⚠️ {style_name}: No images generated")
+                logging.info(f"  ⚠️ {style_name}: No images generated")
                 skipped_count += len(chars_to_generate)
                 continue
 
-            tqdm.write(f"  ✓ {style_name}: {len(images)} images in {batch_time:.2f}s")
+            logging.info(f"  ✓ {style_name}: {len(images)} images in {batch_time:.2f}s")
 
             # Save images and metadata
             for char, img in zip(valid_chars, images):
@@ -910,7 +926,7 @@ def batch_generate_images(
                 target_path_rel = f"TargetImage/{style_name}/{target_filename}"
 
                 evaluator.save_image(img, img_path)
-                print(f"    ✓ Saved generated image for '{char}' at {img_path}")
+                logging.info(f"    ✓ Saved generated image for '{char}' at {img_path}")
 
                 # Add generation record with hashes
                 generation_record = {
@@ -950,7 +966,7 @@ def batch_generate_images(
                 save_checkpoint(results, output_dir)
 
         except Exception as e:
-            tqdm.write(f"  ✗ {style_name}: {e}")
+            logging.info(f"  ✗ {style_name}: {e}")
             import traceback
 
             traceback.print_exc()
@@ -1018,7 +1034,7 @@ def sampling_batch_optimized(
                 content_images_pil.append(content_image.copy())
                 content_images.append(content_transform(content_image))
             except Exception as e:
-                tqdm.write(f"    ✗ Error processing '{char}': {e}")
+                logging.info(f"    ✗ Error processing '{char}': {e}")
                 continue
 
         if not content_images:
@@ -1082,7 +1098,7 @@ def sampling_batch_optimized(
             return all_images, available_chars, total_time
 
     except Exception as e:
-        tqdm.write(f"    ✗ Error in batch sampling: {e}")
+        logging.info(f"    ✗ Error in batch sampling: {e}")
         import traceback
 
         traceback.print_exc()
@@ -1104,15 +1120,15 @@ def _print_checkpoint_status(
         else 0
     )
 
-    print(f"\n{'=' * 70}")
-    print(f"{'CHECKPOINT':^70}")
-    print("=" * 70)
-    print(f"Progress:           {current_style}/{total_styles} styles")
-    print(f"Generated:          {generated} pairs")
-    print(f"Skipped:            {skipped} pairs")
-    print(f"Elapsed time:       {elapsed / 60:.1f} minutes")
-    print(f"Est. remaining:     {remaining / 60:.1f} minutes")
-    print("=" * 70)
+    logging.info(f"\n{'=' * 70}")
+    logging.info(f"{'CHECKPOINT':^70}")
+    logging.info("=" * 70)
+    logging.info(f"Progress:           {current_style}/{total_styles} styles")
+    logging.info(f"Generated:          {generated} pairs")
+    logging.info(f"Skipped:            {skipped} pairs")
+    logging.info(f"Elapsed time:       {elapsed / 60:.1f} minutes")
+    logging.info(f"Est. remaining:     {remaining / 60:.1f} minutes")
+    logging.info("=" * 70)
 
 
 def _print_generation_summary(
@@ -1121,22 +1137,22 @@ def _print_generation_summary(
     """Print final generation summary"""
     elapsed = time.time() - start_time
 
-    print("\n" + "=" * 70)
-    print(f"{'GENERATION COMPLETE':^70}")
-    print("=" * 70)
-    print(f"\nPair Statistics:")
-    print(f"  Total possible:     {total}")
-    print(f"  Generated (new):    {generated}")
-    print(f"  Skipped (exist):    {skipped}")
-    print(f"  Failed (no font):   {failed}")
-    print(f"\nTiming:")
-    print(f"  Total time:         {elapsed / 60:.1f} minutes ({elapsed:.0f}s)")
-    print(
+    logging.info("\n" + "=" * 70)
+    logging.info(f"{'GENERATION COMPLETE':^70}")
+    logging.info("=" * 70)
+    logging.info(f"\nPair Statistics:")
+    logging.info(f"  Total possible:     {total}")
+    logging.info(f"  Generated (new):    {generated}")
+    logging.info(f"  Skipped (exist):    {skipped}")
+    logging.info(f"  Failed (no font):   {failed}")
+    logging.info(f"\nTiming:")
+    logging.info(f"  Total time:         {elapsed / 60:.1f} minutes ({elapsed:.0f}s)")
+    logging.info(
         f"  Avg per pair:       {elapsed / generated * 1000:.1f}ms"
         if generated > 0
         else "  Avg per pair:       N/A"
     )
-    print("=" * 70)
+    logging.info("=" * 70)
 
 
 def evaluate_results(
@@ -1148,14 +1164,14 @@ def evaluate_results(
     """Evaluate generated images against ground truth"""
 
     if not ground_truth_dir or not os.path.exists(ground_truth_dir):
-        print(
+        logging.info(
             "\n⚠ No ground truth directory provided or not found, skipping evaluation"
         )
         return results
 
-    print("\n" + "=" * 70)
-    print(f"{'EVALUATING GENERATED IMAGES':^70}")
-    print("=" * 70)
+    logging.info("\n" + "=" * 70)
+    logging.info(f"{'EVALUATING GENERATED IMAGES':^70}")
+    logging.info("=" * 70)
 
     lpips_scores: List[float] = []
     ssim_scores: List[float] = []
@@ -1217,7 +1233,7 @@ def evaluate_results(
             evaluated_pairs += 1
 
         except Exception as e:
-            tqdm.write(f"  ⚠ Error evaluating {char}/{style}: {e}")
+            logging.info(f"  ⚠ Error evaluating {char}/{style}: {e}")
             continue
 
     # Compute aggregate metrics
@@ -1229,11 +1245,11 @@ def evaluate_results(
             "max": float(np.max(lpips_scores)),
             "median": float(np.median(lpips_scores)),
         }
-        print(f"\n📊 LPIPS Statistics:")
-        print(f"  Mean:   {results['metrics']['lpips']['mean']:.4f}")
-        print(f"  Std:    {results['metrics']['lpips']['std']:.4f}")
-        print(f"  Median: {results['metrics']['lpips']['median']:.4f}")
-        print(
+        logging.info(f"\n📊 LPIPS Statistics:")
+        logging.info(f"  Mean:   {results['metrics']['lpips']['mean']:.4f}")
+        logging.info(f"  Std:    {results['metrics']['lpips']['std']:.4f}")
+        logging.info(f"  Median: {results['metrics']['lpips']['median']:.4f}")
+        logging.info(
             f"  Range:  [{results['metrics']['lpips']['min']:.4f}, {results['metrics']['lpips']['max']:.4f}]"
         )
 
@@ -1245,17 +1261,17 @@ def evaluate_results(
             "max": float(np.max(ssim_scores)),
             "median": float(np.median(ssim_scores)),
         }
-        print(f"\n📊 SSIM Statistics:")
-        print(f"  Mean:   {results['metrics']['ssim']['mean']:.4f}")
-        print(f"  Std:    {results['metrics']['ssim']['std']:.4f}")
-        print(f"  Median: {results['metrics']['ssim']['median']:.4f}")
-        print(
+        logging.info(f"\n📊 SSIM Statistics:")
+        logging.info(f"  Mean:   {results['metrics']['ssim']['mean']:.4f}")
+        logging.info(f"  Std:    {results['metrics']['ssim']['std']:.4f}")
+        logging.info(f"  Median: {results['metrics']['ssim']['median']:.4f}")
+        logging.info(
             f"  Range:  [{results['metrics']['ssim']['min']:.4f}, {results['metrics']['ssim']['max']:.4f}]"
         )
 
     # Compute FID if requested
     if compute_fid and FID_AVAILABLE:
-        print("\n📊 Computing FID score...")
+        logging.info("\n📊 Computing FID score...")
         try:
             # Create temporary directories for FID computation
             fake_dir = os.path.join(
@@ -1267,20 +1283,20 @@ def evaluate_results(
                 fid_value: float = evaluator.compute_fid(real_dir, fake_dir)
                 if fid_value >= 0:
                     results["metrics"]["fid"] = fid_value
-                    print(f"  FID Score: {fid_value:.2f}")
+                    logging.info(f"  FID Score: {fid_value:.2f}")
             else:
-                print("  ⚠ Cannot compute FID: directories not found")
+                logging.info("  ⚠ Cannot compute FID: directories not found")
         except Exception as e:
-            print(f"  ⚠ Error computing FID: {e}")
+            logging.info(f"  ⚠ Error computing FID: {e}")
 
-    print("\n" + "=" * 70)
-    print(f"{'EVALUATION SUMMARY':^70}")
-    print("=" * 70)
-    print(f"Evaluated pairs:    {evaluated_pairs}")
-    print(f"Missing GT images:  {missing_gt}")
-    print(f"LPIPS samples:      {len(lpips_scores)}")
-    print(f"SSIM samples:       {len(ssim_scores)}")
-    print("=" * 70)
+    logging.info("\n" + "=" * 70)
+    logging.info(f"{'EVALUATION SUMMARY':^70}")
+    logging.info("=" * 70)
+    logging.info(f"Evaluated pairs:    {evaluated_pairs}")
+    logging.info(f"Missing GT images:  {missing_gt}")
+    logging.info(f"LPIPS samples:      {len(lpips_scores)}")
+    logging.info(f"SSIM samples:       {len(ssim_scores)}")
+    logging.info("=" * 70)
 
     return results
 
@@ -1289,13 +1305,13 @@ def log_to_wandb(results: Dict[str, Any], args: Namespace) -> None:
     """Log results to Weights & Biases"""
 
     if not WANDB_AVAILABLE:
-        print("\n⚠ Wandb not available, skipping logging")
+        logging.info("\n⚠ Wandb not available, skipping logging")
         return
 
     try:
-        print("\n" + "=" * 70)
-        print(f"{'LOGGING TO WEIGHTS & BIASES':^70}")
-        print("=" * 70)
+        logging.info("\n" + "=" * 70)
+        logging.info(f"{'LOGGING TO WEIGHTS & BIASES':^70}")
+        logging.info("=" * 70)
 
         # Initialize wandb
         run_name = (
@@ -1385,7 +1401,7 @@ def log_to_wandb(results: Dict[str, Any], args: Namespace) -> None:
                 )
 
         # Log sample images
-        print("\n📸 Logging sample images...")
+        logging.info("\n📸 Logging sample images...")
         sample_generations = results.get("generations", [])[:20]  # Log first 20
 
         sample_images = []
@@ -1403,11 +1419,11 @@ def log_to_wandb(results: Dict[str, Any], args: Namespace) -> None:
                             )
                         )
                     except Exception as e:
-                        print(f"  ⚠ Error loading image {full_path}: {e}")
+                        logging.info(f"  ⚠ Error loading image {full_path}: {e}")
 
         if sample_images:
             wandb.log({"sample_images": sample_images})
-            print(f"✓ Logged {len(sample_images)} sample images")
+            logging.info(f"✓ Logged {len(sample_images)} sample images")
 
         # Create summary table
         generation_table = wandb.Table(
@@ -1438,13 +1454,13 @@ def log_to_wandb(results: Dict[str, Any], args: Namespace) -> None:
         # Finish run
         wandb.finish()
 
-        print("\n✓ Successfully logged to Weights & Biases")
-        print(f"  Project: {args.wandb_project}")
-        print(f"  Run: {run_name}")
-        print("=" * 70)
+        logging.info("\n✓ Successfully logged to Weights & Biases")
+        logging.info(f"  Project: {args.wandb_project}")
+        logging.info(f"  Run: {run_name}")
+        logging.info("=" * 70)
 
     except Exception as e:
-        print(f"\n⚠ Error logging to wandb: {e}")
+        logging.info(f"\n⚠ Error logging to wandb: {e}")
         import traceback
 
         traceback.print_exc()
@@ -1455,9 +1471,9 @@ def main() -> None:
     args: Namespace = parse_args()
     results: Dict[str, Any] = {}
 
-    print("\n" + "=" * 60)
-    print("FONTDIFFUSER SYNTHESIS DATA GENERATION MAGIC")
-    print("=" * 60)
+    logging.info("\n" + "=" * 60)
+    logging.info("FONTDIFFUSER SYNTHESIS DATA GENERATION MAGIC")
+    logging.info("=" * 60)
 
     try:
         # Load characters
@@ -1470,20 +1486,20 @@ def main() -> None:
             args.style_images
         )
 
-        print(f"\nInitializing font manager...")
+        logging.info(f"\nInitializing font manager...")
         font_manager: FontManager = FontManager(args.ttf_path)
 
-        print(f"\n📊 Configuration:")
-        print(f"  Dataset split: {args.dataset_split}")
-        print(
+        logging.info(f"\n📊 Configuration:")
+        logging.info(f"  Dataset split: {args.dataset_split}")
+        logging.info(
             f"  Characters: {len(characters)} (lines {args.start_line}-{args.end_line or 'end'})"
         )
-        print(f"  Styles: {len(style_paths_with_names)}")
-        print(f"  Output Directory: {args.output_dir}")
-        print(f"  Checkpoint Directory: {args.ckpt_dir}")
-        print(f"  Device: {args.device}")
-        print(f"  Batch Size: {args.batch_size}")
-        print(
+        logging.info(f"  Styles: {len(style_paths_with_names)}")
+        logging.info(f"  Output Directory: {args.output_dir}")
+        logging.info(f"  Checkpoint Directory: {args.ckpt_dir}")
+        logging.info(f"  Device: {args.device}")
+        logging.info(f"  Batch Size: {args.batch_size}")
+        logging.info(
             f"Will look for results checkpoint at {os.path.join(args.output_dir, 'results_checkpoint.json')}"
         )
 
@@ -1498,14 +1514,14 @@ def main() -> None:
         # Create args namespace for pipeline
         pipeline_args: Namespace = create_args_namespace(args)
 
-        print("\nLoading FontDiffuser pipeline...")
+        logging.info("\nLoading FontDiffuser pipeline...")
         pipe: FontDiffuserDPMPipeline = load_fontdiffuser_pipeline(pipeline_args)
 
         # Add this block to enable torch.compile if requested
         if getattr(args, "compile", False):
             import torch
 
-            print("🔧 Compiling model components with torch.compile...")
+            logging.info("🔧 Compiling model components with torch.compile...")
             try:
                 if hasattr(pipe.model, "unet"):
                     pipe.model.unet = torch.compile(pipe.model.unet)
@@ -1515,9 +1531,9 @@ def main() -> None:
                     pipe.model.content_encoder = torch.compile(
                         pipe.model.content_encoder
                     )
-                print("✓ Compilation complete.")
+                logging.info("✓ Compilation complete.")
             except Exception as e:
-                print(f"⚠ Compilation failed: {e}")
+                logging.info(f"⚠ Compilation failed: {e}")
 
         evaluator: QualityEvaluator = QualityEvaluator(device=args.device)
 
@@ -1540,37 +1556,37 @@ def main() -> None:
             )
 
         # Save final checkpoint
-        print("\n💾 Saving final checkpoint...")
+        logging.info("\n💾 Saving final checkpoint...")
         save_checkpoint(results, args.output_dir)
 
         if args.use_wandb:
             log_to_wandb(results, args)
 
-        print("\n" + "=" * 60)
-        print("✅ GENERATION COMPLETE!")
-        print("=" * 60)
-        print(f"\nOutput structure:")
-        print(f"  {args.output_dir}/")
-        print(f"    ├── ContentImage/")
-        print(f"    │   ├── U+XXXX_char_hash.png")
-        print(f"    │   └── ...")
-        print(f"    ├── TargetImage/")
-        print(f"    │   ├── style0/")
-        print(f"    │   │   ├── U+XXXX_char_style0_hash.png")
-        print(f"    │   │   └── ...")
-        print(f"    │   └── ...")
-        print(f"    └── results_checkpoint.json ✅ (single source of truth)")
+        logging.info("\n" + "=" * 60)
+        logging.info("✅ GENERATION COMPLETE!")
+        logging.info("=" * 60)
+        logging.info(f"\nOutput structure:")
+        logging.info(f"  {args.output_dir}/")
+        logging.info(f"    ├── ContentImage/")
+        logging.info(f"    │   ├── U+XXXX_char_hash.png")
+        logging.info(f"    │   └── ...")
+        logging.info(f"    ├── TargetImage/")
+        logging.info(f"    │   ├── style0/")
+        logging.info(f"    │   │   ├── U+XXXX_char_style0_hash.png")
+        logging.info(f"    │   │   └── ...")
+        logging.info(f"    │   └── ...")
+        logging.info(f"    └── results_checkpoint.json ✅ (single source of truth)")
 
     except KeyboardInterrupt:
-        print("\n\n⚠ Generation interrupted by user!")
-        print("💾 Saving emergency checkpoint...")
+        logging.info("\n\n⚠ Generation interrupted by user!")
+        logging.info("💾 Saving emergency checkpoint...")
         if "results" in locals() and results:
             save_checkpoint(results, args.output_dir)
-            print("✓ Latest state saved to results_checkpoint.json")
+            logging.info("✓ Latest state saved to results_checkpoint.json")
         sys.exit(1)
 
     except Exception as e:
-        print(f"\n\n✗ Fatal error: {e}")
+        logging.info(f"\n\n✗ Fatal error: {e}")
         import traceback
 
         traceback.print_exc()
