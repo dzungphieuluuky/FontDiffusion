@@ -822,9 +822,9 @@ def batch_generate_images(
     """
 
     # Generate ALL content images first
-    logging.info(f"\n{'=' * 70}")
-    logging.info(f"{'GENERATING CONTENT IMAGES':^70}")
-    logging.info("=" * 70)
+    logging.info(f"{'=' * 65}")
+    logging.info(f"{'GENERATING CONTENT IMAGES':^65}")
+    logging.info("=" * 65)
 
     char_paths = generate_content_images(
         characters, font_manager, output_dir, generation_tracker
@@ -1075,7 +1075,7 @@ def sampling_batch_optimized(
                 leave=False,
                 dynamic_ncols=True,
                 bar_format="{desc} |{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
-                colour="bright_blue",
+                colour="#1055C9",
                 position=2,
             )
             for batch_idx, i in enumerate(batch_pbar):
