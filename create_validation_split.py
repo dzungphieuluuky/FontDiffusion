@@ -95,6 +95,8 @@ def parse_content_filename(filename: str) -> Optional[Tuple[str, str]]:
 def parse_target_filename(filename: str) -> Optional[Tuple[str, str, str]]:
     """
     Parse target filename: U+XXXX_{char}_{style}_{hash}.png
+    Correctly handles styles with underscores like 'ref_trien', 'my_style_2', etc.
+    Hash is always the last 8 hex characters before .png
     Returns: (char, style, hash) or None if parse fails
     """
     if not filename.endswith('.png'):
@@ -107,7 +109,6 @@ def parse_target_filename(filename: str) -> Optional[Tuple[str, str, str]]:
         return None
     
     codepoint = parts[0]
-    hash_val = parts[-1]
     
     if not codepoint.startswith("U+"):
         return None
@@ -116,17 +117,31 @@ def parse_target_filename(filename: str) -> Optional[Tuple[str, str, str]]:
         char_code = int(codepoint.replace("U+", ""), 16)
         char = chr(char_code)
         
-        # Style is everything between char and hash
+        # The hash is always 8 hex characters and is the LAST part
+        hash_val = parts[-1]
+        
+        # Validate hash is 8 hex chars
+        if len(hash_val) != 8 or not all(c in '0123456789abcdef' for c in hash_val.lower()):
+            return None
+        
+        # Everything between codepoint and hash is: char + style
         # parts[0] = codepoint
-        # parts[1] = char
-        # parts[2:-1] = style (can have multiple underscores)
+        # parts[1] = character itself
+        # parts[2:-1] = style parts (can have underscores)
         # parts[-1] = hash
+        
+        # Extract style (everything after char, before hash)
+        if len(parts) < 4:  # Need at least: codepoint, char, style_part, hash
+            return None
+        
         style = "_".join(parts[2:-1])
         
+        if not style:
+            return None
+        
         return (char, style, hash_val)
-    except (ValueError, OverflowError):
+    except (ValueError, OverflowError, IndexError):
         return None
-
 
 @dataclass
 class ValidationSplitConfig:
