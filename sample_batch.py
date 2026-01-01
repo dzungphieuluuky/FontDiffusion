@@ -1497,6 +1497,7 @@ def main() -> None:
 
         logging.info(f"\nInitializing font manager...")
         font_manager: FontManager = FontManager(args.ttf_path)
+        logging.info(f"✓ Loaded {len(font_manager.get_font_names())} fonts.")
 
         logging.info(f"\n📊 Configuration:")
         logging.info(f"  Dataset split: {args.dataset_split}")
