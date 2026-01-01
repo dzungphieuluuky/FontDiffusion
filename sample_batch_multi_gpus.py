@@ -336,8 +336,19 @@ def parse_args() -> Namespace:
     parser.add_argument("--wandb_project", type=str, default="fontdiffuser-eval", help="Wandb project name")
     parser.add_argument("--wandb_run_name", type=str, default=None, help="Wandb run name")
     parser.add_argument("--dataset_split", type=str, default="train_original", help="Dataset split name (e.g., train_original, val)")
+    # ✅ ADD THESE IMAGE SIZE ARGUMENTS
+    parser.add_argument("--style_image_size", type=int, default=96, help="Style image size")
+    parser.add_argument("--content_image_size", type=int, default=96, help="Content image size")
+    parser.add_argument("--order", type=int, default=2, help="DPM-Solver order")
+    parser.add_argument("--algorithm_type", type=str, default="dpmsolver++", help="Algorithm type")
+    parser.add_argument("--skip_type", type=str, default="time_uniform", help="Skip type")
+    parser.add_argument("--method", type=str, default="multistep", help="Method")
+    parser.add_argument("--t_start", type=float, default=1.0, help="t_start")
+    parser.add_argument("--t_end", type=float, default=1e-3, help="t_end")
+    parser.add_argument("--content_encoder_downsample_size", type=int, default=3, help="Content encoder downsample size")
+    parser.add_argument("--correcting_x0_fn", type=str, default=None, help="Correcting x0 function")
+    
     return parser.parse_args()
-
 
 def load_characters(characters_arg: str, start_line: int = 1, end_line: Optional[int] = None) -> List[str]:
     chars: List[str] = []
@@ -420,28 +431,30 @@ def create_args_namespace(args: Namespace) -> Namespace:
     for key, value in vars(args).items():
         setattr(default_args, key, value)
     
-    # ✅ ENSURE these are set with proper defaults if missing
-    if not hasattr(default_args, "style_image_size") or default_args.style_image_size is None:
+    # ✅ Convert integer image sizes to tuples
+    if hasattr(default_args, "style_image_size"):
+        if isinstance(default_args.style_image_size, int):
+            default_args.style_image_size = (default_args.style_image_size, default_args.style_image_size)
+        elif isinstance(default_args.style_image_size, (list, tuple)):
+            default_args.style_image_size = tuple(default_args.style_image_size)
+    else:
         default_args.style_image_size = (96, 96)
-    elif isinstance(default_args.style_image_size, int):
-        default_args.style_image_size = (default_args.style_image_size, default_args.style_image_size)
-    elif isinstance(default_args.style_image_size, (list, tuple)) and len(default_args.style_image_size) == 2:
-        default_args.style_image_size = tuple(default_args.style_image_size)
     
-    if not hasattr(default_args, "content_image_size") or default_args.content_image_size is None:
+    if hasattr(default_args, "content_image_size"):
+        if isinstance(default_args.content_image_size, int):
+            default_args.content_image_size = (default_args.content_image_size, default_args.content_image_size)
+        elif isinstance(default_args.content_image_size, (list, tuple)):
+            default_args.content_image_size = tuple(default_args.content_image_size)
+    else:
         default_args.content_image_size = (96, 96)
-    elif isinstance(default_args.content_image_size, int):
-        default_args.content_image_size = (default_args.content_image_size, default_args.content_image_size)
-    elif isinstance(default_args.content_image_size, (list, tuple)) and len(default_args.content_image_size) == 2:
-        default_args.content_image_size = tuple(default_args.content_image_size)
     
-    # ✅ Set other required attributes
-    default_args.demo = False
-    default_args.character_input = True
-    default_args.save_image = True
-    default_args.cache_models = True
-    default_args.controlnet = False
-    default_args.resolution = 96
+    # ✅ Set other required attributes with proper defaults
+    default_args.demo = getattr(default_args, "demo", False)
+    default_args.character_input = getattr(default_args, "character_input", True)
+    default_args.save_image = getattr(default_args, "save_image", True)
+    default_args.cache_models = getattr(default_args, "cache_models", True)
+    default_args.controlnet = getattr(default_args, "controlnet", False)
+    default_args.resolution = getattr(default_args, "resolution", 96)
     default_args.algorithm_type = getattr(default_args, "algorithm_type", "dpmsolver++")
     default_args.guidance_type = getattr(default_args, "guidance_type", "classifier-free")
     default_args.method = getattr(default_args, "method", "multistep")
