@@ -4,6 +4,7 @@ from typing import Optional
 import torch
 from safetensors.torch import save_file
 import shutil
+from huggingface_hub.utils import tqdm
 
 def flatten_folder(root_dir):
     """
