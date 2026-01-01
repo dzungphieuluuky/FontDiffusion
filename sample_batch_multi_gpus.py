@@ -122,7 +122,7 @@ class FontManager:
             if not font_files:
                 raise ValueError(f"No font files found for pattern: {ttf_path}")
             self.font_paths = sorted(font_files)
-            logging.info(f"\n{'=' * 60}")
+            logging.info(f"{'=' * 60}")
             logging.info(f"Loading {len(font_files)} fonts from wildcard path...")
             logging.info("=" * 60)
             for font_path in self.font_paths:
@@ -157,7 +157,7 @@ class FontManager:
             if not font_files:
                 raise ValueError(f"No font files found in directory: {ttf_path}")
             self.font_paths = sorted(font_files)
-            logging.info(f"\n{'=' * 60}")
+            logging.info(f"{'=' * 60}")
             logging.info(f"Loading {len(font_files)} fonts from directory...")
             logging.info("=" * 60)
             for font_path in self.font_paths:
@@ -360,7 +360,7 @@ def load_style_images(style_images_arg: str) -> List[Tuple[str, str]]:
             if os.path.splitext(f)[1].lower() in image_exts
         ]
         style_paths.sort()
-        logging.info(f"\n📂 Loading {len(style_paths)} style images from directory...")
+        logging.info(f"📂 Loading {len(style_paths)} style images from directory...")
         verified_paths = []
         for path in tqdm(style_paths, desc="✓ Verifying style images", colour="green"):
             if os.path.isfile(path):
@@ -652,7 +652,7 @@ def create_args_namespace(args: Namespace, accelerator: Optional[Accelerator] = 
 
     # ✅ Log the final confirmed values
     if accelerator and accelerator.is_main_process:
-        logging.info(f"\n✅ Image size configuration:")
+        logging.info(f"✅ Image size configuration:")
         logging.info(f"   style_image_size:   {default_args.style_image_size} (type: {type(default_args.style_image_size).__name__})")
         logging.info(f"   content_image_size: {default_args.content_image_size} (type: {type(default_args.content_image_size).__name__})")
 
@@ -714,7 +714,7 @@ def generate_content_images(
         raise ValueError("No fonts loaded")
     
     if accelerator.is_main_process:
-        logging.info(f"\n{'=' * 60}")
+        logging.info(f"{'=' * 60}")
         logging.info(f"Generating Content Images")
         logging.info(f"Using {len(font_names)} fonts")
         logging.info(f"Characters: {len(characters)}")
@@ -821,7 +821,7 @@ def batch_generate_images(
     accelerator.wait_for_everyone()
     
     if accelerator.is_main_process:
-        logging.info(f"\n{'=' * 60}")
+        logging.info(f"{'=' * 60}")
         logging.info(f"{'BATCH IMAGE GENERATION':^60}")
         logging.info("=" * 60)
         logging.info(f"Fonts:                {len(font_manager.get_font_names())}")
@@ -1131,12 +1131,12 @@ def _print_generation_summary(
     logging.info("\n" + "=" * 60)
     logging.info(f"{'GENERATION COMPLETE':^60}")
     logging.info("=" * 60)
-    logging.info(f"\nPair Statistics:")
+    logging.info(f"Pair Statistics:")
     logging.info(f"  Total possible:     {total}")
     logging.info(f"  Generated (new):    {generated}")
     logging.info(f"  Skipped (exist):    {skipped}")
     logging.info(f"  Failed (no font):   {failed}")
-    logging.info(f"\nTiming:")
+    logging.info(f"Timing:")
     logging.info(f"  Total time:         {elapsed / 60:.1f} minutes ({elapsed:.0f}s)")
     logging.info(
         f"  Avg per pair:       {elapsed / generated * 1000:.1f}ms"
@@ -1232,7 +1232,7 @@ def evaluate_results(
             "max": float(np.max(lpips_scores)),
             "median": float(np.median(lpips_scores)),
         }
-        logging.info(f"\n📊 LPIPS Statistics:")
+        logging.info(f"📊 LPIPS Statistics:")
         logging.info(f"  Mean:   {results['metrics']['lpips']['mean']:.4f}")
         logging.info(f"  Std:    {results['metrics']['lpips']['std']:.4f}")
         logging.info(f"  Median: {results['metrics']['lpips']['median']:.4f}")
@@ -1248,7 +1248,7 @@ def evaluate_results(
             "max": float(np.max(ssim_scores)),
             "median": float(np.median(ssim_scores)),
         }
-        logging.info(f"\n📊 SSIM Statistics:")
+        logging.info(f"📊 SSIM Statistics:")
         logging.info(f"  Mean:   {results['metrics']['ssim']['mean']:.4f}")
         logging.info(f"  Std:    {results['metrics']['ssim']['std']:.4f}")
         logging.info(f"  Median: {results['metrics']['ssim']['median']:.4f}")
@@ -1442,7 +1442,7 @@ def log_to_wandb(results: Dict[str, Any], args: Namespace) -> None:
         logging.info("=" * 60)
 
     except Exception as e:
-        logging.info(f"\n⚠ Error logging to wandb: {e}")
+        logging.info(f"⚠ Error logging to wandb: {e}")
         import traceback
         traceback.print_exc()
 
@@ -1471,12 +1471,12 @@ def main() -> None:
         )
 
         if accelerator.is_main_process:
-            logging.info(f"\nInitializing font manager...")
+            logging.info(f"Initializing font manager...")
         font_manager: FontManager = FontManager(args.ttf_path)
         if accelerator.is_main_process:
             logging.info(f"✓ Loaded {len(font_manager.get_font_names())} fonts.")
 
-            logging.info(f"\n📊 Configuration:")
+            logging.info(f"📊 Configuration:")
             logging.info(f"  GPUs: {accelerator.num_processes}")
             logging.info(f"  Dataset split: {args.dataset_split}")
             logging.info(
@@ -1553,7 +1553,7 @@ def main() -> None:
             logging.info("\n" + "=" * 60)
             logging.info("✅ GENERATION COMPLETE!")
             logging.info("=" * 60)
-            logging.info(f"\nOutput structure:")
+            logging.info(f"Output structure:")
             logging.info(f"  {args.output_dir}/")
             logging.info(f"    ├── ContentImage/")
             logging.info(f"    │   ├── U+XXXX_char_hash.png")
@@ -1576,7 +1576,7 @@ def main() -> None:
 
     except Exception as e:
         if accelerator.is_main_process:
-            logging.info(f"\n\n✗ Fatal error: {e}")
+            logging.info(f"✗ Fatal error: {e}")
             import traceback
             traceback.print_exc()
 

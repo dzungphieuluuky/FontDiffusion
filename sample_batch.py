@@ -174,7 +174,7 @@ class FontManager:
 
             self.font_paths = sorted(font_files)
 
-            logging.info(f"\n{'=' * 60}")
+            logging.info(f"{'=' * 60}")
             logging.info(f"Loading {len(font_files)} fonts from wildcard path...")
             logging.info("=" * 60)
 
@@ -218,7 +218,7 @@ class FontManager:
 
             self.font_paths = sorted(font_files)
 
-            logging.info(f"\n{'=' * 60}")
+            logging.info(f"{'=' * 60}")
             logging.info(f"Loading {len(font_files)} fonts from directory...")
             logging.info("=" * 60)
 
@@ -671,7 +671,7 @@ def load_style_images(style_images_arg: str) -> List[Tuple[str, str]]:
         ]
         style_paths.sort()
 
-        logging.info(f"\n📂 Loading {len(style_paths)} style images from directory...")
+        logging.info(f"📂 Loading {len(style_paths)} style images from directory...")
         verified_paths = []
         for path in tqdm(
             style_paths,
@@ -792,7 +792,7 @@ def generate_content_images(
     if not font_names:
         raise ValueError("No fonts loaded")
 
-    logging.info(f"\n{'=' * 60}")
+    logging.info(f"{'=' * 60}")
     logging.info(f"Generating Content Images")
     logging.info(f"Using {len(font_names)} fonts")
     logging.info(f"Characters: {len(characters)}")
@@ -902,7 +902,7 @@ def batch_generate_images(
     os.makedirs(target_base_dir, exist_ok=True)
 
     # Print configuration
-    logging.info(f"\n{'=' * 60}")
+    logging.info(f"{'=' * 60}")
     logging.info(f"{'BATCH IMAGE GENERATION':^60}")
     logging.info("=" * 60)
     logging.info(f"Fonts:                {len(font_manager.get_font_names())}")
@@ -1225,12 +1225,12 @@ def _print_generation_summary(
     logging.info("=" * 60)
     logging.info(f"{'GENERATION COMPLETE':^60}")
     logging.info("=" * 60)
-    logging.info(f"\nPair Statistics:")
+    logging.info(f"Pair Statistics:")
     logging.info(f"  Total possible:     {total}")
     logging.info(f"  Generated (new):    {generated}")
     logging.info(f"  Skipped (exist):    {skipped}")
     logging.info(f"  Failed (no font):   {failed}")
-    logging.info(f"\nTiming:")
+    logging.info(f"Timing:")
     logging.info(f"  Total time:         {elapsed / 60:.1f} minutes ({elapsed:.0f}s)")
     logging.info(
         f"  Avg per pair:       {elapsed / generated * 1000:.1f}ms"
@@ -1328,7 +1328,7 @@ def evaluate_results(
             "max": float(np.max(lpips_scores)),
             "median": float(np.median(lpips_scores)),
         }
-        logging.info(f"\n📊 LPIPS Statistics:")
+        logging.info(f"📊 LPIPS Statistics:")
         logging.info(f"  Mean:   {results['metrics']['lpips']['mean']:.4f}")
         logging.info(f"  Std:    {results['metrics']['lpips']['std']:.4f}")
         logging.info(f"  Median: {results['metrics']['lpips']['median']:.4f}")
@@ -1344,7 +1344,7 @@ def evaluate_results(
             "max": float(np.max(ssim_scores)),
             "median": float(np.median(ssim_scores)),
         }
-        logging.info(f"\n📊 SSIM Statistics:")
+        logging.info(f"📊 SSIM Statistics:")
         logging.info(f"  Mean:   {results['metrics']['ssim']['mean']:.4f}")
         logging.info(f"  Std:    {results['metrics']['ssim']['std']:.4f}")
         logging.info(f"  Median: {results['metrics']['ssim']['median']:.4f}")
@@ -1543,7 +1543,7 @@ def log_to_wandb(results: Dict[str, Any], args: Namespace) -> None:
         logging.info("=" * 60)
 
     except Exception as e:
-        logging.info(f"\n⚠ Error logging to wandb: {e}")
+        logging.info(f"⚠ Error logging to wandb: {e}")
         import traceback
 
         traceback.print_exc()
@@ -1569,11 +1569,11 @@ def main() -> None:
             args.style_images
         )
 
-        logging.info(f"\nInitializing font manager...")
+        logging.info(f"Initializing font manager...")
         font_manager: FontManager = FontManager(args.ttf_path)
         logging.info(f"✓ Loaded {len(font_manager.get_font_names())} fonts.")
 
-        logging.info(f"\n📊 Configuration:")
+        logging.info(f"📊 Configuration:")
         logging.info(f"  Dataset split: {args.dataset_split}")
         logging.info(
             f"  Characters: {len(characters)} (lines {args.start_line}-{args.end_line or 'end'})"
@@ -1649,7 +1649,7 @@ def main() -> None:
         logging.info("=" * 60)
         logging.info("✅ GENERATION COMPLETE!")
         logging.info("=" * 60)
-        logging.info(f"\nOutput structure:")
+        logging.info(f"Output structure:")
         logging.info(f"  {args.output_dir}/")
         logging.info(f"    ├── ContentImage/")
         logging.info(f"    │   ├── U+XXXX_char_hash.png")
@@ -1670,7 +1670,7 @@ def main() -> None:
         sys.exit(1)
 
     except Exception as e:
-        logging.info(f"\n\n✗ Fatal error: {e}")
+        logging.info(f"✗ Fatal error: {e}")
         import traceback
 
         traceback.print_exc()

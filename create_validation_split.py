@@ -259,9 +259,9 @@ class ValidationSplitCreator:
         
         # ✅ Print parse error diagnostics
         if parse_error_count > 0:
-            logging.info(f"\n⚠️  PARSE ERROR DIAGNOSTICS:")
+            logging.info(f"⚠️  PARSE ERROR DIAGNOSTICS:")
             logging.info(f"  Total parse errors: {parse_error_count}")
-            logging.info(f"\n  First 10 unparseable files:")
+            logging.info(f"  First 10 unparseable files:")
             for item in unparseable_files[:10]:
                 logging.info(f"    Folder: {item['folder']}")
                 logging.info(f"    File:   {item['filename']}")
@@ -277,15 +277,15 @@ class ValidationSplitCreator:
                 for item in unparseable_files:
                     abs_path = str((self.source_train_dir / "TargetImage" / item["folder"] / item["filename"]).resolve())
                     f.write(abs_path + "\n")
-            logging.info(f"\n✓ Exported unparseable file list to {unparseable_txt_path}")
+            logging.info(f"✓ Exported unparseable file list to {unparseable_txt_path}")
 
 
         # ✅ Print style mismatch diagnostics
         if style_mismatch_count > 0:
-            logging.info(f"\n⚠️  STYLE MISMATCH DIAGNOSTICS:")
+            logging.info(f"⚠️  STYLE MISMATCH DIAGNOSTICS:")
             logging.info(f"  Total mismatches: {style_mismatch_count}")
             for style_folder, mismatches in style_mismatch_details.items():
-                logging.info(f"\n  Folder: {style_folder}")
+                logging.info(f"  Folder: {style_folder}")
                 logging.info(f"    Mismatch count: {len(mismatches)}")
                 for mismatch in mismatches[:3]:
                     logging.info(f"      - {mismatch['filename']}")
@@ -318,7 +318,7 @@ class ValidationSplitCreator:
         }
 
         # ✅ COMPREHENSIVE ANALYSIS SUMMARY
-        logging.info(f"\n" + "=" * 70)
+        logging.info(f"" + "=" * 70)
         logging.info(f"📊 DATA ANALYSIS SUMMARY")
         logging.info(f"=" * 70)
         logging.info(f"Content images found:        {len(content_files):,}")
@@ -338,7 +338,7 @@ class ValidationSplitCreator:
         total_lost = lost_to_parse_error + lost_to_style_mismatch + lost_to_missing_content
         
         if total_lost > 0:
-            logging.info(f"\n⚠️  IMAGE LOSS BREAKDOWN:")
+            logging.info(f"⚠️  IMAGE LOSS BREAKDOWN:")
             logging.info(f"  Total scanned:          {expected_total:,}")
             logging.info(f"  Lost to parse errors:   {lost_to_parse_error:,} ({lost_to_parse_error*100/expected_total:.2f}%)")
             logging.info(f"  Lost to style mismatch: {lost_to_style_mismatch:,} ({lost_to_style_mismatch*100/expected_total:.2f}%)")
@@ -407,7 +407,7 @@ class ValidationSplitCreator:
         )
 
         for split_name, split_data in scenarios.items():
-            logging.info(f"\n  {split_name}:")
+            logging.info(f"  {split_name}:")
             logging.info(f"    Chars: {len(split_data['characters'])}")
             logging.info(f"    Styles: {len(split_data['styles'])}")
 
@@ -441,7 +441,7 @@ class ValidationSplitCreator:
         skipped = 0
 
         # Copy content images
-        logging.info(f"\n  📥 Copying content images for {split_name}...")
+        logging.info(f"  📥 Copying content images for {split_name}...")
         for char in tqdm(
             sorted(allowed_chars),
             desc="  Content",
@@ -522,7 +522,7 @@ class ValidationSplitCreator:
         Filter results_checkpoint.json to only include generations
         that have both content and target in this split
         """
-        logging.info(f"\n  📋 Filtering checkpoint for {split_name}...")
+        logging.info(f"  📋 Filtering checkpoint for {split_name}...")
 
         original_checkpoint_path = self.source_train_dir / "results_checkpoint.json"
 
@@ -618,7 +618,7 @@ class ValidationSplitCreator:
         )
 
         # Step 4: Create val split
-        logging.info(f"\n📁 CREATING VAL SPLIT...")
+        logging.info(f"📁 CREATING VAL SPLIT...")
         val_chars = set(scenarios["val"]["characters"])
         val_styles = set(scenarios["val"]["styles"])
         
@@ -643,7 +643,7 @@ class ValidationSplitCreator:
         with open(metadata_path, "w", encoding="utf-8") as f:
             json.dump(scenarios, f, indent=2, ensure_ascii=False)
 
-        logging.info(f"\n✓ Saved split metadata to {metadata_path}")
+        logging.info(f"✓ Saved split metadata to {metadata_path}")
 
 
 # ============================================================================
