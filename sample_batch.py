@@ -1512,7 +1512,7 @@ def main() -> None:
         logging.info(f"  Device: {args.device}")
         logging.info(f"  Batch Size: {args.batch_size}")
         logging.info(
-            f"Will look for results checkpoint at {os.path.join(args.output_dir, 'results_checkpoint.json')}"
+            f"  Results checkpoint path: {os.path.join(args.output_dir, 'results_checkpoint.json')}"
         )
 
         os.makedirs(args.output_dir, exist_ok=True)
