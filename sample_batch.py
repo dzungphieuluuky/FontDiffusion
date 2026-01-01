@@ -44,10 +44,10 @@ logging.basicConfig(
 )
 
 HF_TQDM_CONFIG = {
-    "ncols": 100,
+    "ncols": 120,  # Increased length for better visibility
     "ascii": False,
-    "bar_format": "{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
-    "colour": "#2196f3",
+    "bar_format": "🚀 {l_bar}{bar}| {n_fmt}/{total_fmt} | {percentage:3.0f}% [{elapsed}<{remaining}, {rate_fmt}]",
+    "colour": "#2196f3", # A nice vibrant blue
 }
 
 # Import evaluation metrics
