@@ -36,10 +36,11 @@ class TqdmLoggingHandler(logging.Handler):
         except Exception:
             self.handleError(record)
 
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
-    handlers=[TqdmLoggingHandler()]
+    handlers=[TqdmLoggingHandler()],
 )
 
 # Import evaluation metrics
@@ -56,7 +57,9 @@ try:
 
     FID_AVAILABLE: bool = True
 except ImportError:
-    logging.info("Warning: pytorch-fid not available. Install with: pip install pytorch-fid")
+    logging.info(
+        "Warning: pytorch-fid not available. Install with: pip install pytorch-fid"
+    )
     FID_AVAILABLE: bool = False
 
 try:
@@ -64,7 +67,9 @@ try:
 
     SSIM_AVAILABLE: bool = True
 except ImportError:
-    logging.info("Warning: scikit-image not available. Install with: pip install scikit-image")
+    logging.info(
+        "Warning: scikit-image not available. Install with: pip install scikit-image"
+    )
     SSIM_AVAILABLE: bool = False
 
 try:
@@ -282,7 +287,9 @@ class GenerationTracker:
             # ✅ Store only unique generations
             self.generations = unique_generations
 
-            logging.info(f"✓ Loaded checkpoint: {len(self.generations)} unique generations")
+            logging.info(
+                f"✓ Loaded checkpoint: {len(self.generations)} unique generations"
+            )
             if duplicate_count > 0:
                 logging.info(f"  ⚠️  Removed {duplicate_count} duplicate entries")
             logging.info(f"  Total raw entries: {len(raw_generations)}")
@@ -850,7 +857,9 @@ def batch_generate_images(
     logging.info(f"Styles:               {len(style_paths_with_names)}")
     logging.info(f"Characters:           {len(characters)}")
     logging.info(f"Batch size:           {args.batch_size}")
-    logging.info(f"Existing generations: {len(generation_tracker.generations)} unique pairs")
+    logging.info(
+        f"Existing generations: {len(generation_tracker.generations)} unique pairs"
+    )
     logging.info(f"Existing hashes:      {len(generation_tracker.generated_hashes)}")
     logging.info("=" * 70 + "\n")
 
