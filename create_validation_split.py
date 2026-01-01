@@ -387,7 +387,7 @@ class ValidationSplitCreator:
         content_files: Dict[str, str],
         target_files: Dict[Tuple[str, str], str],
     ) -> Tuple[int, int, int]:
-        """Copy images for a specific split, only for (char, style) pairs in split"""
+        """Copy images for a specific split"""
         split_config = scenarios[split_name]
         allowed_chars = set(split_config["characters"])
         allowed_styles = set(split_config["styles"])
@@ -409,11 +409,10 @@ class ValidationSplitCreator:
         target_copied = 0
         skipped = 0
 
-        # Copy content images (only for chars that have at least one (char, style) in this split)
-        chars_with_targets = {char for (char, style) in target_files if char in allowed_chars and style in allowed_styles}
+        # Copy content images
         logging.info(f"\n  📥 Copying content images for {split_name}...")
         for char in tqdm(
-            sorted(chars_with_targets),
+            sorted(allowed_chars),
             desc="  Content",
             ncols=80,
             unit="char",
@@ -423,8 +422,16 @@ class ValidationSplitCreator:
                 skipped += 1
                 continue
 
-            hash_val = content_files[char]
-            content_filename = get_content_filename(char)
+            # ✅ Get the actual hash from content_files (extracted from filename during analyze_data)
+            actual_hash = content_files[char]
+            codepoint = f"U+{ord(char):04X}"
+            safe_char = char if char.isprintable() and char not in '<>:"/\\|?*' else ""
+            
+            # Reconstruct filename using ACTUAL hash from file
+            if safe_char:
+                content_filename = f"{codepoint}_{safe_char}_{actual_hash}.png"
+            else:
+                content_filename = f"{codepoint}_{actual_hash}.png"
 
             src_path = source_content_dir / content_filename
             dst_path = split_content_dir / content_filename
@@ -438,19 +445,28 @@ class ValidationSplitCreator:
                 tqdm.write(f"    ⚠️  Not found: {content_filename}")
                 skipped += 1
 
-        # Copy target images (only for (char, style) pairs in this split)
+        # Copy target images
         logging.info(f"  📥 Copying target images for {split_name}...")
-        for (char, style), hash_val in tqdm(
+        for (char, style), actual_hash in tqdm(
             sorted(target_files.items()),
             desc="  Target",
             ncols=80,
             unit="pair",
             leave=False,
         ):
+            # Only copy if char and style are in this split
             if char not in allowed_chars or style not in allowed_styles:
                 continue
 
-            target_filename = get_target_filename(char, style)
+            # ✅ Use ACTUAL hash from target_files (extracted during analyze_data)
+            codepoint = f"U+{ord(char):04X}"
+            safe_char = char if char.isprintable() and char not in '<>:"/\\|?*' else ""
+            
+            if safe_char:
+                target_filename = f"{codepoint}_{safe_char}_{style}_{actual_hash}.png"
+            else:
+                target_filename = f"{codepoint}_{style}_{actual_hash}.png"
+
             style_dir = source_target_dir / style
             src_path = style_dir / target_filename
             dst_path = split_target_dir / style / target_filename
@@ -469,7 +485,6 @@ class ValidationSplitCreator:
         )
 
         return content_copied, target_copied, skipped
-
     def _copy_and_filter_checkpoint(
         self,
         split_name: str,
@@ -760,7 +775,7 @@ class ValidationSplitCreator:
 
         # Save metadata
         self._save_metadata(scenarios)
-        
+
     def _save_metadata(self, scenarios: Dict[str, Dict]) -> None:
         """Save split information to JSON"""
         metadata_path = self.data_root / "split_info.json"
