@@ -784,6 +784,7 @@ def generate_content_images(
 ) -> Dict[str, str]:
     """
     Generate and save content character images
+    ✅ CORRECTED: Only generates if content image doesn't already exist
     Returns: char_paths dict mapping character to file path
     """
     content_dir: str = os.path.join(output_dir, "ContentImage")
@@ -801,6 +802,8 @@ def generate_content_images(
 
     char_paths: Dict[str, str] = {}
     chars_without_fonts: List[str] = []
+    chars_already_exist: List[str] = []
+    generated_new: int = 0
 
     for char in tqdm(
         characters,
@@ -820,26 +823,39 @@ def generate_content_images(
             continue
 
         try:
-            font = font_manager.get_font(found_font)
-            content_img: Image.Image = ttf2im(font=font, char=char)
-
-            # Use hash-based filename
+            # ✅ Generate expected filename
             content_filename = get_content_filename(char, found_font)
             char_path: str = os.path.join(content_dir, content_filename)
 
+            # ✅ Check if content image already exists
+            if os.path.exists(char_path):
+                logging.info(f"  ✓ Content image already exists for '{char}' at {char_path}")
+                char_paths[char] = char_path
+                chars_already_exist.append(char)
+                continue
+
+            # Generate new content image only if it doesn't exist
+            font = font_manager.get_font(found_font)
+            content_img: Image.Image = ttf2im(font=font, char=char)
+
             content_img.save(char_path)
-            logging.info(f"  ✓ Saved content image for '{char}' at {char_path}. ")
+            logging.info(f"  ✓ Generated new content image for '{char}' at {char_path}.")
             char_paths[char] = char_path
+            generated_new += 1
+
         except Exception as e:
             logging.info(f"  ✗ Error generating '{char}': {e}")
 
-    logging.info(f"✓ Generated {len(char_paths)} content images")
-    if chars_without_fonts:
-        logging.info(f"⚠ {len(chars_without_fonts)} characters not found in any font")
+    logging.info(f"{'=' * 60}")
+    logging.info(f"Content Image Generation Summary:")
+    logging.info(f"  Total characters:       {len(characters)}")
+    logging.info(f"  Generated (new):        {generated_new}")
+    logging.info(f"  Already exist (reused): {len(chars_already_exist)}")
+    logging.info(f"  Not in any font:        {len(chars_without_fonts)}")
+    logging.info(f"  Total usable:           {len(char_paths)}")
     logging.info("=" * 60)
 
     return char_paths
-
 
 def batch_generate_images(
     pipe: FontDiffuserDPMPipeline,

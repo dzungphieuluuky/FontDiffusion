@@ -186,9 +186,9 @@ class ValidationSplitCreator:
             - target_files: {(char, style) -> file_path}
             - char_to_styles: {char -> [styles]}
         """
-        logging.info("\n" + "=" * 70)
+        logging.info("\n" + "=" * 60)
         logging.info("ANALYZING TRAINING DATA")
-        logging.info("=" * 70)
+        logging.info("=" * 60)
 
         content_dir: Path = self.source_train_dir / "ContentImage"
         target_dir: Path = self.source_train_dir / "TargetImage"
@@ -333,9 +333,9 @@ class ValidationSplitCreator:
         }
 
         # ✅ COMPREHENSIVE ANALYSIS SUMMARY
-        logging.info(f"" + "=" * 70)
+        logging.info(f"" + "=" * 60)
         logging.info(f"📊 DATA ANALYSIS SUMMARY")
-        logging.info(f"=" * 70)
+        logging.info(f"=" * 60)
         logging.info(f"Content images found:        {len(content_files):,}")
         logging.info(f"Target images scanned:       {total_targets:,}")
         logging.info(f"  ├─ Parse errors:          {parse_error_count:,}")
@@ -343,7 +343,7 @@ class ValidationSplitCreator:
         logging.info(f"Target images after filter:  {len(target_files):,}")
         logging.info(f"Missing content images:      {missing_content_count:,}")
         logging.info(f"Final valid pairs:           {len(valid_target_files):,}")
-        logging.info(f"=" * 70)
+        logging.info(f"=" * 60)
 
         # ✅ Calculate and show loss
         expected_total = total_targets
@@ -386,9 +386,9 @@ class ValidationSplitCreator:
         - Randomly split both characters and styles
         - Only pairs (char, style) where both char and style are in the split are included
         """
-        logging.info("\n" + "=" * 70)
+        logging.info("\n" + "=" * 60)
         logging.info("CREATING TRAIN/VAL SPLITS (random char & style)")
-        logging.info("=" * 70)
+        logging.info("=" * 60)
 
         all_chars = sorted(list(content_files.keys()))
         all_styles = sorted({style for (_, style) in target_files.keys()})
@@ -616,9 +616,9 @@ class ValidationSplitCreator:
 
     def create_splits(self) -> None:
         """Main function to create train/val splits"""
-        logging.info("\n" + "=" * 70)
+        logging.info("\n" + "=" * 60)
         logging.info("FONTDIFFUSION VALIDATION SPLIT CREATOR")
-        logging.info("=" * 70)
+        logging.info("=" * 60)
 
         # Step 1: Analyze data
         content_files, target_files, char_to_styles = self.analyze_data()
@@ -693,9 +693,9 @@ def create_validation_split(
     creator = ValidationSplitCreator(config)
     creator.create_splits()
 
-    logging.info("\n" + "=" * 70)
+    logging.info("\n" + "=" * 60)
     logging.info("✓ SPLIT CREATION COMPLETE")
-    logging.info("=" * 70)
+    logging.info("=" * 60)
     logging.info("\n✅ Created:")
     logging.info("  📁 train/")
     logging.info("    ├── ContentImage/ (training chars)")
