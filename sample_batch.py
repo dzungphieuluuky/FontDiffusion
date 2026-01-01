@@ -949,7 +949,9 @@ def batch_generate_images(
                 target_path_rel = f"TargetImage/{style_name}/{target_filename}"
 
                 evaluator.save_image(img, img_path)
-                logging.info(f"    ✓ Saved generated image for '{char}' at {img_path}. ")
+                logging.info(
+                    f"    ✓ Saved generated image for '{char}' at {img_path}. "
+                )
 
                 # Add generation record with hashes
                 generation_record = {
