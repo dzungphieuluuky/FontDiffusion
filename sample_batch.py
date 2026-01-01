@@ -14,7 +14,7 @@ import hashlib
 import argparse
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Any, Set, Union
-from tqdm.auto import tqdm
+from huggingface_hub.utils import tqdm, enable_progress_bars
 import logging
 
 import numpy as np
@@ -43,13 +43,7 @@ logging.basicConfig(
     handlers=[TqdmLoggingHandler()],
 )
 
-HF_TQDM_CONFIG = {
-    "ncols": 100,
-    "ascii": False,  # Uses smooth unicode blocks
-    "bar_format": "{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]",
-    "colour": "#4caf50",  # Professional Green
-}
-
+enable_progress_bars()
 # Import evaluation metrics
 try:
     import lpips
@@ -590,10 +584,7 @@ def load_characters(
             enumerate(all_lines[start_idx:end_idx], start=start_line),
             total=(end_idx - start_idx),
             desc="📖 Reading character file",
-            ncols=100,
-            unit="line",
-            bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
-            colour="cyan",
+            colour="green",
         ):
             char: str = line.strip()
             if not char:
@@ -644,9 +635,6 @@ def load_style_images(style_images_arg: str) -> List[Tuple[str, str]]:
         for path in tqdm(
             style_paths,
             desc="✓ Verifying style images",
-            ncols=100,
-            unit="image",
-            bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}]",
             colour="green",
         ):
             if os.path.isfile(path):
@@ -774,7 +762,7 @@ def generate_content_images(
     for char in tqdm(
         characters,
         desc="📸 Generating content images",
-        **HF_TQDM_CONFIG,
+        colour="magenta",
     ):
         found_font = None
         for font_name in font_names:
@@ -886,7 +874,6 @@ def batch_generate_images(
         enumerate(style_paths_with_names),
         total=len(style_paths_with_names),
         desc="🎨 Generating styles",
-        **HF_TQDM_CONFIG,
     ):
         style_dir = os.path.join(target_base_dir, style_name)
         os.makedirs(style_dir, exist_ok=True)
@@ -1029,12 +1016,7 @@ def sampling_batch_optimized(
         for char in tqdm(
             available_chars,
             desc=f"  📸 Preparing {font_name}",
-            ncols=100,
-            unit="char",
-            leave=False,
-            bar_format="  {desc}: {n_fmt}/{total_fmt} |{bar}| [{elapsed}]",
             colour="cyan",
-            position=1,
         ):
             try:
                 content_image: Image.Image = ttf2im(font=font, char=char)
@@ -1068,13 +1050,7 @@ def sampling_batch_optimized(
             batch_pbar = tqdm(
                 range(0, len(content_batch), batch_size),
                 desc="    🚀 Batch Inference",
-                ncols=120,
-                unit="batch",
-                leave=False,
-                dynamic_ncols=True,
-                bar_format="{desc} |{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
                 colour="#1055C9",
-                position=2,
             )
             for batch_idx, i in enumerate(batch_pbar):
                 batch_content: torch.Tensor = content_batch[i : i + batch_size]
@@ -1189,9 +1165,6 @@ def evaluate_results(
     for gen in tqdm(
         results["generations"],
         desc="📊 Evaluating",
-        ncols=100,
-        unit="pair",
-        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
         colour="green",
     ):
         char: str = gen["character"]
