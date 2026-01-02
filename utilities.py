@@ -10,6 +10,7 @@ import logging
 import json
 import os
 
+
 class TqdmLoggingHandler(logging.Handler):
     def emit(self, record):
         try:
@@ -27,24 +28,26 @@ logging.basicConfig(
 )
 
 HF_BLUE = "#05339C"  # Color for active bars
-HF_GREEN = "#41A67E" # Color for completed bars
+HF_GREEN = "#41A67E"  # Color for completed bars
 
 # The format string to match your image exactly:
 HF_BAR_FORMAT = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"
+
 
 class HFTqdm(tqdm):
     """
     A custom TQDM bar that replicates the Hugging Face download look.
     """
+
     def __init__(self, *args, **kwargs):
         # Set defaults to match the image
         kwargs.setdefault("unit", "B")
         kwargs.setdefault("unit_scale", True)
         kwargs.setdefault("unit_divisor", 1024)
         kwargs.setdefault("bar_format", HF_BAR_FORMAT)
-        kwargs.setdefault("colour", HF_BLUE) # Start as Blue
+        kwargs.setdefault("colour", HF_BLUE)  # Start as Blue
         kwargs.setdefault("ascii", False)
-        kwargs.setdefault("ncols", 100)      # Fixed width
+        kwargs.setdefault("ncols", 100)  # Fixed width
         super().__init__(*args, **kwargs)
 
     def close(self):
@@ -52,6 +55,7 @@ class HFTqdm(tqdm):
         self.colour = HF_GREEN
         self.refresh()
         super().close()
+
 
 def get_hf_bar(iterable=None, desc="File", total=None, **kwargs):
     """Factory function for the progress bar."""
@@ -63,6 +67,7 @@ def load_model_checkpoint(checkpoint_path: str):
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
     if checkpoint_path.endswith(".safetensors"):
         from safetensors.torch import load_file as safe_load
+
         state_dict = safe_load(checkpoint_path, device="cpu")
     else:
         state_dict = torch.load(checkpoint_path, map_location="cpu")
@@ -73,6 +78,7 @@ def save_model_checkpoint(model_state_dict, checkpoint_path: str):
     os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
     if checkpoint_path.endswith(".safetensors"):
         from safetensors.torch import save_file as safe_save
+
         safe_save(model_state_dict, checkpoint_path)
     else:
         torch.save(model_state_dict, checkpoint_path)
@@ -91,7 +97,7 @@ def find_checkpoint(checkpoint_dir: str, checkpoint_name: str) -> str:
     """
     safetensors_path = os.path.join(checkpoint_dir, f"{checkpoint_name}.safetensors")
     pth_path = os.path.join(checkpoint_dir, f"{checkpoint_name}.pth")
-    
+
     if os.path.exists(safetensors_path):
         return safetensors_path
     elif os.path.exists(pth_path):
@@ -101,7 +107,8 @@ def find_checkpoint(checkpoint_dir: str, checkpoint_name: str) -> str:
             f"Checkpoint not found for '{checkpoint_name}' in {checkpoint_dir}\n"
             f"  Expected: {safetensors_path} or {pth_path}"
         )
-    
+
+
 def rename_images(json_file):
     # Load the JSON data
     with open(json_file, "r", encoding="utf-8") as f:

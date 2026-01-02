@@ -27,6 +27,7 @@ from filename_utils import (
 )
 from utilities import get_hf_bar
 
+
 # Setup logging with tqdm compatibility
 class TqdmLoggingHandler(logging.Handler):
     def emit(self, record):

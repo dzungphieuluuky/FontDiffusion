@@ -1573,7 +1573,9 @@ def main() -> None:
                 if hasattr(pipe.model, "unet"):
                     pipe.model.config.unet = torch.compile(pipe.model.config.unet)
                 if hasattr(pipe.model, "style_encoder"):
-                    pipe.model.config.style_encoder = torch.compile(pipe.model.config.style_encoder)
+                    pipe.model.config.style_encoder = torch.compile(
+                        pipe.model.config.style_encoder
+                    )
                 if hasattr(pipe.model, "content_encoder"):
                     pipe.model.config.content_encoder = torch.compile(
                         pipe.model.config.content_encoder

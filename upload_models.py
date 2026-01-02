@@ -14,6 +14,7 @@ from huggingface_hub import HfApi, create_repo, login
 
 from utilities import load_model_checkpoint, save_model_checkpoint, find_checkpoint
 
+
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Convert PyTorch .pth weights to SafeTensors format and upload to HF Hub",
@@ -26,23 +27,70 @@ Examples:
   python upload_models.py --weights_dir "ckpt" --repo_id "username/font-diffusion-weights" --skip-conversion
         """,
     )
-    parser.add_argument("--weights_dir", type=str, required=True, default="outputs/FontDiffuser", help="Directory with .pth/.safetensors files")
-    parser.add_argument("--repo_id", type=str, default="dzungpham/font-diffusion-weights", help="Hugging Face repo ID")
-    parser.add_argument("--token", type=str, default=None, help="Hugging Face API token")
-    parser.add_argument("--files", nargs="+", default=[
-        "content_encoder.pth", "content_encoder.safetensors",
-        "style_encoder.pth", "style_encoder.safetensors",
-        "unet.pth", "unet.safetensors",
-        "total_model.pth", "total_model.safetensors",
-        "scr.pth", "scr.safetensors",
-    ], help="Specific files to convert (default: all standard FontDiffusion weights)")
-    parser.add_argument("--repo_type", type=str, default="model", help="Repository type (default: model)")
-    parser.add_argument("--private", action="store_true", default=False, help="Make repository private")
-    parser.add_argument("--no-upload", action="store_true", default=False, help="Convert only, do not upload")
-    parser.add_argument("--skip-conversion", action="store_true", default=False, help="Skip conversion, only upload")
-    parser.add_argument("--commit-message", type=str, default="Add converted safetensors and original pth weights")
-    parser.add_argument("--verbose", action="store_true", default=False, help="Verbose output")
+    parser.add_argument(
+        "--weights_dir",
+        type=str,
+        required=True,
+        default="outputs/FontDiffuser",
+        help="Directory with .pth/.safetensors files",
+    )
+    parser.add_argument(
+        "--repo_id",
+        type=str,
+        default="dzungpham/font-diffusion-weights",
+        help="Hugging Face repo ID",
+    )
+    parser.add_argument(
+        "--token", type=str, default=None, help="Hugging Face API token"
+    )
+    parser.add_argument(
+        "--files",
+        nargs="+",
+        default=[
+            "content_encoder.pth",
+            "content_encoder.safetensors",
+            "style_encoder.pth",
+            "style_encoder.safetensors",
+            "unet.pth",
+            "unet.safetensors",
+            "total_model.pth",
+            "total_model.safetensors",
+            "scr.pth",
+            "scr.safetensors",
+        ],
+        help="Specific files to convert (default: all standard FontDiffusion weights)",
+    )
+    parser.add_argument(
+        "--repo_type",
+        type=str,
+        default="model",
+        help="Repository type (default: model)",
+    )
+    parser.add_argument(
+        "--private", action="store_true", default=False, help="Make repository private"
+    )
+    parser.add_argument(
+        "--no-upload",
+        action="store_true",
+        default=False,
+        help="Convert only, do not upload",
+    )
+    parser.add_argument(
+        "--skip-conversion",
+        action="store_true",
+        default=False,
+        help="Skip conversion, only upload",
+    )
+    parser.add_argument(
+        "--commit-message",
+        type=str,
+        default="Add converted safetensors and original pth weights",
+    )
+    parser.add_argument(
+        "--verbose", action="store_true", default=False, help="Verbose output"
+    )
     return parser.parse_args()
+
 
 def get_token(token_arg: Optional[str]) -> Optional[str]:
     if token_arg:
@@ -53,9 +101,11 @@ def get_token(token_arg: Optional[str]) -> Optional[str]:
         return token_env
     try:
         from huggingface_hub import HfFolder
+
         return HfFolder.get_token()
     except Exception:
         return None
+
 
 def validate_inputs(args: argparse.Namespace) -> bool:
     print("\n" + "=" * 70)
@@ -86,6 +136,7 @@ def validate_inputs(args: argparse.Namespace) -> bool:
             print(f"  ⚠ {file_name} (not found)")
     return True
 
+
 def convert_pth_to_safetensors(args: argparse.Namespace) -> bool:
     if args.skip_conversion:
         print("\n⊘ Skipping conversion (--skip-conversion)")
@@ -113,9 +164,13 @@ def convert_pth_to_safetensors(args: argparse.Namespace) -> bool:
             save_model_checkpoint(state_dict, safe_path)
             safe_size_mb = os.path.getsize(safe_path) / (1024 * 1024)
             pth_size_mb = os.path.getsize(pth_path) / (1024 * 1024)
-            compression = ((pth_size_mb - safe_size_mb) / pth_size_mb) * 100 if pth_size_mb else 0
+            compression = (
+                ((pth_size_mb - safe_size_mb) / pth_size_mb) * 100 if pth_size_mb else 0
+            )
             print(f"  ✓ Saved to: {safe_path}")
-            print(f"    Original: {pth_size_mb:.2f} MB → Safetensors: {safe_size_mb:.2f} MB")
+            print(
+                f"    Original: {pth_size_mb:.2f} MB → Safetensors: {safe_size_mb:.2f} MB"
+            )
             print(f"    Compression: {compression:.1f}%")
             converted_count += 1
         except Exception as e:
@@ -123,10 +178,12 @@ def convert_pth_to_safetensors(args: argparse.Namespace) -> bool:
             failed_count += 1
             if args.verbose:
                 import traceback
+
                 traceback.print_exc()
     print("\n" + "-" * 70)
     print(f"Conversion complete: {converted_count} succeeded, {failed_count} failed")
     return failed_count == 0
+
 
 def upload_to_hub(args: argparse.Namespace) -> bool:
     if args.no_upload:
@@ -170,8 +227,10 @@ def upload_to_hub(args: argparse.Namespace) -> bool:
         print(f"\n✗ Upload failed: {e}")
         if args.verbose:
             import traceback
+
             traceback.print_exc()
         return False
+
 
 def main():
     print("\n" + "=" * 70)
@@ -205,6 +264,7 @@ def main():
         print(f"   from safetensors.torch import load_file")
         print(f"   state = load_file('model.safetensors')")
 
+
 if __name__ == "__main__":
     try:
         main()
@@ -214,5 +274,6 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n\n✗ Fatal error: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)

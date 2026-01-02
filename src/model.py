@@ -96,7 +96,9 @@ class FontDiffuserModelDPM(ModelMixin, ConfigMixin):
         content_images = cond[0]
         style_images = cond[1]
 
-        style_img_feature, _, style_residual_features = self.config.style_encoder(style_images)
+        style_img_feature, _, style_residual_features = self.config.style_encoder(
+            style_images
+        )
 
         batch_size, channel, height, width = style_img_feature.shape
         style_hidden_states = style_img_feature.permute(0, 2, 3, 1).reshape(
