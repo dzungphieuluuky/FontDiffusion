@@ -89,7 +89,7 @@ def main():
     noise_scheduler = build_ddpm_scheduler(args)
     
     # ========== LOAD PHASE 1 CHECKPOINTS ==========
-    if args.phase_2:
+    if args.phase_1_ckpt_dir is not None:
         print("\n📦 Loading Phase 1 checkpoints...")
         try:
             unet_ckpt = find_checkpoint(args.phase_1_ckpt_dir, "unet")
@@ -240,8 +240,7 @@ def main():
             with accelerator.accumulate(model):
                 # Sample noise that we'll add to the samples
                 noise = torch.randn_like(target_images)
-                bsz = target_images.shape[0]
-                
+                bsz = target_images.shape[0]           
                 # Sample a random timestep for each image
                 timesteps = torch.randint(
                     0,
@@ -370,7 +369,13 @@ def main():
                             unwrapped_model.state_dict(),
                             f"{save_dir}/total_model.safetensors"
                         )
-                        
+
+                        if args.phase_2:
+                            save_model_checkpoint(
+                                scr.state_dict(),
+                                f"{save_dir}/scr.safetensors",
+                            )
+
                         log_msg = f"[{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}] Save the checkpoint on global step {global_step}"
                         logging.info(log_msg)
                         print(f"✅ {log_msg}")
