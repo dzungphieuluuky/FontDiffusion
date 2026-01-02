@@ -1120,6 +1120,7 @@ def log_to_wandb(results: Dict[str, Any], args: argparse.Namespace) -> None:
 def main():
     """Main entry point."""
     args = parse_args()
+    args = create_args_namespace(args)
 
     logger.info("=" * 60)
     logger.info("FONTDIFFUSER MULTI-GPU SYNTHESIS")
