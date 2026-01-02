@@ -4,7 +4,7 @@ from typing import Optional
 import torch
 from safetensors.torch import save_file
 import shutil
-from huggingface_hub.utils import tqdm
+from tqdm.auto import tqdm
 from typing import Any, Dict
 import logging
 import json
@@ -26,75 +26,37 @@ logging.basicConfig(
     handlers=[TqdmLoggingHandler()],
 )
 
-def get_tqdm_config(
-    total: Optional[int] = None,
-    desc: str = "",
-    unit: str = "it",
-    ncols: int = 100,
-    unit_scale: bool = True,
-    unit_divisor: int = 1000,
-) -> Dict[str, Any]:
+HF_BLUE = "#05339C"  # Color for active bars
+HF_GREEN = "#41A67E" # Color for completed bars
+
+# The format string to match your image exactly:
+HF_BAR_FORMAT = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"
+
+class HFTqdm(tqdm):
     """
-    Get standardized tqdm configuration
-
-    ✅ unit_scale=True: Automatically scales to KB, MB, GB, etc.
-    ✅ total: Number of items (from loop)
-    ✅ Updates automatically as items are processed
-
-    Args:
-        total: Total number of items to process
-        desc: Description/label for the progress bar
-        unit: Unit name (default: "it" for items)
-        ncols: Width of progress bar (default: 100)
-        unit_scale: Enable automatic scaling (default: True)
-        unit_divisor: Divisor for unit scaling (1000 for decimal, 1024 for binary)
-
-    Returns:
-        Dict of tqdm configuration that can be unpacked with **
-
-    Example:
-        for item in tqdm(items, **get_tqdm_config(
-            total=len(items),
-            desc="Processing",
-            unit="item"
-        )):
-            # process item
-            pass
+    A custom TQDM bar that replicates the Hugging Face download look.
     """
-    config = {
-        "total": total,
-        "desc": desc,
-        "unit": unit,
-        "ncols": ncols,
-        "unit_scale": unit_scale,
-        "unit_divisor": unit_divisor,
-        "leave": True,
-        "dynamic_ncols": True,
-    }
-    return {k: v for k, v in config.items() if v is not None}
+    def __init__(self, *args, **kwargs):
+        # Set defaults to match the image
+        kwargs.setdefault("unit", "B")
+        kwargs.setdefault("unit_scale", True)
+        kwargs.setdefault("unit_divisor", 1024)
+        kwargs.setdefault("bar_format", HF_BAR_FORMAT)
+        kwargs.setdefault("colour", HF_BLUE) # Start as Blue
+        kwargs.setdefault("ascii", False)
+        kwargs.setdefault("ncols", 128)      # Fixed width
+        super().__init__(*args, **kwargs)
 
+    def close(self):
+        """Change color to green upon completion."""
+        self.colour = HF_GREEN
+        self.refresh()
+        super().close()
 
-# Preset configurations for common scenarios
-TQDM_IMAGE_LOADING = {
-    "unit": "img",
-    "ncols": 100,
-    "unit_scale": True,
-    "unit_divisor": 1000,
-}
+def get_hf_bar(iterable=None, desc="File", total=None, **kwargs):
+    """Factory function for the progress bar."""
+    return HFTqdm(iterable=iterable, desc=desc, total=total, **kwargs)
 
-TQDM_GENERATION_PAIR = {
-    "unit": "pair",
-    "ncols": 100,
-    "unit_scale": True,
-    "unit_divisor": 1000,
-}
-
-TQDM_FILE_IO = {
-    "unit": "file",
-    "ncols": 100,
-    "unit_scale": True,
-    "unit_divisor": 1024,  # Binary divisor for file sizes
-}
 
 def load_model_checkpoint(checkpoint_path: str):
     if not os.path.exists(checkpoint_path):

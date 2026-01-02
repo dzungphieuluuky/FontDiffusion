@@ -25,7 +25,11 @@ import torchvision.transforms as transforms
 from argparse import Namespace, ArgumentParser
 
 from src.dpm_solver.pipeline_dpm_solver import FontDiffuserDPMPipeline
-from utilities import *
+from utilities import (
+    save_model_checkpoint,
+    load_model_checkpoint,
+    get_hf_bar,
+)
 
 enable_progress_bars()
 # Import evaluation metrics
@@ -556,9 +560,8 @@ def load_characters(
         )
         logging.info(f"   Processing {end_idx - start_idx} lines...")
 
-        for line_num, line in tqdm(
+        for line_num, line in get_hf_bar(
             enumerate(all_lines[start_idx:end_idx], start=start_line),
-            **TQDM_FILE_IO,
             total=(end_idx - start_idx),
             desc="📖 Reading character file",
             colour="green",
@@ -609,9 +612,8 @@ def load_style_images(style_images_arg: str) -> List[Tuple[str, str]]:
 
         logging.info(f"📂 Loading {len(style_paths)} style images from directory...")
         verified_paths = []
-        for path in tqdm(
+        for path in get_hf_bar(
             style_paths,
-            **TQDM_FILE_IO,
             desc="✓ Verifying style images",
             colour="green",
         ):
@@ -740,9 +742,8 @@ def generate_content_images(
     chars_already_exist: List[str] = []
     generated_new: int = 0
 
-    for char in tqdm(
+    for char in get_hf_bar(
         characters,
-        **TQDM_GENERATION_PAIR,
         desc="📸 Generating content images",
         colour="magenta",
     ):
@@ -892,9 +893,8 @@ def batch_generate_images(
     generation_start_time = time.time()
 
     # Main generation loop
-    for style_idx, (style_path, style_name) in tqdm(
+    for style_idx, (style_path, style_name) in get_hf_bar(
         enumerate(style_paths_with_names),
-        **TQDM_GENERATION_PAIR,
         total=len(style_paths_with_names),
         desc="🎨 Generating styles",
     ):
@@ -1079,9 +1079,8 @@ def sampling_batch_optimized(
         content_images: List[torch.Tensor] = []
         content_images_pil: List[Image.Image] = []
 
-        for char in tqdm(
+        for char in get_hf_bar(
             available_chars,
-            **TQDM_FILE_IO,
             desc=f"  📸 Preparing {font_name}",
             colour="cyan",
         ):
@@ -1114,9 +1113,8 @@ def sampling_batch_optimized(
             batch_size: int = args.batch_size
 
             num_batches = (len(content_batch) + batch_size - 1) // batch_size
-            batch_pbar = tqdm(
+            batch_pbar = get_hf_bar(
                 range(0, len(content_batch), batch_size),
-                **TQDM_GENERATION_PAIR,
                 desc="    🚀 Batch Inference",
                 colour="#1055C9",
             )
@@ -1230,9 +1228,8 @@ def evaluate_results(
     missing_gt: int = 0
 
     # Evaluate each generation
-    for gen in tqdm(
+    for gen in get_hf_bar(
         results["generations"],
-        **TQDM_IMAGE_LOADING,
         desc="📊 Evaluating",
         colour="green",
     ):
