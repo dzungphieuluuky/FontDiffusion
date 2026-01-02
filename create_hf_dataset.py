@@ -18,11 +18,8 @@ import pyarrow.parquet as pq
 from huggingface_hub.utils import tqdm
 
 from utilities import get_tqdm_config
-from filename_utils import (
-    get_content_filename,
-    get_target_filename,
-    compute_file_hash
-)
+from filename_utils import get_content_filename, get_target_filename, compute_file_hash
+
 # ============================================================================
 # MAIN CLASS
 # ============================================================================

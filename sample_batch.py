@@ -100,6 +100,7 @@ from filename_utils import (
     compute_file_hash,
 )
 
+
 class FontManager:
     """Manages multiple font files"""
 
@@ -780,7 +781,9 @@ def generate_content_images(
 
             # ✅ Check if content image already exists
             if os.path.exists(char_path):
-                logging.info(f"  ✓ Content image already exists for '{char}' at {char_path}")
+                logging.info(
+                    f"  ✓ Content image already exists for '{char}' at {char_path}"
+                )
                 char_paths[char] = char_path
                 chars_already_exist.append(char)
                 continue
@@ -790,7 +793,9 @@ def generate_content_images(
             content_img: Image.Image = ttf2im(font=font, char=char)
 
             content_img.save(char_path)
-            logging.info(f"  ✓ Generated new content image for '{char}' at {char_path}.")
+            logging.info(
+                f"  ✓ Generated new content image for '{char}' at {char_path}."
+            )
             char_paths[char] = char_path
             generated_new += 1
 
@@ -807,6 +812,7 @@ def generate_content_images(
     logging.info("=" * 60)
 
     return char_paths
+
 
 def batch_generate_images(
     pipe: FontDiffuserDPMPipeline,
@@ -862,7 +868,7 @@ def batch_generate_images(
         "dataset_split": args.dataset_split,
         "fonts": font_manager.get_font_names(),
         "characters": sorted(list(all_chars_in_checkpoint)),
-        "styles": sorted(list(all_styles_in_checkpoint)),  
+        "styles": sorted(list(all_styles_in_checkpoint)),
         "total_chars": len(all_chars_in_checkpoint),
         "total_styles": len(all_styles_in_checkpoint),
     }
@@ -955,12 +961,11 @@ def batch_generate_images(
                         continue
 
                     # ✅ Generate filename (character inclusion determined by filesystem safety, not printability)
-                    target_filename = get_target_filename(
-                        char, style_name
-                    )
+                    target_filename = get_target_filename(char, style_name)
 
                     # ✅ Validate filename format
                     import re
+
                     # Valdate target filename format: {style}+{char}.png
                     expected_pattern = r".+\+.\.png"
                     if not re.match(expected_pattern, target_filename):
@@ -983,7 +988,7 @@ def batch_generate_images(
                     # Add generation record with hashes
                     generation_record = {
                         "character": char,
-                        "char_code": f"U+{ord(char):04X}",  
+                        "char_code": f"U+{ord(char):04X}",
                         "style": style_name,
                         "font": primary_font,
                         "content_image_path": content_path_rel,
@@ -993,7 +998,7 @@ def batch_generate_images(
                             char, style_name, primary_font
                         ),
                         "content_filename": content_filename,
-                        "target_filename": target_filename,  
+                        "target_filename": target_filename,
                     }
 
                     results["generations"].append(generation_record)

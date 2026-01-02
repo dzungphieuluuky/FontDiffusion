@@ -89,11 +89,7 @@ from sample_optimized import (
     get_content_transform,
     get_style_transform,
 )
-from utils import (
-    load_ttf, 
-    ttf2im, 
-    is_char_in_font
-)
+from utils import load_ttf, ttf2im, is_char_in_font
 
 from filename_utils import (
     get_content_filename,
@@ -102,6 +98,7 @@ from filename_utils import (
     parse_target_filename,
     compute_file_hash,
 )
+
 
 class FontManager:
     def __init__(self, ttf_path: str) -> None:

@@ -23,10 +23,10 @@ def get_content_filename(char: str, font: str = "") -> str:
     """
     codepoint = f"U+{ord(char):04X}"
     hash_val = compute_file_hash(char, "", font)
-    
+
     filesystem_unsafe = '<>:"/\\|?*'
     safe_char = char if char not in filesystem_unsafe else ""
-    
+
     if safe_char:
         return f"{codepoint}_{safe_char}_{hash_val}.png"
     else:
@@ -40,10 +40,10 @@ def get_target_filename(char: str, style: str, font: str = "") -> str:
     """
     codepoint = f"U+{ord(char):04X}"
     hash_val = compute_file_hash(char, style, font)
-    
+
     filesystem_unsafe = '<>:"/\\|?*'
     safe_char = char if char not in filesystem_unsafe else ""
-    
+
     if safe_char:
         return f"{codepoint}_{safe_char}_{style}_{hash_val}.png"
     else:
@@ -74,12 +74,12 @@ class MyFontDataset(Dataset):
 
     def __init__(self, args, phase: str = "train", transforms=None, scr: bool = False):
         super().__init__()
-        
+
         self.args = args
         self.root = args.data_root
         self.phase = phase
         self.scr = scr
-        
+
         if self.scr:
             self.num_neg = args.num_neg
 
@@ -99,7 +99,7 @@ class MyFontDataset(Dataset):
         """
         data_root = Path(self.root) / self.phase
         checkpoint_path = data_root / "results_checkpoint.json"
-        
+
         if not checkpoint_path.exists():
             raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
 
@@ -107,7 +107,7 @@ class MyFontDataset(Dataset):
             checkpoint = json.load(f)
 
         generations = checkpoint.get("generations", [])
-        
+
         if not generations:
             raise ValueError(f"No generations in checkpoint: {checkpoint_path}")
 
@@ -122,7 +122,9 @@ class MyFontDataset(Dataset):
 
             # Generate expected filename using hash
             target_filename = get_target_filename(char, style, font)
-            target_image_path = f"{self.root}/{self.phase}/TargetImage/{style}/{target_filename}"
+            target_image_path = (
+                f"{self.root}/{self.phase}/TargetImage/{style}/{target_filename}"
+            )
 
             # Verify file exists
             if not Path(target_image_path).exists():
@@ -164,13 +166,13 @@ class MyFontDataset(Dataset):
         # Random sample used for style image (pick different target from same style)
         images_related_style = self.style_to_images[style].copy()
         images_related_style.remove(target_image_path)
-        
+
         if not images_related_style:
             # If only one image per style, reuse the target as style image
             style_image_path = target_image_path
         else:
             style_image_path = random.choice(images_related_style)
-        
+
         style_image = Image.open(style_image_path).convert("RGB")
 
         # Read target image
@@ -201,19 +203,19 @@ class MyFontDataset(Dataset):
 
             if style_list:  # Only if other styles exist
                 choose_neg_names = []
-                
+
                 for i in range(self.num_neg):
                     if not style_list:
                         break
-                    
+
                     choose_style = random.choice(style_list)
                     choose_index = style_list.index(choose_style)
                     style_list.pop(choose_index)
-                    
+
                     # Generate negative filename using hash
                     neg_filename = get_target_filename(char, choose_style, font)
                     choose_neg_name = f"{self.root}/{self.phase}/TargetImage/{choose_style}/{neg_filename}"
-                    
+
                     if Path(choose_neg_name).exists():
                         choose_neg_names.append(choose_neg_name)
 
@@ -223,7 +225,7 @@ class MyFontDataset(Dataset):
                     neg_image = Image.open(neg_name).convert("RGB")
                     if self.transforms is not None:
                         neg_image = self.transforms[2](neg_image)
-                    
+
                     if neg_images is None:
                         neg_images = neg_image[None, :, :, :]
                     else:

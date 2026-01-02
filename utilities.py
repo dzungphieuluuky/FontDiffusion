@@ -85,9 +85,10 @@ TQDM_FILE_IO = {
 import json
 import os
 
+
 def rename_images(json_file):
     # Load the JSON data
-    with open(json_file, 'r', encoding='utf-8') as f:
+    with open(json_file, "r", encoding="utf-8") as f:
         data = json.load(f)
 
     generations = data.get("generations", [])
@@ -95,7 +96,7 @@ def rename_images(json_file):
     for entry in generations:
         char = entry.get("character")
         style = entry.get("style")
-        
+
         # New base name based on your example: style+char.png
         new_filename = f"{style}+{char}.png"
 
@@ -104,7 +105,7 @@ def rename_images(json_file):
 
         for path_key in paths_to_update:
             old_path = entry.get(path_key)
-            
+
             if old_path and os.path.exists(old_path):
                 # Extract directory (e.g., ContentImage/ or TargetImage/1/)
                 directory = os.path.dirname(old_path)
@@ -126,35 +127,38 @@ def rename_images(json_file):
 
     # Save the updated JSON back to a file
     output_file = "updated_generations.json"
-    with open(output_file, 'w', encoding='utf-8') as f:
+    with open(output_file, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    
+
     print(f"\nProcessing complete. Updated JSON saved as: {output_file}")
+
 
 def rename_content_images(path: str):
     # Rename all files in ContentImage/ from 1+char.png to char.png
     content_dir = os.path.join(path, "ContentImage")
     for filename in os.listdir(content_dir):
-        if '+' in filename:
-            char = filename.split('+')[1]
+        if "+" in filename:
+            char = filename.split("+")[1]
             old_path = os.path.join(content_dir, filename)
             new_path = os.path.join(content_dir, char)
             os.rename(old_path, new_path)
             print(f"Renamed: {old_path} -> {new_path}")
 
+
 def update_paths(input_file, output_file=None):
-    with open(input_file, 'r', encoding='utf-8') as f:
+    with open(input_file, "r", encoding="utf-8") as f:
         data = json.load(f)
-    
+
     items = data.get("generations", [])
-    
+
     for item in items:
-        char, style = item['character'], item['style']
-        item['content_image_path'] = f"ContentImage/{char}.png"
-        item['target_image_path'] = f"TargetImage/{style}/{style}+{char}.png"
-    
-    with open(output_file or input_file, 'w', encoding='utf-8') as f:
+        char, style = item["character"], item["style"]
+        item["content_image_path"] = f"ContentImage/{char}.png"
+        item["target_image_path"] = f"TargetImage/{style}/{style}+{char}.png"
+
+    with open(output_file or input_file, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
 
 def flatten_folder(root_dir):
     """
@@ -316,7 +320,7 @@ if __name__ == "__main__":
 
     if args.convert_ckpt_dir:
         convert_checkpoint_folder(args.convert_ckpt_dir, args.output_dir)
-    
+
     if args.rename_images_json:
         rename_images(args.rename_images_json)
 

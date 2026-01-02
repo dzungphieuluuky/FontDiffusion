@@ -26,6 +26,7 @@ from filename_utils import (
     get_target_filename,
 )
 
+
 # Setup logging with tqdm compatibility
 class TqdmLoggingHandler(logging.Handler):
     def emit(self, record):
@@ -63,6 +64,7 @@ def compute_file_hash(char: str, style: str, font: str = "") -> str:
     """
     content = f"{char}_{style}_{font}"
     return hashlib.sha256(content.encode("utf-8")).hexdigest()[:8]
+
 
 @dataclass
 class ValidationSplitConfig:

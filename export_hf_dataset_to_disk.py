@@ -15,11 +15,8 @@ from huggingface_hub.utils import tqdm
 import json
 import os
 
-from filename_utils import (
-    get_content_filename,
-    get_target_filename,
-    compute_file_hash
-    )
+from filename_utils import get_content_filename, get_target_filename, compute_file_hash
+
 
 @dataclass
 class ExportConfig:
