@@ -659,102 +659,112 @@ def generate_content_images(
         return {}
 
 
-def sampling_batch(
-    args: argparse.Namespace,
+def sampling_batch_optimized(
+    args: Namespace,
     pipe: FontDiffuserDPMPipeline,
     characters: List[str],
     style_image_path: Union[str, Image.Image],
     font_manager: FontManager,
     font_name: str,
 ) -> Tuple[Optional[List[Image.Image]], Optional[List[str]], Optional[float]]:
-    """Batch sampling for multiple characters.
+    """Batch sampling for multiple characters with specific font"""
 
-    Args:
-        args: Arguments
-        pipe: Pipeline
-        characters: List of characters
-        style_image_path: Style image path or PIL image
-        font_manager: Font manager
-        font_name: Font name to use
-
-    Returns:
-        Tuple of (images, valid_chars, batch_time)
-    """
     # Get available characters for this font
-    available_chars = font_manager.get_available_chars_for_font(font_name, characters)
+    available_chars: List[str] = font_manager.get_available_chars_for_font(
+        font_name, characters
+    )
+
     if not available_chars:
         return None, None, None
 
     try:
         # Load style image
         if isinstance(style_image_path, str):
-            style_image = Image.open(style_image_path).convert("RGB")
+            style_image: Image.Image = Image.open(style_image_path).convert("RGB")
         else:
-            style_image = style_image_path.convert("RGB")
+            style_image: Image.Image = style_image_path.convert("RGB")
+        style_transform: transforms.Compose = get_style_transform(args.style_image_size)
 
-        style_transform = get_style_transform(args.style_image_size)
-        font = font_manager.get_font(font_name)
-        content_transform = get_content_transform(args.content_image_size)
+        font: Any = font_manager.get_font(font_name)
+        content_transform: transforms.Compose = get_content_transform(
+            args.content_image_size
+        )
 
         # Generate content images
-        content_images = []
-        for char in available_chars:
+        content_images: List[torch.Tensor] = []
+        content_images_pil: List[Image.Image] = []
+
+        for char in get_hf_bar(
+            available_chars,
+            desc=f"  📸 Preparing {font_name}",
+            colour="cyan",
+        ):
             try:
-                content_image = ttf2im(font=font, char=char)
+                content_image: Image.Image = ttf2im(font=font, char=char)
+                content_images_pil.append(content_image.copy())
                 content_images.append(content_transform(content_image))
             except Exception as e:
-                logger.warning(f"Error processing '{char}': {e}")
+                logging.info(f"    ✗ Error processing '{char}': {e}")
+                continue
 
         if not content_images:
             return None, None, None
 
-        # Prepare batches
-        content_batch = torch.stack(content_images)
-        style_batch = style_transform(style_image)[None, :].repeat(
+        # Stack into batch
+        content_batch: torch.Tensor = torch.stack(content_images)
+        style_batch: torch.Tensor = style_transform(style_image)[None, :].repeat(
             len(content_images), 1, 1, 1
         )
 
         with torch.inference_mode():
-            dtype = torch.float16 if args.fp16 else torch.float32
+            dtype: torch.dtype = torch.float16 if args.fp16 else torch.float32
             content_batch = content_batch.to(args.device, dtype=dtype)
             style_batch = style_batch.to(args.device, dtype=dtype)
 
-            start = time.perf_counter()
+            start: float = time.perf_counter()
 
             # Process in batches
-            all_images = []
-            for i in range(0, len(content_batch), args.batch_size):
-                batch_content = content_batch[i : i + args.batch_size]
-                batch_style = style_batch[i : i + args.batch_size]
+            all_images: List[Image.Image] = []
+            batch_size: int = args.batch_size
 
-                # FIX: Use getattr with defaults for optional attributes
-                images = pipe.generate(
+            num_batches = (len(content_batch) + batch_size - 1) // batch_size
+            batch_pbar = get_hf_bar(
+                range(0, len(content_batch), batch_size),
+                desc="    🚀 Batch Inference",
+                colour="#1055C9",
+            )
+            for batch_idx, i in enumerate(batch_pbar):
+                batch_content: torch.Tensor = content_batch[i : i + batch_size]
+                batch_style: torch.Tensor = style_batch[i : i + batch_size]
+
+                images: List[Image.Image] = pipe.generate(
                     content_images=batch_content,
                     style_images=batch_style,
                     batch_size=len(batch_content),
-                    order=getattr(args, 'order', 2),
+                    order=args.order,
                     num_inference_step=args.num_inference_steps,
-                    content_encoder_downsample_size=getattr(
-                        args, 'content_encoder_downsample_size', 3
-                    ),
-                    t_start=getattr(args, 't_start', 1.0),
-                    t_end=getattr(args, 't_end', 1e-3),
+                    content_encoder_downsample_size=args.content_encoder_downsample_size,
+                    t_start=args.t_start,
+                    t_end=args.t_end,
                     dm_size=args.content_image_size,
-                    algorithm_type=getattr(args, 'algorithm_type', 'dpmsolver++'),
-                    skip_type=getattr(args, 'skip_type', 'time_uniform'),
-                    method=getattr(args, 'method', 'multistep'),
-                    correcting_x0_fn=getattr(args, 'correcting_x0_fn', None),
+                    algorithm_type=args.algorithm_type,
+                    skip_type=args.skip_type,
+                    method=args.method,
+                    correcting_x0_fn=args.correcting_x0_fn,
                 )
-                all_images.extend(images)
 
-            end = time.perf_counter()
-            total_time = end - start
+                all_images.extend(images)
+                batch_pbar.update(1)
+
+            end: float = time.perf_counter()
+            total_time: float = end - start
 
             return all_images, available_chars, total_time
 
     except Exception as e:
-        logger.error(f"Batch sampling failed: {e}")
+        logging.info(f"    ✗ Error in batch sampling: {e}")
         import traceback
+
         traceback.print_exc()
         return None, None, None
 
@@ -852,7 +862,7 @@ def batch_generate_images(
                     continue
 
                 # Generate batch
-                images, valid_chars, batch_time = sampling_batch(
+                images, valid_chars, batch_time = sampling_batch_optimized(
                     args,
                     pipe,
                     chars_to_generate,
