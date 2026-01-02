@@ -1,186 +1,207 @@
 """
-Generate results.json and results_checkpoint.json from existing dataset structure
+Generate results_checkpoint.json from existing ContentImage and TargetImage folders
+✅ Rescans directories and recalculates all paths and hashes
+✅ Handles new simplified filename format: {char}.png and {style}+{char}.png
 """
 
 import json
 import os
 from pathlib import Path
-from typing import Dict, List, Any, Tuple
-import re
+from typing import Dict, List, Any, Set
+import hashlib
+from filename_utils import (
+    get_content_filename,
+    get_target_filename,
+    parse_content_filename,
+    parse_target_filename,
+    compute_file_hash
+)
 
 
-def parse_filename(filename: str) -> Tuple[int, str]:
+def generate_checkpoint_from_disk(data_root: str) -> Dict[str, Any]:
     """
-    Parse style and character index from filename
-    Format: styleX+charY.png -> (Y, 'styleX')
-    """
-    match = re.match(r"style(\d+)\+char(\d+)\.png", filename)
-    if match:
-        style_idx = int(match.group(1))
-        char_idx = int(match.group(2))
-        return char_idx, f"style{style_idx}"
-    return None, None
-
-
-def generate_metadata_from_directory(
-    data_root: str, output_dir: str = None
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """
-    Generate complete metadata from directory structure
-
+    Generate complete checkpoint from disk structure
+    
     Args:
-        data_root: Path to train_original directory
-        output_dir: Output directory (defaults to data_root)
-
+        data_root: Path to directory containing ContentImage/ and TargetImage/
+    
     Returns:
-        Tuple of (results_data, checkpoint_data)
+        Dictionary with checkpoint data
     """
-
-    if output_dir is None:
-        output_dir = data_root
-
+    
     data_root = Path(data_root)
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    print(f"📂 Reading from: {data_root}")
-
-    # Initialize metadata
-    generations: List[Dict[str, Any]] = []
-    char_index_map: Dict[str, int] = {}
-    style_index_map: Dict[str, int] = {}
-    characters_set = set()
-    styles_set = set()
-    fonts_set = set()
-
-    next_char_idx = 0
-
-    # Get all fonts (directories in data_root)
     content_dir = data_root / "ContentImage"
-    target_dir = data_root / "TargetImage"
-
-    if not content_dir.exists() or not target_dir.exists():
-        print(f"❌ Missing required directories:")
-        print(f"   {content_dir} exists: {content_dir.exists()}")
-        print(f"   {target_dir} exists: {target_dir.exists()}")
-        return {}, {}
-
-    # Parse content images to build char mapping
-    print(f"\n📝 Parsing content images...")
-    content_files = list(content_dir.glob("char*.png"))
+    target_base_dir = data_root / "TargetImage"
+    
+    print(f"📂 Scanning directory: {data_root}")
+    print(f"   Content images: {content_dir}")
+    print(f"   Target images: {target_base_dir}")
+    
+    # Validate directories exist
+    if not content_dir.exists():
+        raise FileNotFoundError(f"❌ ContentImage directory not found: {content_dir}")
+    if not target_base_dir.exists():
+        raise FileNotFoundError(f"❌ TargetImage directory not found: {target_base_dir}")
+    
+    # Collections
+    generations: List[Dict[str, Any]] = []
+    characters_set: Set[str] = set()
+    styles_set: Set[str] = set()
+    fonts_set: List[str] = ["NomNaTong-Regular"]
+    
+    # Track which content/target pairs exist
+    content_chars: Dict[str, str] = {}  # char -> filepath
+    valid_pairs: Set[tuple] = set()  # (char, style) pairs
+    
+    # ========== PHASE 1: Scan ContentImage directory ==========
+    print(f"\n📝 Phase 1: Scanning ContentImage/...")
+    content_files = list(content_dir.glob("*.png"))
     print(f"   Found {len(content_files)} content images")
-
+    
     for content_file in sorted(content_files):
-        # Extract char index from filename (charX.png)
-        match = re.match(r"char(\d+)\.png", content_file.name)
-        if match:
-            char_idx = int(match.group(1))
-            # Use the actual character or generate placeholder
-            char = f"char{char_idx}"
-            char_index_map[char] = char_idx
+        char = parse_content_filename(content_file.name)
+        
+        if char:
+            content_chars[char] = str(content_file.relative_to(data_root))
             characters_set.add(char)
-
-    print(f"   Mapped {len(char_index_map)} characters")
-
-    # Parse target images to build complete generation records
-    print(f"\n🎨 Parsing target images...")
-    target_subdirs = [d for d in target_dir.iterdir() if d.is_dir()]
-    print(f"   Found {len(target_subdirs)} style directories")
-
-    for style_dir in sorted(target_subdirs):
-        style_name = style_dir.name  # e.g., "style0"
-
-        # Extract style index
-        match = re.match(r"style(\d+)", style_name)
-        if match:
-            style_idx = int(match.group(1))
-            style_index_map[style_name] = style_idx
-            styles_set.add(style_name)
-
-            # Get all target images for this style
-            target_files = list(style_dir.glob("*.png"))
-            print(f"   {style_name}: {len(target_files)} images")
-
-            for target_file in sorted(target_files):
-                char_idx, parsed_style = parse_filename(target_file.name)
-
-                if char_idx is not None:
-                    char = f"char{char_idx}"
-
-                    generation = {
-                        "character": char,
-                        "char_index": char_idx,
-                        "style": style_name,
-                        "style_index": style_idx,
-                        "font": "NomNaTongLight2",  # Update this based on your font
-                        "output_path": str(target_file.relative_to(data_root)),
-                        "content_image_path": f"ContentImage/char{char_idx}.png",
-                        "target_image_path": f"TargetImage/{style_name}/{style_name}+char{char_idx}.png",
-                    }
-                    generations.append(generation)
-
-    print(f"\n✅ Generated {len(generations)} generation records")
-
-    # Build final metadata
-    results_metadata = {
+            print(f"   ✓ {content_file.name} -> char: {repr(char)}")
+        else:
+            print(f"   ✗ Could not parse: {content_file.name}")
+    
+    # ========== PHASE 2: Scan TargetImage directory ==========
+    print(f"\n🎨 Phase 2: Scanning TargetImage/...")
+    target_style_dirs = [d for d in target_base_dir.iterdir() if d.is_dir()]
+    print(f"   Found {len(target_style_dirs)} style directories")
+    
+    for style_dir in sorted(target_style_dirs):
+        style_name = style_dir.name
+        styles_set.add(style_name)
+        
+        target_files = list(style_dir.glob("*.png"))
+        print(f"\n   {style_name}: {len(target_files)} images")
+        
+        for target_file in sorted(target_files):
+            char, parsed_style = parse_target_filename(target_file.name)
+            
+            if char is None:
+                print(f"      ✗ Could not parse: {target_file.name}")
+                continue
+            
+            # Verify style matches directory
+            if parsed_style != style_name:
+                print(f"      ⚠️  Style mismatch in {target_file.name}: expected {style_name}, got {parsed_style}")
+                continue
+            
+            # Check if content image exists for this character
+            if char not in content_chars:
+                print(f"      ⚠️  No content image for char {repr(char)} (target: {target_file.name})")
+                continue
+            
+            valid_pairs.add((char, style_name))
+            print(f"      ✓ {target_file.name} -> char: {repr(char)}, style: {style_name}")
+    
+    # ========== PHASE 3: Build generation records ==========
+    print(f"\n⚙️  Phase 3: Building generation records...")
+    print(f"   Valid char-style pairs: {len(valid_pairs)}")
+    
+    for char, style in sorted(valid_pairs):
+        content_path = content_dir / get_content_filename(char)
+        target_path = target_base_dir / style / get_target_filename(char, style)
+        
+        # Compute hashes
+        print(f"\n   Processing: char={repr(char)}, style={style}, font={fonts_set[0]}")
+        content_hash = compute_file_hash(char, "", fonts_set[0])
+        target_hash = compute_file_hash(char, style, fonts_set[0])
+        print(f"      content_hash: {content_hash}")
+        print(f"      target_hash: {target_hash}")
+        
+        generation = {
+            "character": char,
+            "style": style,
+            "font": "NomNaTong-Regular",
+            "content_image_path": f"ContentImage/{get_content_filename(char)}",
+            "target_image_path": f"TargetImage/{style}/{get_target_filename(char, style)}",
+            "content_hash": content_hash,
+            "target_hash": target_hash,
+        }
+        generations.append(generation)
+    
+    # ========== PHASE 4: Build final checkpoint ==========
+    print(f"\n📊 Phase 4: Building checkpoint...")
+    
+    checkpoint = {
         "generations": generations,
-        "metrics": {"lpips": [], "ssim": [], "inference_times": []},
         "characters": sorted(list(characters_set)),
         "styles": sorted(list(styles_set)),
-        "fonts": ["NomNaTongLight2"],
+        "fonts": sorted(list(fonts_set)),
         "total_chars": len(characters_set),
         "total_styles": len(styles_set),
     }
+    
+    print(f"\n✅ Checkpoint Summary:")
+    print(f"   Total generations: {len(generations)}")
+    print(f"   Total unique characters: {checkpoint['total_chars']}")
+    print(f"   Total unique styles: {checkpoint['total_styles']}")
+    print(f"   Fonts: {checkpoint['fonts']}")
+    
+    return checkpoint
 
-    # Checkpoint is identical to results
-    checkpoint_metadata = results_metadata.copy()
 
-    return results_metadata, checkpoint_metadata
+def save_checkpoint(checkpoint: Dict[str, Any], output_path: str) -> None:
+    """Save checkpoint to JSON file"""
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(checkpoint, f, indent=2, ensure_ascii=False)
+    
+    print(f"\n💾 Saved checkpoint to: {output_path}")
 
 
-def save_metadata_files(
-    results_data: Dict[str, Any], checkpoint_data: Dict[str, Any], output_dir: str
-) -> None:
-    """Save metadata files"""
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Save results.json
-    results_path = output_dir / "results.json"
-    with open(results_path, "w", encoding="utf-8") as f:
-        json.dump(results_data, f, indent=2, ensure_ascii=False)
-    print(f"\n✅ Saved: {results_path}")
-    print(f"   Generations: {len(results_data.get('generations', []))}")
-
-    # Save results_checkpoint.json
-    checkpoint_path = output_dir / "results_checkpoint.json"
-    with open(checkpoint_path, "w", encoding="utf-8") as f:
-        json.dump(checkpoint_data, f, indent=2, ensure_ascii=False)
-    print(f"✅ Saved: {checkpoint_path}")
-    print(f"   Generations: {len(checkpoint_data.get('generations', []))}")
+def main():
+    """Main entry point"""
+    
+    print("=" * 70)
+    print("REGENERATING RESULTS_CHECKPOINT.JSON FROM DISK")
+    print("=" * 70)
+    
+    # Configure paths
+    data_root = "my_dataset/train_original"
+    checkpoint_output = "my_dataset/train_original/results_checkpoint.json"
+    
+    try:
+        # Generate checkpoint
+        checkpoint = generate_checkpoint_from_disk(data_root)
+        
+        # Save checkpoint
+        save_checkpoint(checkpoint, checkpoint_output)
+        
+        print("\n" + "=" * 70)
+        print("✅ SUCCESSFULLY GENERATED CHECKPOINT!")
+        print("=" * 70)
+        
+    except FileNotFoundError as e:
+        print(f"\n❌ Error: {e}")
+        print("\nMake sure your directory structure is:")
+        print("   data_root/")
+        print("   ├── ContentImage/")
+        print("   │   ├── {char1}.png")
+        print("   │   ├── {char2}.png")
+        print("   │   └── ...")
+        print("   └── TargetImage/")
+        print("       ├── {style1}/")
+        print("       │   ├── {style1}+{char1}.png")
+        print("       │   ├── {style1}+{char2}.png")
+        print("       │   └── ...")
+        print("       ├── {style2}/")
+        print("       │   └── ...")
+        print("       └── ...")
+    
+    except Exception as e:
+        print(f"\n❌ Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 if __name__ == "__main__":
-    # Configure paths
-    data_root = "my_dataset/train_original"
-
-    print("=" * 60)
-    print("GENERATING METADATA FROM DATASET")
-    print("=" * 60)
-
-    # Generate metadata
-    results_data, checkpoint_data = generate_metadata_from_directory(data_root)
-
-    # Save files
-    if results_data:
-        save_metadata_files(results_data, checkpoint_data, data_root)
-
-        print("\n" + "=" * 60)
-        print("✓ COMPLETE!")
-        print("=" * 60)
-        print(f"\nMetadata Summary:")
-        print(f"  Total characters: {results_data.get('total_chars', 0)}")
-        print(f"  Total styles: {results_data.get('total_styles', 0)}")
-        print(f"  Total generations: {len(results_data.get('generations', []))}")
-    else:
-        print("\n❌ Failed to generate metadata")
+    main()

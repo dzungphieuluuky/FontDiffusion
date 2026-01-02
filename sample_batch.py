@@ -956,13 +956,13 @@ def batch_generate_images(
 
                     # ✅ Generate filename (character inclusion determined by filesystem safety, not printability)
                     target_filename = get_target_filename(
-                        char, style_name, primary_font
+                        char, style_name
                     )
 
                     # ✅ Validate filename format
                     import re
-
-                    expected_pattern = r"U\+[0-9A-F]{4,5}.*_[0-9a-f]{8}\.png"
+                    # Valdate target filename format: {style}+{char}.png
+                    expected_pattern = r".+\+.\.png"
                     if not re.match(expected_pattern, target_filename):
                         raise ValueError(
                             f"Invalid filename format: {target_filename}\n"

@@ -142,6 +142,20 @@ def rename_content_images(path: str):
             os.rename(old_path, new_path)
             print(f"Renamed: {old_path} -> {new_path}")
 
+def update_paths(input_file, output_file=None):
+    with open(input_file, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    items = data.get("generations", [])
+    
+    for item in items:
+        char, style = item['character'], item['style']
+        item['content_image_path'] = f"ContentImage/{char}.png"
+        item['target_image_path'] = f"TargetImage/{style}/{style}+{char}.png"
+    
+    with open(output_file or input_file, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
 def flatten_folder(root_dir):
     """
     Moves all files from subdirectories of root_dir into root_dir.
@@ -284,6 +298,13 @@ if __name__ == "__main__":
         type=str,
         help="Path to directory to rename content images from '1+char.png' to 'char.png'",
     )
+
+    parser.add_argument(
+        "--update_paths",
+        type=str,
+        nargs=2,
+        help="Path to JSON file to update content and target image paths",
+    )
     args = parser.parse_args()
 
     if args.flatten_dir:
@@ -301,6 +322,10 @@ if __name__ == "__main__":
 
     if args.rename_content_images_dir:
         rename_content_images(args.rename_content_images_dir)
+
+    if args.update_paths:
+        update_paths(args.update_paths[0], args.update_paths[1])
+        print(f"✓ Updated paths in JSON file: {args.update_paths}")
 
     else:
         print("No arguments provided. Use --help for usage information.")
