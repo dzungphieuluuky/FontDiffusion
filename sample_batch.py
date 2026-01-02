@@ -1574,12 +1574,12 @@ def main() -> None:
             logging.info("🔧 Compiling model components with torch.compile...")
             try:
                 if hasattr(pipe.model, "unet"):
-                    pipe.model.unet = torch.compile(pipe.model.unet)
+                    pipe.model.config.unet = torch.compile(pipe.model.config.unet)
                 if hasattr(pipe.model, "style_encoder"):
-                    pipe.model.style_encoder = torch.compile(pipe.model.style_encoder)
+                    pipe.model.config.style_encoder = torch.compile(pipe.model.config.style_encoder)
                 if hasattr(pipe.model, "content_encoder"):
-                    pipe.model.content_encoder = torch.compile(
-                        pipe.model.content_encoder
+                    pipe.model.config.content_encoder = torch.compile(
+                        pipe.model.config.content_encoder
                     )
                 logging.info("✓ Compilation complete.")
             except Exception as e:
