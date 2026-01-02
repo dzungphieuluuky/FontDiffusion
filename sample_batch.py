@@ -497,7 +497,7 @@ def parse_args() -> Namespace:
     parser.add_argument(
         "--use_wandb",
         action="store_true",
-        default=False,
+        default=True,
         help="Log results to Weights & Biases",
     )
     parser.add_argument(

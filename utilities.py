@@ -96,6 +96,50 @@ TQDM_FILE_IO = {
     "unit_divisor": 1024,  # Binary divisor for file sizes
 }
 
+def load_model_checkpoint(checkpoint_path: str):
+    if not os.path.exists(checkpoint_path):
+        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+    if checkpoint_path.endswith(".safetensors"):
+        from safetensors.torch import load_file as safe_load
+        state_dict = safe_load(checkpoint_path, device="cpu")
+    else:
+        state_dict = torch.load(checkpoint_path, map_location="cpu")
+    return state_dict
+
+
+def save_model_checkpoint(model_state_dict, checkpoint_path: str):
+    os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
+    if checkpoint_path.endswith(".safetensors"):
+        from safetensors.torch import save_file as safe_save
+        safe_save(model_state_dict, checkpoint_path)
+    else:
+        torch.save(model_state_dict, checkpoint_path)
+
+
+def find_checkpoint(checkpoint_dir: str, checkpoint_name: str) -> str:
+    """
+    Find checkpoint file, preferring .safetensors over .pth
+    Args:
+        checkpoint_dir: Directory containing checkpoint
+        checkpoint_name: Checkpoint name without extension (e.g., "unet")
+    Returns:
+        Full path to checkpoint file
+    Raises:
+        FileNotFoundError: If neither format exists
+    """
+    safetensors_path = os.path.join(checkpoint_dir, f"{checkpoint_name}.safetensors")
+    pth_path = os.path.join(checkpoint_dir, f"{checkpoint_name}.pth")
+    
+    if os.path.exists(safetensors_path):
+        return safetensors_path
+    elif os.path.exists(pth_path):
+        return pth_path
+    else:
+        raise FileNotFoundError(
+            f"Checkpoint not found for '{checkpoint_name}' in {checkpoint_dir}\n"
+            f"  Expected: {safetensors_path} or {pth_path}"
+        )
+    
 def rename_images(json_file):
     # Load the JSON data
     with open(json_file, "r", encoding="utf-8") as f:

@@ -2,12 +2,12 @@ import os
 import math
 import time
 import logging
-from huggingface_hub.utils import tqdm
 from pathlib import Path
 
 import torch
 import torch.nn.functional as F
 from torchvision import transforms
+from huggingface_hub.utils import tqdm
 
 from accelerate import Accelerator
 from accelerate.logging import get_logger
@@ -33,6 +33,11 @@ from utils import (
     normalize_mean_std,
 )
 
+from utilities import (
+    save_model_checkpoint,
+    load_model_checkpoint,
+    find_checkpoint,
+)
 
 logger = get_logger(__name__)
 
@@ -49,50 +54,6 @@ def get_args():
     args.content_image_size = (content_image_size, content_image_size)
 
     return args
-
-def load_model_checkpoint(checkpoint_path: str):
-    if not os.path.exists(checkpoint_path):
-        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
-    if checkpoint_path.endswith(".safetensors"):
-        from safetensors.torch import load_file as safe_load
-        state_dict = safe_load(checkpoint_path, device="cpu")
-    else:
-        state_dict = torch.load(checkpoint_path, map_location="cpu")
-    return state_dict
-
-
-def save_model_checkpoint(model_state_dict, checkpoint_path: str):
-    os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
-    if checkpoint_path.endswith(".safetensors"):
-        from safetensors.torch import save_file as safe_save
-        safe_save(model_state_dict, checkpoint_path)
-    else:
-        torch.save(model_state_dict, checkpoint_path)
-
-
-def find_checkpoint(checkpoint_dir: str, checkpoint_name: str) -> str:
-    """
-    Find checkpoint file, preferring .safetensors over .pth
-    Args:
-        checkpoint_dir: Directory containing checkpoint
-        checkpoint_name: Checkpoint name without extension (e.g., "unet")
-    Returns:
-        Full path to checkpoint file
-    Raises:
-        FileNotFoundError: If neither format exists
-    """
-    safetensors_path = os.path.join(checkpoint_dir, f"{checkpoint_name}.safetensors")
-    pth_path = os.path.join(checkpoint_dir, f"{checkpoint_name}.pth")
-    
-    if os.path.exists(safetensors_path):
-        return safetensors_path
-    elif os.path.exists(pth_path):
-        return pth_path
-    else:
-        raise FileNotFoundError(
-            f"Checkpoint not found for '{checkpoint_name}' in {checkpoint_dir}\n"
-            f"  Expected: {safetensors_path} or {pth_path}"
-        )
 
 def main():
     args = get_args()
