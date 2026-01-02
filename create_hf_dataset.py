@@ -17,7 +17,7 @@ from PIL import Image as PILImage
 import pyarrow.parquet as pq
 from huggingface_hub.utils import tqdm
 
-from utilities import get_tqdm_config
+from utilities import get_hf_bar
 from filename_utils import get_content_filename, get_target_filename, compute_file_hash
 
 # ============================================================================
@@ -98,13 +98,11 @@ class FontDiffusionDatasetBuilder:
         print(f"\n🖼️  Loading {len(generations)} image pairs...")
 
         # ✅ Use standardized tqdm config with total from loop
-        for gen in tqdm(
+        for gen in get_hf_bar(
             generations,
-            **get_tqdm_config(
-                total=len(generations),
-                desc="Loading image pairs",
-                unit="pair",
-            ),
+            total=len(generations),
+            desc="Loading image pairs",
+            unit="pair",
         ):
             char = gen.get("character")
             style = gen.get("style")

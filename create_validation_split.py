@@ -25,7 +25,7 @@ from filename_utils import (
     get_content_filename,
     get_target_filename,
 )
-
+from utilities import get_hf_bar
 
 # Setup logging with tqdm compatibility
 class TqdmLoggingHandler(logging.Handler):
@@ -138,7 +138,7 @@ class ValidationSplitCreator:
         # Scan content images
         logging.info("\n🔍 Scanning content images...")
         if content_dir.exists():
-            for img_file in tqdm(
+            for img_file in get_hf_bar(
                 list(content_dir.glob("*.png")),
                 desc="Content images",
                 unit="img",
@@ -158,7 +158,7 @@ class ValidationSplitCreator:
         style_mismatch_details = defaultdict(list)
         unparseable_files = []  # ✅ Collect unparseable files for later diagnosis
 
-        for style_folder in tqdm(
+        for style_folder in get_hf_bar(
             sorted(target_dir.iterdir()),
             desc="Styles",
             unit="style",
@@ -251,7 +251,7 @@ class ValidationSplitCreator:
         valid_pairs: Dict[Tuple[str, str], bool] = {}
         missing_content_count = 0
 
-        for char, style in tqdm(
+        for char, style in get_hf_bar(
             target_files.keys(),
             desc="Validating pairs",
             ncols=100,
@@ -407,7 +407,7 @@ class ValidationSplitCreator:
 
         # Copy content images
         logging.info(f"  📥 Copying content images for {split_name}...")
-        for char in tqdm(
+        for char in get_hf_bar(
             sorted(allowed_chars),
             desc="  Content",
             ncols=80,
@@ -439,7 +439,7 @@ class ValidationSplitCreator:
 
         # Copy target images
         logging.info(f"  📥 Copying target images for {split_name}...")
-        for (char, style), target_path_str in tqdm(
+        for (char, style), target_path_str in get_hf_bar(
             sorted(target_files.items()),
             desc="  Target",
             ncols=80,
@@ -506,7 +506,7 @@ class ValidationSplitCreator:
         original_generations = original_data.get("generations", [])
         filtered_generations = []
 
-        for gen in tqdm(
+        for gen in get_hf_bar(
             original_generations,
             desc="    Filtering",
             ncols=80,
