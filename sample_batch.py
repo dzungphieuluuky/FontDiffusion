@@ -1570,13 +1570,13 @@ def main() -> None:
 
             logging.info("🔧 Compiling model components with torch.compile...")
             try:
-                if hasattr(pipe.model, "unet"):
+                if hasattr(pipe.model.config, "unet"):
                     pipe.model.config.unet = torch.compile(pipe.model.config.unet)
-                if hasattr(pipe.model, "style_encoder"):
+                if hasattr(pipe.model.config, "style_encoder"):
                     pipe.model.config.style_encoder = torch.compile(
                         pipe.model.config.style_encoder
                     )
-                if hasattr(pipe.model, "content_encoder"):
+                if hasattr(pipe.model.config, "content_encoder"):
                     pipe.model.config.content_encoder = torch.compile(
                         pipe.model.config.content_encoder
                     )
