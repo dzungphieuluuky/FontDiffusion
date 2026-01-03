@@ -41,12 +41,13 @@ class HFTqdm(tqdm):
 
     def __init__(self, *args, **kwargs):
         # Set defaults to match the image
-        kwargs.setdefault("unit", "B")
+        kwargs.setdefault("unit", "iteration")
         kwargs.setdefault("unit_scale", True)
         kwargs.setdefault("unit_divisor", 1024)
         kwargs.setdefault("bar_format", HF_BAR_FORMAT)
         kwargs.setdefault("colour", HF_BLUE)  # Start as Blue
         kwargs.setdefault("ascii", False)
+        kwargs.setdefault("dynamic_ncols", False)
         kwargs.setdefault("ncols", 100)  # Fixed width
         super().__init__(*args, **kwargs)
 

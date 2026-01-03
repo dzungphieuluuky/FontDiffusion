@@ -86,6 +86,7 @@ except ImportError:
     WANDB_AVAILABLE = False
     logger.warning("wandb not available. Install with: pip install wandb")
 
+
 def generate_content_images_with_accelerator(
     characters: List[str],
     font_manager: FontManager,
@@ -163,6 +164,7 @@ def generate_content_images_with_accelerator(
         return merged_char_paths
     else:
         return {}
+
 
 def batch_generate_images_with_accelerator(
     pipe: FontDiffuserDPMPipeline,
@@ -448,6 +450,7 @@ def evaluate_results_with_accelerator(
 
     return results
 
+
 def main():
     """Main entry point."""
     args = parse_args()
@@ -552,7 +555,12 @@ def main():
         # Evaluate if requested
         if args.evaluate and args.ground_truth_dir and accelerator.is_main_process:
             results = evaluate_results_with_accelerator(
-                results, evaluator, args.output_dir, args.ground_truth_dir, args.compute_fid, accelerator
+                results,
+                evaluator,
+                args.output_dir,
+                args.ground_truth_dir,
+                args.compute_fid,
+                accelerator,
             )
 
         # Save final checkpoint
@@ -600,7 +608,7 @@ def main():
             if accelerator.is_main_process:
                 save_checkpoint(results, args.output_dir)
         sys.exit(1)
-    
+
     finally:
         # FIX: Properly cleanup multi-GPU resources
         try:
@@ -610,6 +618,7 @@ def main():
                 logger.info("Process group destroyed successfully")
         except Exception as e:
             logger.warning(f"Error during cleanup: {e}")
-    
+
+
 if __name__ == "__main__":
     main()
