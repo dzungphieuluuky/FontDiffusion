@@ -137,19 +137,32 @@ def generate_content_images_with_accelerator(
                 continue
 
             try:
-                # Generate content image
-                font = font_manager.get_font(found_font)
-                content_img = ttf2im(font=font, char=char)
+                # ✅ Generate expected filename
                 content_filename = get_content_filename(char)
-                char_path = os.path.join(content_dir, content_filename)
+                char_path: str = os.path.join(content_dir, content_filename)
 
-                # Skip if already exists
-                if not os.path.exists(char_path):
-                    content_img.save(char_path)
+                # ✅ Check if content image already exists
+                if os.path.exists(char_path):
+                    logging.info(
+                        f"  ✓ Content image already exists for '{char}' at {char_path}"
+                    )
+                    char_paths[char] = char_path
+                    chars_already_exist.append(char)
+                    continue
 
-                local_char_paths[char] = char_path
+                # Generate new content image only if it doesn't exist
+                font = font_manager.get_font(found_font)
+                content_img: Image.Image = ttf2im(font=font, char=char)
+
+                content_img.save(char_path)
+                logging.info(
+                    f"  ✓ Generated new content image for '{char}' at {char_path}."
+                )
+                char_paths[char] = char_path
+                generated_new += 1
+
             except Exception as e:
-                logger.warning(f"Error generating '{char}': {e}")
+                logging.info(f"  ✗ Error generating '{char}': {e}")
 
     # Gather results from all GPUs
     accelerator.wait_for_everyone()
