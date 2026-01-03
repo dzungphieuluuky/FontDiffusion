@@ -838,7 +838,7 @@ def batch_generate_images(
     # Distribute styles across GPUs
     with accelerator.split_between_processes(style_paths_with_names) as local_styles:
         for style_idx, (style_path, style_name) in enumerate(
-            tqdm(
+            get_hf_bar(
                 local_styles,
                 desc=f"GPU {accelerator.process_index}",
                 disable=not accelerator.is_local_main_process,
@@ -990,7 +990,7 @@ def evaluate_results(
 
     target_base_dir = os.path.join(output_dir, "TargetImage")
 
-    for gen in tqdm(
+    for gen in get_hf_bar(
         results["generations"],
         desc="Evaluating",
         disable=not accelerator.is_main_process,
@@ -1120,10 +1120,10 @@ def log_to_wandb(results: Dict[str, Any], args: argparse.Namespace) -> None:
 def main():
     """Main entry point."""
     args = parse_args()
-    args = create_args_namespace(args)
+    results: Dict[str, Any] = {}
 
     logger.info("=" * 60)
-    logger.info("FONTDIFFUSER MULTI-GPU SYNTHESIS")
+    logger.info("FONTDIFFUSER SYNTHESIS DATA GENERATION MAGIC")
     logger.info("=" * 60)
 
     # Initialize accelerator
@@ -1131,18 +1131,39 @@ def main():
         mixed_precision="fp16" if args.fp16 else "no",
     )
 
-    if accelerator.is_main_process:
-        logger.info(f"Using {accelerator.num_processes} GPUs")
-
     try:
-        # Load characters and styles
-        characters = load_characters(args.characters, args.start_line, args.end_line)
-        style_paths_with_names = load_style_images(args.style_images)
+        # Load characters
+        characters: List[str] = load_characters(
+            args.characters, args.start_line, args.end_line
+        )
 
-        # Initialize font manager
-        font_manager = FontManager(args.ttf_path)
+        # Load style images with names
+        style_paths_with_names: List[Tuple[str, str]] = load_style_images(
+            args.style_images
+        )
 
-        # Create output directory
+        if accelerator.is_main_process:
+            logger.info(f"Initializing font manager...")
+        font_manager: FontManager = FontManager(args.ttf_path)
+        if accelerator.is_main_process:
+            logger.info(f"✓ Loaded {len(font_manager.get_font_names())} fonts.")
+
+        if accelerator.is_main_process:
+            logger.info(f"📊 Configuration:")
+            logger.info(f"  Dataset split: {args.dataset_split}")
+            logger.info(
+                f"  Characters: {len(characters)} (lines {args.start_line}-{args.end_line or 'end'})"
+            )
+            logger.info(f"  Styles: {len(style_paths_with_names)}")
+            logger.info(f"  Output Directory: {args.output_dir}")
+            logger.info(f"  Checkpoint Directory: {args.ckpt_dir}")
+            logger.info(f"  Device: {args.device}")
+            logger.info(f"  Batch Size: {args.batch_size}")
+            logger.info(f"  Using {accelerator.num_processes} GPUs")
+            logger.info(
+                f"  Results checkpoint path: {os.path.join(args.output_dir, 'results_checkpoint.json')}"
+            )
+
         os.makedirs(args.output_dir, exist_ok=True)
 
         # Initialize generation tracker
@@ -1152,62 +1173,101 @@ def main():
         )
 
         # Create args namespace for pipeline
-        pipeline_args = create_args_namespace(args)
+        pipeline_args: Namespace = create_args_namespace(args)
 
-        # Load pipeline
         if accelerator.is_main_process:
-            logger.info("Loading FontDiffuser pipeline...")
-
-        pipe = load_fontdiffuser_pipeline(pipeline_args)
+            logger.info("\nLoading FontDiffuser pipeline...")
+        pipe: FontDiffuserDPMPipeline = load_fontdiffuser_pipeline(pipeline_args)
         pipe = accelerator.prepare(pipe)
 
-        # Initialize evaluator
-        evaluator = QualityEvaluator(device=args.device)
+        # Add this block to enable torch.compile if requested
+        if getattr(args, "compile", False):
+            import torch
+
+            if accelerator.is_main_process:
+                logger.info("🔧 Compiling model components with torch.compile...")
+            try:
+                if hasattr(pipe.model, "unet"):
+                    pipe.model.config.unet = torch.compile(pipe.model.config.unet)
+                if hasattr(pipe.model, "style_encoder"):
+                    pipe.model.config.style_encoder = torch.compile(
+                        pipe.model.config.style_encoder
+                    )
+                if hasattr(pipe.model, "content_encoder"):
+                    pipe.model.config.content_encoder = torch.compile(
+                        pipe.model.config.content_encoder
+                    )
+                if accelerator.is_main_process:
+                    logger.info("✓ Compilation complete.")
+            except Exception as e:
+                if accelerator.is_main_process:
+                    logger.info(f"⚠ Compilation failed: {e}")
+
+        evaluator: QualityEvaluator = QualityEvaluator(device=args.device)
 
         # Generate images
-        if accelerator.is_main_process:
-            logger.info(
-                f"Generating {len(characters)} × {len(style_paths_with_names)} images"
-            )
-
-        results = batch_generate_images(
+        results: Dict[str, Any] = batch_generate_images(
             pipe,
             characters,
             style_paths_with_names,
             args.output_dir,
-            args,
+            pipeline_args,
             evaluator,
             font_manager,
             generation_tracker,
             accelerator,
         )
 
-        # Evaluate on main process
-        if accelerator.is_main_process:
-            if args.evaluate and args.ground_truth_dir:
-                results = evaluate_results(
-                    results,
-                    evaluator,
-                    args.output_dir,
-                    args.ground_truth_dir,
-                    args.compute_fid,
-                    accelerator,
-                )
+        # Evaluate if requested
+        if args.evaluate and args.ground_truth_dir and accelerator.is_main_process:
+            results = evaluate_results(
+                results, evaluator, args.output_dir, args.ground_truth_dir, args.compute_fid, accelerator
+            )
 
-            # Log to wandb
+        # Save final checkpoint
+        accelerator.wait_for_everyone()
+        if accelerator.is_main_process:
+            logger.info("\n💾 Saving final checkpoint...")
+            save_checkpoint(results, args.output_dir)
+
             if args.use_wandb:
                 log_to_wandb(results, args)
 
             logger.info("=" * 60)
             logger.info("✅ GENERATION COMPLETE!")
             logger.info("=" * 60)
+            logger.info(f"Output structure:")
+            logger.info(f"  {args.output_dir}/")
+            logger.info(f"    ├── ContentImage/")
+            logger.info(f"    │   ├── U+XXXX_char_hash.png")
+            logger.info(f"    │   └── ...")
+            logger.info(f"    ├── TargetImage/")
+            logger.info(f"    │   ├── style0/")
+            logger.info(f"    │   │   ├── U+XXXX_char_style0_hash.png")
+            logger.info(f"    │   │   └── ...")
+            logger.info(f"    │   └── ...")
+            logger.info(f"    └── results_checkpoint.json ✅ (single source of truth)")
 
         accelerator.wait_for_everyone()
 
+    except KeyboardInterrupt:
+        logger.info("\n\n⚠ Generation interrupted by user!")
+        logger.info("💾 Saving emergency checkpoint...")
+        if "results" in locals() and results:
+            if accelerator.is_main_process:
+                save_checkpoint(results, args.output_dir)
+                logger.info("✓ Latest state saved to results_checkpoint.json")
+        sys.exit(1)
+
     except Exception as e:
-        logger.error(f"Fatal error: {e}")
+        logger.error(f"✗ Fatal error: {e}")
         import traceback
+
         traceback.print_exc()
+
+        if "results" in locals() and results:
+            if accelerator.is_main_process:
+                save_checkpoint(results, args.output_dir)
         sys.exit(1)
     
     finally:
@@ -1219,7 +1279,6 @@ def main():
                 logger.info("Process group destroyed successfully")
         except Exception as e:
             logger.warning(f"Error during cleanup: {e}")
-
-
+    
 if __name__ == "__main__":
     main()
