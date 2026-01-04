@@ -32,10 +32,10 @@ from sample_batch import (
     FontManager,
     QualityEvaluator,
     GenerationTracker,
+    parse_args,
     create_args_namespace,
     load_characters,
     load_style_images,
-    parse_args,
     save_checkpoint,
     log_to_wandb,
 )
@@ -328,7 +328,7 @@ def batch_generate_images_with_accelerator(
     # Distribute styles across GPUs
     with accelerator.split_between_processes(style_paths_with_names) as local_styles:
         for style_idx, (style_path, style_name) in enumerate(
-            tqdm(
+            get_hf_bar(
                 local_styles,
                 desc=f"GPU {accelerator.process_index}",
                 disable=not accelerator.is_local_main_process,
@@ -480,7 +480,7 @@ def evaluate_results(
 
     target_base_dir = os.path.join(output_dir, "TargetImage")
 
-    for gen in tqdm(
+    for gen in get_hf_bar(
         results["generations"],
         desc="Evaluating",
         disable=not accelerator.is_main_process,
@@ -545,7 +545,8 @@ def evaluate_results(
 def main():
     """Main entry point."""
     args = parse_args()
-
+    args = create_args_namespace(args)
+    
     logger.info("=" * 60)
     logger.info("FONTDIFFUSER MULTI-GPU SYNTHESIS")
     logger.info("=" * 60)
@@ -564,8 +565,23 @@ def main():
         style_paths_with_names = load_style_images(args.style_images)
 
         # Initialize font manager
-        font_manager = FontManager(args.ttf_path)
+        logging.info(f"Initializing font manager...")
+        font_manager: FontManager = FontManager(args.ttf_path)
+        logging.info(f"✓ Loaded {len(font_manager.get_font_names())} fonts.")
 
+        logging.info(f"📊 Configuration:")
+        logging.info(f"  Dataset split: {args.dataset_split}")
+        logging.info(
+            f"  Characters: {len(characters)} (lines {args.start_line}-{args.end_line or 'end'})"
+        )
+        logging.info(f"  Styles: {len(style_paths_with_names)}")
+        logging.info(f"  Output Directory: {args.output_dir}")
+        logging.info(f"  Checkpoint Directory: {args.ckpt_dir}")
+        logging.info(f"  Device: {args.device}")
+        logging.info(f"  Batch Size: {args.batch_size}")
+        logging.info(
+            f"  Results checkpoint path: {os.path.join(args.output_dir, 'results_checkpoint.json')}"
+        )
         # Create output directory
         os.makedirs(args.output_dir, exist_ok=True)
 
@@ -580,7 +596,9 @@ def main():
 
         # Load pipeline
         if accelerator.is_main_process:
+            logger.info("=" * 60)
             logger.info("Loading FontDiffuser pipeline...")
+            logger.info("=" * 60)
 
         pipe = load_fontdiffuser_pipeline(pipeline_args)
         pipe = accelerator.prepare(pipe)
