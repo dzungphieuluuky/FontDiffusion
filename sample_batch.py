@@ -1400,7 +1400,6 @@ def log_to_wandb(results: Dict[str, Any], args: Namespace) -> None:
         # Initialize wandb
         run_name = (
             args.wandb_run_name
-            or f"{args.dataset_split}_{time.strftime('%Y%m%d_%H%M%S')}"
         )
 
         wandb.init(
