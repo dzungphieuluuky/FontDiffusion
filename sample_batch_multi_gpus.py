@@ -60,7 +60,7 @@ try:
     LPIPS_AVAILABLE = True
 except ImportError:
     LPIPS_AVAILABLE = False
-    logger.warning("lpips not available. Install with: pip install lpips")
+    logging.warning("lpips not available. Install with: pip install lpips")
 
 try:
     from pytorch_fid import fid_score
@@ -68,7 +68,7 @@ try:
     FID_AVAILABLE = True
 except ImportError:
     FID_AVAILABLE = False
-    logger.warning("pytorch-fid not available. Install with: pip install pytorch-fid")
+    logging.warning("pytorch-fid not available. Install with: pip install pytorch-fid")
 
 try:
     from skimage.metrics import structural_similarity as ssim
@@ -145,7 +145,7 @@ def generate_content_images_with_accelerator(
 
                 # ✅ Skip if already exists (check before generation)
                 if char_path.exists():
-                    logger.info(
+                    logging.info(
                         f"  ✓ Content image already exists for '{char}' at {char_path}"
                     )
                     local_char_paths[char] = char_path
@@ -154,13 +154,13 @@ def generate_content_images_with_accelerator(
                 # Generate new content image only if it doesn't exist
                 content_img = ttf2im(font=font, char=char)
                 content_img.save(str(char_path))
-                logger.info(
+                logging.info(
                     f"  ✓ Generated new content image for '{char}' at {char_path}"
                 )
                 local_char_paths[char] = str(char_path)
 
             except Exception as e:
-                logger.warning(f"Error generating '{char}': {e}")
+                logging.warning(f"Error generating '{char}': {e}")
 
     # Gather results from all GPUs
     accelerator.wait_for_everyone()
@@ -171,7 +171,7 @@ def generate_content_images_with_accelerator(
         merged_char_paths = {}
         for paths in all_char_paths_list:
             merged_char_paths.update(paths)
-        logger.info(f"Generated {len(merged_char_paths)} content images")
+        logging.info(f"Generated {len(merged_char_paths)} content images")
         return merged_char_paths
     else:
         return {}
@@ -220,7 +220,7 @@ def sampling_batch_with_accelerator(
                 content_image = ttf2im(font=font, char=char)
                 content_images.append(content_transform(content_image))
             except Exception as e:
-                logger.warning(f"Error processing '{char}': {e}")
+                logging.warning(f"Error processing '{char}': {e}")
 
         if not content_images:
             return None, None, None
@@ -267,7 +267,7 @@ def sampling_batch_with_accelerator(
             return all_images, available_chars, total_time
 
     except Exception as e:
-        logger.error(f"Batch sampling failed: {e}")
+        logging.error(f"Batch sampling failed: {e}")
         return None, None, None
 
 
@@ -327,11 +327,11 @@ def batch_generate_images_with_accelerator(
     primary_font = font_names[0]
 
     if accelerator.is_main_process:
-        logger.info(
+        logging.info(
             f"Generating images: {len(characters)} chars × {len(style_paths_with_names)} styles"
         )
-        logger.info(f"Using {accelerator.num_processes} GPUs")
-        logger.info(f"Primary font: {primary_font}")
+        logging.info(f"Using {accelerator.num_processes} GPUs")
+        logging.info(f"Primary font: {primary_font}")
 
     # Counters
     generated_count = 0
@@ -411,7 +411,7 @@ def batch_generate_images_with_accelerator(
                         generated_count += 1
 
                     except Exception as e:
-                        logger.warning(f"Error saving '{char}': {e}")
+                        logging.warning(f"Error saving '{char}': {e}")
                         failed_count += 1
 
                 # Record inference time
@@ -431,12 +431,12 @@ def batch_generate_images_with_accelerator(
                     accelerator.wait_for_everyone()
                     if accelerator.is_main_process:
                         save_checkpoint(results, args.output_dir)
-                        logger.info(
+                        logging.info(
                             f"Checkpoint saved at {style_idx + 1}/{len(local_styles)} styles"
                         )
 
             except Exception as e:
-                logger.error(f"Error processing {style_name}: {e}")
+                logging.error(f"Error processing {style_name}: {e}")
                 failed_count += (
                     len(chars_to_generate)
                     if "chars_to_generate" in locals()
@@ -446,15 +446,15 @@ def batch_generate_images_with_accelerator(
     # Final summary on main process
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
-        logger.info("=" * 60)
-        logger.info("GENERATION COMPLETE")
-        logger.info("=" * 60)
-        logger.info(f"Generated: {generated_count} images")
-        logger.info(f"Skipped: {skipped_count} images")
-        logger.info(f"Failed: {failed_count} images")
-        logger.info(f"Total characters: {len(all_chars_in_checkpoint)}")
-        logger.info(f"Total styles: {len(all_styles_in_checkpoint)}")
-        logger.info("=" * 60)
+        logging.info("=" * 60)
+        logging.info("GENERATION COMPLETE")
+        logging.info("=" * 60)
+        logging.info(f"Generated: {generated_count} images")
+        logging.info(f"Skipped: {skipped_count} images")
+        logging.info(f"Failed: {failed_count} images")
+        logging.info(f"Total characters: {len(all_chars_in_checkpoint)}")
+        logging.info(f"Total styles: {len(all_styles_in_checkpoint)}")
+        logging.info("=" * 60)
 
         # Update results metadata
         results["characters"] = sorted(list(all_chars_in_checkpoint))
@@ -481,12 +481,12 @@ def evaluate_results_with_accelerator(
         return results
 
     if not ground_truth_dir or not os.path.exists(ground_truth_dir):
-        logger.info("No ground truth directory provided, skipping evaluation")
+        logging.info("No ground truth directory provided, skipping evaluation")
         return results
 
-    logger.info("=" * 60)
-    logger.info("EVALUATING GENERATED IMAGES")
-    logger.info("=" * 60)
+    logging.info("=" * 60)
+    logging.info("EVALUATING GENERATED IMAGES")
+    logging.info("=" * 60)
 
     lpips_scores = []
     ssim_scores = []
@@ -533,7 +533,7 @@ def evaluate_results_with_accelerator(
 
             evaluated += 1
         except Exception as e:
-            logger.warning(f"Error evaluating {char}/{style}: {e}")
+            logging.warning(f"Error evaluating {char}/{style}: {e}")
 
     # Log metrics
     if lpips_scores:
@@ -542,7 +542,7 @@ def evaluate_results_with_accelerator(
             "std": float(np.std(lpips_scores)),
             "median": float(np.median(lpips_scores)),
         }
-        logger.info(f"LPIPS: mean={results['metrics']['lpips']['mean']:.4f}")
+        logging.info(f"LPIPS: mean={results['metrics']['lpips']['mean']:.4f}")
 
     if ssim_scores:
         results["metrics"]["ssim"] = {
@@ -550,10 +550,10 @@ def evaluate_results_with_accelerator(
             "std": float(np.std(ssim_scores)),
             "median": float(np.median(ssim_scores)),
         }
-        logger.info(f"SSIM: mean={results['metrics']['ssim']['mean']:.4f}")
+        logging.info(f"SSIM: mean={results['metrics']['ssim']['mean']:.4f}")
 
-    logger.info(f"Evaluated {evaluated} image pairs")
-    logger.info("=" * 60)
+    logging.info(f"Evaluated {evaluated} image pairs")
+    logging.info("=" * 60)
 
     return results
 
@@ -562,9 +562,9 @@ def main():
     args = parse_args()
     args = create_args_namespace(args)
 
-    logger.info("=" * 60)
-    logger.info("FONTDIFFUSER MULTI-GPU SYNTHESIS")
-    logger.info("=" * 60)
+    logging.info("=" * 60)
+    logging.info("FONTDIFFUSER MULTI-GPU SYNTHESIS")
+    logging.info("=" * 60)
 
     # Initialize accelerator
     accelerator = Accelerator(
@@ -572,7 +572,7 @@ def main():
     )
 
     if accelerator.is_main_process:
-        logger.info(f"Using {accelerator.num_processes} GPUs")
+        logging.info(f"Using {accelerator.num_processes} GPUs")
 
     try:
         # Load characters and styles
@@ -611,9 +611,9 @@ def main():
 
         # Load pipeline
         if accelerator.is_main_process:
-            logger.info("=" * 60)
-            logger.info("Loading FontDiffuser pipeline...")
-            logger.info("=" * 60)
+            logging.info("=" * 60)
+            logging.info("Loading FontDiffuser pipeline...")
+            logging.info("=" * 60)
 
         pipe = load_fontdiffuser_pipeline(pipeline_args)
         pipe = accelerator.prepare(pipe)
@@ -623,7 +623,7 @@ def main():
 
         # Generate images
         if accelerator.is_main_process:
-            logger.info(
+            logging.info(
                 f"Generating {len(characters)} × {len(style_paths_with_names)} images"
             )
 
@@ -655,14 +655,14 @@ def main():
             if args.use_wandb:
                 log_to_wandb(results, args)
 
-            logger.info("=" * 60)
-            logger.info("✅ GENERATION COMPLETE!")
-            logger.info("=" * 60)
+            logging.info("=" * 60)
+            logging.info("✅ GENERATION COMPLETE!")
+            logging.info("=" * 60)
 
         accelerator.wait_for_everyone()
 
     except Exception as e:
-        logger.error(f"Fatal error: {e}")
+        logging.error(f"Fatal error: {e}")
         import traceback
 
         traceback.print_exc()
@@ -674,9 +674,9 @@ def main():
             accelerator.free_memory()
             if torch.distributed.is_available() and torch.distributed.is_initialized():
                 torch.distributed.destroy_process_group()
-                logger.info("Process group destroyed successfully")
+                logging.info("Process group destroyed successfully")
         except Exception as e:
-            logger.warning(f"Error during cleanup: {e}")
+            logging.warning(f"Error during cleanup: {e}")
 
 
 if __name__ == "__main__":
