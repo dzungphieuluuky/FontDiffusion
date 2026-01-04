@@ -139,15 +139,25 @@ def generate_content_images_with_accelerator(
             try:
                 # Generate content image
                 font = font_manager.get_font(found_font)
-                content_img = ttf2im(font=font, char=char)
                 content_filename = get_content_filename(char)
                 char_path = os.path.join(content_dir, content_filename)
 
-                # Skip if already exists
-                if not os.path.exists(char_path):
-                    content_img.save(char_path)
+                # ✅ Skip if already exists (check before generation)
+                if os.path.exists(char_path):
+                    logger.info(
+                        f"  ✓ Content image already exists for '{char}' at {char_path}"
+                    )
+                    local_char_paths[char] = char_path
+                    continue
 
+                # Generate new content image only if it doesn't exist
+                content_img = ttf2im(font=font, char=char)
+                content_img.save(char_path)
+                logger.info(
+                    f"  ✓ Generated new content image for '{char}' at {char_path}"
+                )
                 local_char_paths[char] = char_path
+
             except Exception as e:
                 logger.warning(f"Error generating '{char}': {e}")
 
@@ -164,7 +174,6 @@ def generate_content_images_with_accelerator(
         return merged_char_paths
     else:
         return {}
-
 
 def sampling_batch_with_accelerator(
     args: argparse.Namespace,
@@ -457,7 +466,7 @@ def batch_generate_images_with_accelerator(
     return results
 
 
-def evaluate_results(
+def evaluate_results_with_accelerator(
     results: Dict[str, Any],
     evaluator: QualityEvaluator,
     output_dir: str,
@@ -632,7 +641,7 @@ def main():
         # Evaluate on main process
         if accelerator.is_main_process:
             if args.evaluate and args.ground_truth_dir:
-                results = evaluate_results(
+                results = evaluate_results_with_accelerator(
                     results,
                     evaluator,
                     args.output_dir,
