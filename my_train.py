@@ -319,7 +319,9 @@ def save_checkpoint(
         )
 
     logger.info(f"Saved checkpoint at step {global_step} to {save_dir}")
-
+    # Log checkpoint save event
+    if hasattr(accelerator, 'log'):
+        accelerator.log({"checkpoint_saved": True, "checkpoint_step": global_step})
 
 def train_step(
     model: FontDiffuserModel,
@@ -410,6 +412,9 @@ def train_step(
         loss += args.sc_coefficient * sc_loss
         loss_dict["sc_loss"] = sc_loss.item()
 
+    grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+    loss_dict['grad_norm'] = grad_norm.item() if isinstance(grad_norm, torch.Tensor) else grad_norm
+
     return loss, loss_dict
 
 def train(
@@ -481,19 +486,31 @@ def train(
                 optimizer.zero_grad()
 
             # Update progress
-            if accelerator.sync_gradients:
-                progress_bar.update(1)
-                global_step += 1
+                if accelerator.sync_gradients:
+                    progress_bar.update(1)
+                    global_step += 1
 
-                # Log metrics
-                accelerator.log({"train_loss": train_loss}, step=global_step)
+                    # Prepare detailed metrics
+                    log_dict = {
+                        "train_loss": train_loss,
+                        "learning_rate": lr_scheduler.get_last_lr()[0],
+                        "epoch": epoch + step / len(train_dataloader),
+                        "global_step": global_step,
+                    }
+                    
+                    # Add loss components if available
+                    if loss_dict:
+                        for loss_name, loss_val in loss_dict.items():
+                            log_dict[f"loss/{loss_name}"] = loss_val
+                    
+                    # Log to wandb
+                    accelerator.log(log_dict, step=global_step)
 
-                if global_step % args.log_interval == 0:
-                    logger.info(
-                        f"Step {global_step}: loss={train_loss:.4f}, "
-                        f"lr={lr_scheduler.get_last_lr()[0]:.6f}"
-                    )
-
+                    if global_step % args.log_interval == 0:
+                        logger.info(
+                            f"Step {global_step}: loss={train_loss:.4f}, "
+                            f"lr={lr_scheduler.get_last_lr()[0]:.6f}"
+                        )
                 train_loss = 0.0
 
                 # Save checkpoint
@@ -655,7 +672,31 @@ def main():
             args=args,
             output_file=f"{args.output_dir}/{args.experience_name}_config.yaml",
         )
-
+        
+        # Log configuration to wandb
+        config_dict = {
+            "model": {
+                "unet": str(unet),
+                "style_encoder": str(style_encoder),
+                "content_encoder": str(content_encoder),
+            },
+            "training": {
+                "max_train_steps": args.max_train_steps,
+                "train_batch_size": args.train_batch_size,
+                "learning_rate": args.learning_rate,
+                "gradient_accumulation_steps": args.gradient_accumulation_steps,
+                "mixed_precision": args.mixed_precision,
+            },
+            "loss_weights": {
+                "perceptual_coefficient": args.perceptual_coefficient,
+                "offset_coefficient": args.offset_coefficient,
+                "sc_coefficient": args.sc_coefficient if args.phase_2 else 0,
+                "style_transform_coefficient": getattr(args, 'style_transform_coefficient', 0.1),
+            },
+            "phase_2_enabled": args.phase_2,
+            "style_transform_enabled": getattr(args, 'enable_style_transform', False),
+        }
+        accelerator.log(config_dict)
     # Train
     logger.info("Starting training...")
     logger.info(f"  Num examples: {len(train_dataset)}")
