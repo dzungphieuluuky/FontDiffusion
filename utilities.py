@@ -9,14 +9,15 @@ from typing import Any, Dict
 import logging
 import json
 import os
-from tqdm.rich import tqdm, trange
+from tqdm.rich import tqdm_rich as rich_tqdm
+from huggingface_hub.utils import tqdm as hf_tqdm
 
 
 class TqdmLoggingHandler(logging.Handler):
     def emit(self, record):
         try:
             msg = self.format(record)
-            tqdm.write(msg)
+            rich_tqdm.write(msg)
             self.flush()
         except Exception:
             self.handleError(record)
@@ -39,7 +40,7 @@ HF_BAR_FORMAT = (
     "{n_fmt}/{total_fmt} "
     "[{elapsed}<{remaining}, {rate_fmt}]"
 )
-class HFTqdm(tqdm):
+class HFTqdm(rich_tqdm):
     """
     Enhanced TQDM progress bar that replicates the Hugging Face download interface.
     Features smooth updates, dynamic colors, and polished formatting.
