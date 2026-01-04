@@ -29,8 +29,8 @@ logging.basicConfig(
 )
 
 # Hugging Face colors
-HF_BLUE = "#053A94"
-HF_GREEN = "#00FFBF"
+HF_BLUE = "#1055C9"
+HF_GREEN = "#41A67E"
 HF_ORANGE = "#FF8C00"
 HF_RED = "#E03E3E"
 # Enhanced bar format with smooth animation
