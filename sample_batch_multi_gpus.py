@@ -103,11 +103,12 @@ def generate_content_images_with_accelerator(
     Returns:
         Dictionary mapping character to image path
     """
-    content_dir = os.path.join(output_dir, "ContentImage")
+    output_dir = Path(output_dir)
+    content_dir = output_dir / "ContentImage"
 
     # Main process creates directory
     if accelerator.is_main_process:
-        os.makedirs(content_dir, exist_ok=True)
+        content_dir.mkdir(parents=True, exist_ok=True)
     accelerator.wait_for_everyone()
 
     font_names = font_manager.get_font_names()
@@ -140,10 +141,10 @@ def generate_content_images_with_accelerator(
                 # Generate content image
                 font = font_manager.get_font(found_font)
                 content_filename = get_content_filename(char)
-                char_path = os.path.join(content_dir, content_filename)
+                char_path = content_dir / content_filename
 
                 # ✅ Skip if already exists (check before generation)
-                if os.path.exists(char_path):
+                if char_path.exists():
                     logger.info(
                         f"  ✓ Content image already exists for '{char}' at {char_path}"
                     )
@@ -152,11 +153,11 @@ def generate_content_images_with_accelerator(
 
                 # Generate new content image only if it doesn't exist
                 content_img = ttf2im(font=font, char=char)
-                content_img.save(char_path)
+                content_img.save(str(char_path))
                 logger.info(
                     f"  ✓ Generated new content image for '{char}' at {char_path}"
                 )
-                local_char_paths[char] = char_path
+                local_char_paths[char] = str(char_path)
 
             except Exception as e:
                 logger.warning(f"Error generating '{char}': {e}")
