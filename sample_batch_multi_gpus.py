@@ -122,9 +122,9 @@ def generate_content_images_with_accelerator(
     # Split characters across GPUs
     local_char_paths = {}
     with accelerator.split_between_processes(characters) as local_chars:
-        for char in get_hf_bar_file(
+        for char in get_hf_bar(
             local_chars,
-            desc=f"GPU {accelerator.process_index}",
+            desc=f"GPU {accelerator.process_index} generating content images",
             disable=not accelerator.is_local_main_process,
         ):
             # Find font containing character
@@ -332,9 +332,9 @@ def batch_generate_images_with_accelerator(
     # Distribute styles across GPUs
     with accelerator.split_between_processes(style_paths_with_names) as local_styles:
         for style_idx, (style_path, style_name) in enumerate(
-            get_hf_bar_batch(
+            get_hf_bar(
                 local_styles,
-                desc=f"GPU {accelerator.process_index}",
+                desc=f"GPU {accelerator.process_index} generating styles",
                 disable=not accelerator.is_local_main_process,
             )
         ):
@@ -484,9 +484,9 @@ def evaluate_results(
 
     target_base_dir = os.path.join(output_dir, "TargetImage")
 
-    for gen in get_hf_bar_batch(
+    for gen in get_hf_bar(
         results["generations"],
-        desc="Evaluating",
+        desc=f"GPU {accelerator.process_index} evaluating generated images",
         disable=not accelerator.is_main_process,
     ):
         char = gen["character"]

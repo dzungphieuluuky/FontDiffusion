@@ -77,11 +77,7 @@ class HFTqdm(tqdm):
         # Dynamic color based on progress
         if self.total:
             progress = self.n / self.total
-            if progress < 0.3:
-                self.colour = HF_BLUE
-            elif progress < 0.7:
-                self.colour = HF_BLUE  # Keep blue during main work
-            elif progress < 1.0:
+            if progress < 1.0:
                 self.colour = HF_BLUE
             else:
                 self.colour = HF_GREEN  # Green on completion
@@ -180,7 +176,12 @@ def get_hf_bar(iterable=None, desc="Processing", total=None, unit="it", **kwargs
         ...         pbar.update(1)
     """
     kwargs["unit"] = unit
-    return HFTqdm(iterable=iterable, desc=desc, total=total, **kwargs)
+    if "file" in desc.lower():
+        return HFTqdmFile(iterable=iterable, desc=desc, total=total, **kwargs)
+    elif "batch" in desc.lower():
+        return HFTqdmBatch(iterable=iterable, desc=desc, total=total, **kwargs)
+    else:
+        return HFTqdm(iterable=iterable, desc=desc, total=total, **kwargs)
 
 
 def get_hf_bar_file(iterable=None, desc="File processing", total=None, **kwargs):
