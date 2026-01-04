@@ -48,7 +48,7 @@ class HFTqdm(tqdm):
     def __init__(self, *args, **kwargs):
         # Set defaults to match HuggingFace style
         kwargs.setdefault("unit", "it")
-        kwargs.setdefault("unit_scale", False)
+        kwargs.setdefault("unit_scale", True)
         kwargs.setdefault("bar_format", HF_BAR_FORMAT)
         kwargs.setdefault("colour", HF_BLUE)
         kwargs.setdefault("ascii", False)
