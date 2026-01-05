@@ -384,7 +384,6 @@ def train_step(
         loss += getattr(args, 'style_transform_coefficient', 0.1) * style_transform_loss
         loss_dict['style_transform_loss'] = style_transform_loss.item()
 
-    # ✅ FIX: Handle neg_images which may be a list of tensors
     if args.phase_2 and scr is not None:
         neg_images = samples["neg_images"]
         
@@ -556,7 +555,6 @@ def main():
     content_encoder = build_content_encoder(args=args)
     noise_scheduler = build_ddpm_scheduler(args)
 
-    # ✅ BUILD STYLE TRANSFORMATION MODULE
     style_transform_module = None
     if getattr(args, 'enable_style_transform', False):
         logging.info("Building Style Transformation Module...")
