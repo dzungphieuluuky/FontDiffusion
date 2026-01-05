@@ -47,6 +47,7 @@ from utils import (
 )
 
 logger = get_logger(__name__)
+logger.info("Logger initialized.")
 
 
 def setup_logging(output_dir: Path) -> None:

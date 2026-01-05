@@ -13,7 +13,7 @@ from typing import Any, Optional
 
 from datasets import Dataset, load_dataset
 from PIL import Image
-from tqdm.auto import tqdm
+from utilities import get_hf_bar
 
 from filename_utils import compute_file_hash, get_content_filename, get_target_filename
 
@@ -115,7 +115,7 @@ class DatasetExporter:
         exported_content = set()
         generations = []
 
-        for sample in tqdm(dataset, desc="Exporting images", unit="sample"):
+        for sample in get_hf_bar(dataset, desc="Exporting images", unit="sample"):
             char = sample["character"]
             style = sample["style"]
             font = sample.get("font", "unknown")
