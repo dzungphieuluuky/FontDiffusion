@@ -1,31 +1,74 @@
+"""
+Batch sampling and evaluation for FontDiffuser
+✅ Uses hash-based file naming with unicode characters
+✅ Uses results_checkpoint.json as single source of truth
+✅ Checks existing generations to skip already processed (char, style, font) combinations
+✅ Supports resuming from any start_line/end_line pair
+"""
+
 import os
 import sys
 import time
 import json
+import hashlib
+import argparse
+from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Any, Set, Union
 from huggingface_hub.utils import tqdm, enable_progress_bars
 import logging
-import wandb
 
 import numpy as np
+import torch
+import torch.nn.functional as F
 from PIL import Image
+import torchvision.transforms as transforms
 from argparse import Namespace, ArgumentParser
 
 from src.dpm_solver.pipeline_dpm_solver import FontDiffuserDPMPipeline
+from src.model import StyleTransformationModule
 from utilities import (
+    save_model_checkpoint,
+    load_model_checkpoint,
     get_hf_bar,
-)
-from font_manager import FontManager
-from generation_tracker import GenerationTracker
-from quality_evaluator import (
-    QualityEvaluator,
-    LPIPS_AVAILABLE,
-    FID_AVAILABLE,
-    SSIM_AVAILABLE,
-    WANDB_AVAILABLE,
 )
 
 enable_progress_bars()
+# Import evaluation metrics
+try:
+    import lpips
+
+    LPIPS_AVAILABLE: bool = True
+except ImportError:
+    logging.info("Warning: lpips not available. Install with: pip install lpips")
+    LPIPS_AVAILABLE: bool = False
+
+try:
+    from pytorch_fid import fid_score
+
+    FID_AVAILABLE: bool = True
+except ImportError:
+    logging.info(
+        "Warning: pytorch-fid not available. Install with: pip install pytorch-fid"
+    )
+    FID_AVAILABLE: bool = False
+
+try:
+    from skimage.metrics import structural_similarity as ssim
+
+    SSIM_AVAILABLE: bool = True
+except ImportError:
+    logging.info(
+        "Warning: scikit-image not available. Install with: pip install scikit-image"
+    )
+    SSIM_AVAILABLE: bool = False
+
+try:
+    import wandb
+
+    WANDB_AVAILABLE: bool = True
+except ImportError:
+    logging.info("Warning: wandb not available. Install with: pip install wandb")
+    WANDB_AVAILABLE: bool = False
 
 # Import FontDiffuser modules
 from sample_optimized import (
@@ -45,224 +88,478 @@ from filename_utils import (
     compute_file_hash,
 )
 
-def parse_args() -> Namespace:
-    """
-    Parse command‑line arguments for the batch‑sampling and evaluation pipeline.
-    Arguments are grouped by functional domain for readability.
-    """
-    parser = ArgumentParser(description="Batch sampling and evaluation")
 
-    # -----------------------------------------------------------------
-    # I/O
-    # -----------------------------------------------------------------
-    io = parser.add_argument_group("Input / Output")
-    io.add_argument(
+class FontManager:
+    """Manages multiple font files"""
+
+    def __init__(self, ttf_path: str) -> None:
+        """
+        Initialize font manager
+
+        Args:
+            ttf_path: Path to a single font file or directory containing fonts
+        """
+        self.fonts: Dict[str, Dict[str, Any]] = {}
+        self.font_paths: List[str] = []
+        self._load_fonts(ttf_path)
+
+    def _load_fonts(self, ttf_path: str) -> None:
+        """Load font(s) from path"""
+        if "*" in ttf_path:
+            # Handle wildcard path
+            import glob
+
+            font_files: List[str] = glob.glob(ttf_path)
+            if not font_files:
+                raise ValueError(f"No font files found for pattern: {ttf_path}")
+
+            self.font_paths = sorted(font_files)
+
+            logging.info(f"{'=' * 60}")
+            logging.info(f"Loading {len(font_files)} fonts from wildcard path...")
+            logging.info("=" * 60)
+
+            for font_path in self.font_paths:
+                font_name: str = os.path.splitext(os.path.basename(font_path))[0]
+                try:
+                    self.fonts[font_name] = {
+                        "path": font_path,
+                        "font": load_ttf(font_path),
+                        "name": font_name,
+                    }
+                    logging.info(f"✓ Loaded: {font_name}")
+                except Exception as e:
+                    logging.info(f"✗ Failed to load {font_name}: {e}")
+
+            logging.info("=" * 60)
+            logging.info(f"Successfully loaded {len(self.fonts)} fonts\n")
+
+        elif os.path.isfile(ttf_path):
+            # Single font file
+            self.font_paths = [ttf_path]
+            font_name: str = os.path.splitext(os.path.basename(ttf_path))[0]
+            self.fonts[font_name] = {
+                "path": ttf_path,
+                "font": load_ttf(ttf_path),
+                "name": font_name,
+            }
+            logging.info(f"✓ Loaded font: {font_name}")
+
+        elif os.path.isdir(ttf_path):
+            # Directory with multiple fonts
+            font_extensions: Set[str] = {".ttf", ".otf", ".TTF", ".OTF"}
+            font_files: List[str] = [
+                os.path.join(ttf_path, f)
+                for f in os.listdir(ttf_path)
+                if os.path.splitext(f)[1] in font_extensions
+            ]
+
+            if not font_files:
+                raise ValueError(f"No font files found in directory: {ttf_path}")
+
+            self.font_paths = sorted(font_files)
+
+            logging.info(f"{'=' * 60}")
+            logging.info(f"Loading {len(font_files)} fonts from directory...")
+            logging.info("=" * 60)
+
+            for font_path in self.font_paths:
+                font_name: str = os.path.splitext(os.path.basename(font_path))[0]
+                try:
+                    self.fonts[font_name] = {
+                        "path": font_path,
+                        "font": load_ttf(font_path),
+                        "name": font_name,
+                    }
+                    logging.info(f"✓ Loaded: {font_name}")
+                except Exception as e:
+                    logging.info(f"✗ Failed to load {font_name}: {e}")
+
+            logging.info("=" * 60)
+            logging.info(f"Successfully loaded {len(self.fonts)} fonts\n")
+        else:
+            raise ValueError(f"Invalid ttf_path: {ttf_path}")
+
+    def get_font_names(self) -> List[str]:
+        """Get list of loaded font names"""
+        return list(self.fonts.keys())
+
+    def get_font(self, font_name: str) -> Any:
+        """Get font object by name"""
+        if font_name not in self.fonts:
+            raise ValueError(f"Font not found: {font_name}")
+        return self.fonts[font_name]["font"]
+
+    def get_font_path(self, font_name: str) -> str:
+        """Get font file path by name"""
+        if font_name not in self.fonts:
+            raise ValueError(f"Font not found: {font_name}")
+        return self.fonts[font_name]["path"]
+
+    def is_char_in_font(self, font_name: str, char: str) -> bool:
+        """Check if character exists in font"""
+        font_path: str = self.get_font_path(font_name)
+        return is_char_in_font(font_path, char)
+
+    def get_available_chars_for_font(
+        self, font_name: str, characters: List[str]
+    ) -> List[str]:
+        """Get list of characters available in specific font"""
+        return [char for char in characters if self.is_char_in_font(font_name, char)]
+
+
+class GenerationTracker:
+    """
+    ✅ Tracks which (character, style, font) combinations have been generated
+    Uses hash-based checking for fast lookups
+    """
+
+    def __init__(self, checkpoint_path: Optional[str] = None):
+        """
+        Initialize generation tracker
+
+        Args:
+            checkpoint_path: Path to results_checkpoint.json file
+        """
+        self.generated_hashes: Set[str] = set()
+        self.generations: List[Dict[str, Any]] = []
+
+        if checkpoint_path and os.path.exists(checkpoint_path):
+            self._load_from_checkpoint(checkpoint_path)
+
+    def _load_from_checkpoint(self, checkpoint_path: str) -> None:
+        """Load existing generations from checkpoint"""
+        try:
+            with open(checkpoint_path, "r", encoding="utf-8") as f:
+                results = json.load(f)
+
+            raw_generations = results.get("generations", [])
+
+            # ✅ Track duplicates
+            seen_hashes: Set[str] = set()
+            unique_generations: List[Dict[str, Any]] = []
+            duplicate_count: int = 0
+
+            # Build hash set for fast lookup and deduplicate
+            for gen in raw_generations:
+                target_hash = gen.get("target_hash")
+
+                if not target_hash:
+                    # Compute hash if not in checkpoint
+                    char = gen.get("character", "")
+                    style = gen.get("style", "")
+                    font = gen.get("font", "")
+
+                    # Skip invalid entries
+                    if not char or not style:
+                        continue
+
+                    target_hash = compute_file_hash(char, style, font)
+
+                # ✅ Check for duplicates
+                if target_hash in seen_hashes:
+                    duplicate_count += 1
+                    continue  # Skip duplicate
+
+                # Add to collections
+                seen_hashes.add(target_hash)
+                self.generated_hashes.add(target_hash)
+                unique_generations.append(gen)
+
+            # ✅ Store only unique generations
+            self.generations = unique_generations
+
+            logging.info(
+                f"✓ Loaded checkpoint: {len(self.generations)} unique generations"
+            )
+            if duplicate_count > 0:
+                logging.info(f"  ⚠️  Removed {duplicate_count} duplicate entries")
+            logging.info(f"  Total raw entries: {len(raw_generations)}")
+
+        except Exception as e:
+            logging.info(f"⚠ Error loading checkpoint: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+    def is_generated(self, char: str, style: str, font: str = "") -> bool:
+        """Check if (char, style, font) combination has been generated"""
+        target_hash = compute_file_hash(char, style, font)
+        return target_hash in self.generated_hashes
+
+    def mark_generated(self, char: str, style: str, font: str = "") -> None:
+        """Mark a (char, style, font) combination as generated"""
+        target_hash = compute_file_hash(char, style, font)
+        self.generated_hashes.add(target_hash)
+
+    def add_generation(self, generation: Dict[str, Any]) -> None:
+        """Add a generation record"""
+        self.generations.append(generation)
+
+        # Also add to hash set
+        char = generation.get("character", "")
+        style = generation.get("style", "")
+        font = generation.get("font", "")
+        self.mark_generated(char, style, font)
+
+
+class QualityEvaluator:
+    """Evaluates generated images using LPIPS, SSIM, and FID"""
+
+    def __init__(self, device: str = "cuda:0") -> None:
+        self.device: str = device
+
+        # Initialize LPIPS
+        if LPIPS_AVAILABLE:
+            self.lpips_fn: Optional[Any] = lpips.LPIPS(net="alex").to(device)
+            self.lpips_fn.eval()
+        else:
+            self.lpips_fn: Optional[Any] = None
+
+        self.transform_to_tensor: transforms.ToTensor = transforms.ToTensor()
+
+    def compute_lpips(self, img1: Image.Image, img2: Image.Image) -> float:
+        """Compute LPIPS between two images"""
+        if not LPIPS_AVAILABLE or self.lpips_fn is None:
+            return -1.0
+
+        try:
+            # Convert to tensors [-1, 1]
+            img1_tensor: torch.Tensor = (
+                self.transform_to_tensor(img1).unsqueeze(0).to(self.device) * 2 - 1
+            )
+            img2_tensor: torch.Tensor = (
+                self.transform_to_tensor(img2).unsqueeze(0).to(self.device) * 2 - 1
+            )
+
+            with torch.inference_mode():
+                lpips_value: float = self.lpips_fn(img1_tensor, img2_tensor).item()
+
+            return lpips_value
+        except Exception as e:
+            logging.info(f"Error computing LPIPS: {e}")
+            return -1.0
+
+    def compute_ssim(self, img1: Image.Image, img2: Image.Image) -> float:
+        """Compute SSIM between two images"""
+        if not SSIM_AVAILABLE:
+            return -1.0
+
+        try:
+            # Convert to grayscale numpy arrays
+            img1_gray: np.ndarray = np.array(img1.convert("L"))
+            img2_gray: np.ndarray = np.array(img2.convert("L"))
+
+            ssim_value: float = ssim(img1_gray, img2_gray, data_range=255)
+            return ssim_value
+        except Exception as e:
+            logging.info(f"Error computing SSIM: {e}")
+            return -1.0
+
+    def compute_fid(self, real_dir: str, fake_dir: str) -> float:
+        """Compute FID between two directories of images"""
+        if not FID_AVAILABLE:
+            return -1.0
+
+        try:
+            fid_value: float = fid_score.calculate_fid_given_paths(
+                [real_dir, fake_dir], batch_size=50, device=self.device, dims=2048
+            )
+            return fid_value
+        except Exception as e:
+            logging.info(f"Error computing FID: {e}")
+            return -1.0
+
+    def save_image(self, image: Image.Image, path: str) -> None:
+        """Save PIL image to path"""
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            image.save(path)
+        except Exception as e:
+            logging.info(f"Error saving image to {path}: {e}")
+
+
+def parse_args() -> Namespace:
+    """Parse command line arguments"""
+    parser: ArgumentParser = argparse.ArgumentParser(
+        description="Batch sampling and evaluation"
+    )
+
+    # Input/Output
+    parser.add_argument(
         "--characters",
         type=str,
         required=True,
-        help="Comma‑separated list of characters or path to text file",
+        help="Comma-separated list of characters or path to text file",
     )
-    io.add_argument(
+    parser.add_argument(
         "--start_line",
         type=int,
         default=1,
-        help="Start line number for character file (1‑indexed)",
+        help="Start line number for character file (1-indexed)",
     )
-    io.add_argument(
+    parser.add_argument(
         "--end_line",
         type=int,
         default=None,
-        help="End line number for character file (inclusive, None = EOF)",
+        help="End line number for character file (inclusive, None = end of file)",
     )
-    io.add_argument(
+    parser.add_argument(
         "--style_images",
         type=str,
         required=True,
-        help="Comma‑separated paths to style images or directory",
+        help="Comma-separated paths to style images or directory",
     )
-    io.add_argument(
+    parser.add_argument(
         "--output_dir",
         type=str,
         default="my_dataset/train_original",
-        help="Output directory (creates ContentImage/ and TargetImage/ subdirs)",
+        help="Output directory (will create ContentImage/ and TargetImage/ subdirs)",
     )
-    io.add_argument(
+    parser.add_argument(
         "--ground_truth_dir",
         type=str,
         default=None,
-        help="Directory with ground‑truth images for evaluation",
+        help="Directory with ground truth images for evaluation",
     )
 
-    # -----------------------------------------------------------------
     # Model configuration
-    # -----------------------------------------------------------------
-    model = parser.add_argument_group("Model configuration")
-    model.add_argument(
-        "--ckpt_dir",
-        type=str,
-        required=True,
-        help="Checkpoint directory",
+    parser.add_argument(
+        "--ckpt_dir", type=str, required=True, help="Checkpoint directory"
     )
-    model.add_argument(
+    parser.add_argument(
         "--ttf_path",
         type=str,
         required=True,
         help="Path to TTF font file or directory with multiple fonts",
     )
-    model.add_argument("--device", type=str, default="cuda", help="Device to use")
-    model.add_argument(
+    parser.add_argument("--device", type=str, default="cuda", help="Device to use")
+
+    parser.add_argument(
         "--num_scales",
         type=int,
         default=4,
-        help="Number of scales in style transformation",
+        help="Number of scales in style transformation"
     )
-    model.add_argument(
+    parser.add_argument(
         "--feature_dim",
         type=int,
         default=512,
-        help="Feature dimension for style transformation",
+        help="Feature dimension for style transformation"
     )
-    model.add_argument(
+    parser.add_argument(
         "--hidden_dim",
         type=int,
         default=256,
-        help="Hidden dimension for style transformation",
+        help="Hidden dimension for style transformation"
     )
-    model.add_argument(
+    parser.add_argument(
         "--num_heads",
         type=int,
         default=8,
-        help="Number of attention heads",
+        help="Number of attention heads"
     )
-    model.add_argument(
+    parser.add_argument(
         "--ffn_dim",
         type=int,
         default=2048,
-        help="Feed‑forward network dimension",
+        help="Feedforward Network dimension"
     )
-    model.add_argument(
+    parser.add_argument(
         "--style_transform_coefficient",
         type=float,
         default=0.1,
-        help="Loss coefficient for style transformation",
+        help="Loss coefficient for style transformation"
     )
 
-    # -----------------------------------------------------------------
     # Generation parameters
-    # -----------------------------------------------------------------
-    gen = parser.add_argument_group("Generation parameters")
-    gen.add_argument(
-        "--num_inference_steps",
-        type=int,
-        default=15,
-        help="Number of inference steps",
+    parser.add_argument(
+        "--num_inference_steps", type=int, default=15, help="Number of inference steps"
     )
-    gen.add_argument(
-        "--guidance_scale",
-        type=float,
-        default=7.5,
-        help="Guidance scale",
+    parser.add_argument(
+        "--guidance_scale", type=float, default=7.5, help="Guidance scale"
     )
-    gen.add_argument(
-        "--batch_size",
-        type=int,
-        default=4,
-        help="Batch size for generation",
+    parser.add_argument(
+        "--batch_size", type=int, default=4, help="Batch size for generation"
     )
-    gen.add_argument("--seed", type=int, default=42, help="Random seed")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
-    # -----------------------------------------------------------------
     # Optimization flags
-    # -----------------------------------------------------------------
-    opt = parser.add_argument_group("Optimization flags")
-    opt.add_argument(
-        "--fp16",
-        action="store_true",
-        default=False,
-        help="Use FP16 precision",
+    parser.add_argument(
+        "--fp16", action="store_true", default=False, help="Use FP16 precision"
     )
-    opt.add_argument(
-        "--compile",
-        action="store_true",
-        default=False,
-        help="Use torch.compile",
+    parser.add_argument(
+        "--compile", action="store_true", default=False, help="Use torch.compile"
     )
-    opt.add_argument(
+    parser.add_argument(
         "--channels_last",
         action="store_true",
         default=True,
-        help="Use channels‑last memory format",
+        help="Use channels last memory format",
     )
-    opt.add_argument(
-        "--enable_xformers",
-        action="store_true",
-        default=False,
-        help="Enable xformers",
+    parser.add_argument(
+        "--enable_xformers", action="store_true", default=False, help="Enable xformers"
     )
-    opt.add_argument(
+    parser.add_argument(
         "--fast_sampling",
         action="store_true",
         default=False,
         help="Use fast sampling mode",
     )
 
-    # -----------------------------------------------------------------
-    # Checkpoint & resume
-    # -----------------------------------------------------------------
-    ckpt = parser.add_argument_group("Checkpoint & resume")
-    ckpt.add_argument(
+    parser.add_argument(
+        "--enable_style_transform",
+        action="store_true",
+        default=False,
+        help="Enable style transformation module",
+    )
+
+    # Checkpoint and resume
+    parser.add_argument(
         "--save_interval",
         type=int,
         default=10,
         help="Save results every N styles (0 = only save at end)",
     )
 
-    # -----------------------------------------------------------------
     # Evaluation flags
-    # -----------------------------------------------------------------
-    eval = parser.add_argument_group("Evaluation flags")
-    eval.add_argument(
+    parser.add_argument(
         "--evaluate",
         action="store_true",
         default=True,
         help="Evaluate generated images",
     )
-    eval.add_argument(
+    parser.add_argument(
         "--compute_fid",
         action="store_true",
         default=False,
         help="Compute FID (requires ground truth)",
     )
-    eval.add_argument(
+    parser.add_argument(
         "--enable_attention_slicing",
         action="store_true",
         default=False,
         help="Enable attention slicing for memory efficiency",
     )
 
-    # -----------------------------------------------------------------
-    # WandB configuration
-    # -----------------------------------------------------------------
-    wandb = parser.add_argument_group("WandB configuration")
-    wandb.add_argument(
+    # Wandb configuration
+    parser.add_argument(
         "--use_wandb",
         action="store_true",
         default=True,
         help="Log results to Weights & Biases",
     )
-    wandb.add_argument(
+    parser.add_argument(
         "--wandb_project",
         type=str,
         default="fontdiffuser-eval",
-        help="WandB project name",
+        help="Wandb project name",
     )
-    wandb.add_argument(
-        "--wandb_run_name",
-        type=str,
-        default=None,
-        help="WandB run name",
+    parser.add_argument(
+        "--wandb_run_name", type=str, default=None, help="Wandb run name"
     )
-    wandb.add_argument(
+
+    parser.add_argument(
         "--dataset_split",
         type=str,
         default="train_original",
@@ -270,6 +567,7 @@ def parse_args() -> Namespace:
     )
 
     return parser.parse_args()
+
 
 def load_characters(
     characters_arg: str, start_line: int = 1, end_line: Optional[int] = None
@@ -286,6 +584,7 @@ def load_characters(
             len(all_lines) if end_line is None else min(len(all_lines), end_line)
         )
 
+        # ✅ ADD VALIDATION
         if start_idx >= len(all_lines):
             raise ValueError(
                 f"❌ start_line ({start_line}) exceeds file length ({len(all_lines)} lines)\n"
@@ -330,13 +629,14 @@ def load_characters(
                 )
             chars.append(c)
 
+    # ✅ ADD FINAL CHECK
     if not chars:
         raise ValueError(
             f"❌ No valid characters loaded!\n"
             f"   Check your character file or line range (start={start_line}, end={end_line})"
         )
 
-    logging.info(f"Successfully loaded {len(chars)} single characters.")
+    logging.info(f"✅ Successfully loaded {len(chars)} single characters.")
     return chars
 
 
@@ -355,7 +655,7 @@ def load_style_images(style_images_arg: str) -> List[Tuple[str, str]]:
         ]
         style_paths.sort()
 
-        logging.info(f"Loading {len(style_paths)} style images from directory...")
+        logging.info(f"📂 Loading {len(style_paths)} style images from directory...")
         verified_paths = []
         for path in get_hf_bar(
             style_paths,
@@ -438,7 +738,7 @@ def create_args_namespace(args: Namespace) -> Namespace:
 
 def save_checkpoint(results: Dict[str, Any], output_dir: str) -> None:
     """
-    Save results_checkpoint.json (single source of truth)
+    ✅ Save results_checkpoint.json (single source of truth)
     """
     try:
         checkpoint_path: str = os.path.join(output_dir, "results_checkpoint.json")
@@ -452,7 +752,7 @@ def save_checkpoint(results: Dict[str, Any], output_dir: str) -> None:
             json.dump(results, f, indent=2, ensure_ascii=False)
 
         num_gens = len(results.get("generations", []))
-        logging.info(f" Saved results_checkpoint.json ({num_gens} generations)")
+        logging.info(f"  ✅ Saved results_checkpoint.json ({num_gens} generations)")
 
     except Exception as e:
         logging.info(f"  ⚠ Error saving checkpoint: {e}")
@@ -616,6 +916,7 @@ def batch_generate_images(
     )
     logging.info(f"Unique chars seen:    {len(all_chars_in_checkpoint)}")
     logging.info(f"Unique styles used:   {len(all_styles_in_checkpoint)}")
+    logging.info(f"Style Transform:      {getattr(args, 'enable_style_transform', False)}")  # ✅ ADD THIS
     logging.info("=" * 60 + "\n")
 
     # Use first font for all characters
@@ -669,6 +970,7 @@ def batch_generate_images(
                 style_path,
                 font_manager,
                 primary_font,
+                enable_style_transform=getattr(args, 'enable_style_transform', False),  # ✅ ADD THIS
             )
 
             if images is None:
@@ -787,79 +1089,110 @@ def sampling_batch_optimized(
     style_image_path: Union[str, Image.Image],
     font_manager: FontManager,
     font_name: str,
+    enable_style_transform: bool = False,  # ✅ ADD THIS PARAMETER
 ) -> Tuple[Optional[List[Image.Image]], Optional[List[str]], Optional[float]]:
-    """
-    Batch sampling for multiple characters.
-    
-    Style transformation is NOT applied during inference.
-    It's only used during training (Phase 2).
-    """
+    """Batch sampling for multiple characters with specific font"""
+
+    # Get available characters for this font
+    available_chars: List[str] = font_manager.get_available_chars_for_font(
+        font_name, characters
+    )
+
+    if not available_chars:
+        return None, None, None
+
     try:
+        # Load style image
         if isinstance(style_image_path, str):
-            style_image = Image.open(style_image_path).convert("RGB")
+            style_image: Image.Image = Image.open(style_image_path).convert("RGB")
         else:
-            style_image = style_image_path
+            style_image: Image.Image = style_image_path.convert("RGB")
+        style_transform: transforms.Compose = get_style_transform(args.style_image_size)
 
-        style_transform = get_style_transform(args.style_image_size)
-        style_image = style_transform(style_image)
+        font: Any = font_manager.get_font(font_name)
+        content_transform: transforms.Compose = get_content_transform(
+            args.content_image_size
+        )
 
-        content_transform = get_content_transform(args.content_image_size)
-        
-        images = []
-        valid_chars = []
-        generation_times = []
+        # Generate content images
+        content_images: List[torch.Tensor] = []
+        content_images_pil: List[Image.Image] = []
 
-        with get_hf_bar(
-            total=len(characters),
-            desc=f"Generating {font_name}",
-            unit="char",
-        ) as pbar:
-            for char in characters:
-                try:
-                    if not is_char_in_font(font_manager.get_font_path(font_name), char):
-                        continue
+        for char in get_hf_bar(
+            available_chars,
+            desc=f"  📸 Preparing {font_name}",
+            colour="cyan",
+        ):
+            try:
+                content_image: Image.Image = ttf2im(font=font, char=char)
+                content_images_pil.append(content_image.copy())
+                content_images.append(content_transform(content_image))
+            except Exception as e:
+                logging.info(f"    ✗ Error processing '{char}': {e}")
+                continue
 
-                    content_image = ttf2im(
-                        load_ttf(font_manager.get_font_path(font_name)),
-                        char,
-                        args.content_image_size,
-                    )
-                    content_image = content_transform(content_image)
+        if not content_images:
+            return None, None, None
 
-                    start_time = time.time()
-                    gen_images = pipe.generate(
-                        content_images=content_image.unsqueeze(0),
-                        style_images=style_image.unsqueeze(0),
-                        batch_size=1,
-                        order=args.order,
-                        num_inference_step=args.num_inference_steps,
-                        content_encoder_downsample_size=args.content_encoder_downsample_size,
-                        t_start=args.t_start,
-                        t_end=args.t_end,
-                        dm_size=args.content_image_size,
-                        algorithm_type=args.algorithm_type,
-                        skip_type=args.skip_type,
-                        method=args.method,
-                        correcting_x0_fn=args.correcting_x0_fn,
-                    )
-                    generation_times.append(time.time() - start_time)
+        # Stack into batch
+        content_batch: torch.Tensor = torch.stack(content_images)
+        style_batch: torch.Tensor = style_transform(style_image)[None, :].repeat(
+            len(content_images), 1, 1, 1
+        )
 
-                    images.extend(gen_images)
-                    valid_chars.append(char)
+        with torch.inference_mode():
+            dtype: torch.dtype = torch.float16 if args.fp16 else torch.float32
+            content_batch = content_batch.to(args.device, dtype=dtype)
+            style_batch = style_batch.to(args.device, dtype=dtype)
 
-                except Exception as e:
-                    logging.warning(f"Failed to generate character '{char}': {e}")
-                    continue
-                finally:
-                    pbar.update(1)
+            start: float = time.perf_counter()
 
-        avg_time = sum(generation_times) / len(generation_times) if generation_times else 0
-        return images, valid_chars, avg_time
+            # Process in batches
+            all_images: List[Image.Image] = []
+            batch_size: int = args.batch_size
+
+            num_batches = (len(content_batch) + batch_size - 1) // batch_size
+            batch_pbar = get_hf_bar(
+                range(0, len(content_batch), batch_size),
+                desc="    🚀 Batch Inference",
+                colour="#1055C9",
+            )
+            for batch_idx, i in enumerate(batch_pbar):
+                batch_content: torch.Tensor = content_batch[i : i + batch_size]
+                batch_style: torch.Tensor = style_batch[i : i + batch_size]
+
+                # ✅ PASS STYLE TRANSFORM FLAG TO PIPELINE
+                images: List[Image.Image] = pipe.generate(
+                    content_images=batch_content,
+                    style_images=batch_style,
+                    batch_size=len(batch_content),
+                    order=args.order,
+                    num_inference_step=args.num_inference_steps,
+                    content_encoder_downsample_size=args.content_encoder_downsample_size,
+                    t_start=args.t_start,
+                    t_end=args.t_end,
+                    dm_size=args.content_image_size,
+                    algorithm_type=args.algorithm_type,
+                    skip_type=args.skip_type,
+                    method=args.method,
+                    correcting_x0_fn=args.correcting_x0_fn,
+                    enable_style_transform=enable_style_transform,  # ✅ ADD THIS
+                )
+
+                all_images.extend(images)
+                batch_pbar.update(1)
+
+            end: float = time.perf_counter()
+            total_time: float = end - start
+
+            return all_images, available_chars, total_time
 
     except Exception as e:
-        logging.error(f"Batch generation failed: {e}")
+        logging.info(f"    ✗ Error in batch sampling: {e}")
+        import traceback
+        traceback.print_exc()
         return None, None, None
-        
+    
 def _print_checkpoint_status(
     current_style: int,
     total_styles: int,
