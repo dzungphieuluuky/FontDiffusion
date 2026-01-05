@@ -273,7 +273,6 @@ def sampling_batch_with_accelerator(
                         skip_type=args.skip_type,
                         method=args.method,
                         correcting_x0_fn=args.correcting_x0_fn,
-                        # ✅ REMOVED: enable_style_transform parameter
                     )
                     generation_times.append(time.time() - start_time)
 
@@ -399,6 +398,7 @@ def batch_generate_images_with_accelerator(
                     style_path,
                     font_manager,
                     primary_font,
+                    accelerator,
                 )
 
                 if images is None:
