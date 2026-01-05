@@ -18,6 +18,7 @@ from fontTools.ttLib import TTFont
 import cv2
 from utils import is_char_in_font, load_ttf
 
+
 def ttf2im_robust(font, char, canvas_size=256):
     """
     Robust font rendering with proper centering and edge protection.

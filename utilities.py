@@ -19,6 +19,7 @@ from huggingface_hub.utils import tqdm as hf_tqdm
 # Logging
 # --------------------------------------------------------------------------- #
 
+
 class TqdmLoggingHandler(logging.Handler):
     """Handler that writes log records to a tqdm progress bar."""
 
@@ -53,6 +54,7 @@ def setup_logging(output_dir: Path) -> None:
         ],
     )
 
+
 # --------------------------------------------------------------------------- #
 # Hugging‑Face style progress bar
 # --------------------------------------------------------------------------- #
@@ -70,6 +72,7 @@ HF_BAR_FORMAT = (
 
 
 import warnings
+
 
 class HFTqdm(rich_tqdm):
     """Enhanced tqdm progress bar."""
@@ -102,7 +105,12 @@ class HFTqdm(rich_tqdm):
             self._base_desc = desc
         super().set_description(desc, refresh=refresh)
 
-    def set_postfix(self, ordered_dict: Optional[Dict[str, Any]] = None, refresh: bool = True, **kwargs: Any) -> None:
+    def set_postfix(
+        self,
+        ordered_dict: Optional[Dict[str, Any]] = None,
+        refresh: bool = True,
+        **kwargs: Any,
+    ) -> None:
         super().set_postfix(ordered_dict=ordered_dict, refresh=refresh, **kwargs)
 
     def close(self) -> None:
@@ -125,6 +133,7 @@ class HFTqdm(rich_tqdm):
             self.set_description(f"✗ {self._base_desc} (failed)", refresh=False)
         self.close()
         return False
+
 
 def get_hf_bar(
     iterable: Optional[Iterable[Any]] = None,
@@ -150,9 +159,11 @@ def get_hf_bar(
     kwargs["unit"] = unit
     return HFTqdm(iterable=iterable, desc=desc, total=total, **kwargs)
 
+
 # --------------------------------------------------------------------------- #
 # Checkpoint utilities
 # --------------------------------------------------------------------------- #
+
 
 def _ensure_path(path: Path | str) -> Path:
     """Return a Path object regardless of input type."""
@@ -182,11 +193,14 @@ def load_model_checkpoint(checkpoint_path: Path | str) -> Dict[str, Any]:
 
     if checkpoint_path.suffix == ".safetensors":
         from safetensors.torch import load_file as safe_load
+
         return safe_load(checkpoint_path, device="cpu")
     return torch.load(checkpoint_path, map_location="cpu")
 
 
-def save_model_checkpoint(model_state_dict: Dict[str, Any], checkpoint_path: Path | str) -> None:
+def save_model_checkpoint(
+    model_state_dict: Dict[str, Any], checkpoint_path: Path | str
+) -> None:
     """
     Save a model state dictionary to disk.
 
@@ -202,6 +216,7 @@ def save_model_checkpoint(model_state_dict: Dict[str, Any], checkpoint_path: Pat
 
     if checkpoint_path.suffix == ".safetensors":
         from safetensors.torch import save_file as safe_save
+
         safe_save(model_state_dict, checkpoint_path)
     else:
         torch.save(model_state_dict, checkpoint_path)
@@ -244,9 +259,11 @@ def find_checkpoint(checkpoint_dir: Path | str, checkpoint_name: str) -> Path:
         f"  Expected: {safetensors_path} or {pth_path}"
     )
 
+
 # --------------------------------------------------------------------------- #
 # File‑system helpers
 # --------------------------------------------------------------------------- #
+
 
 def flatten_folder(root_dir: Path | str) -> None:
     """
@@ -350,7 +367,9 @@ def rename_content_images(path: Path | str) -> None:
             print(f"Renamed: {filename} -> {new_path}")
 
 
-def update_paths(input_file: Path | str, output_file: Optional[Path | str] = None) -> None:
+def update_paths(
+    input_file: Path | str, output_file: Optional[Path | str] = None
+) -> None:
     """
     Update ``content_image_path`` and ``target_image_path`` fields in a JSON file.
 
@@ -408,6 +427,7 @@ def print_font_glyph_counts(fonts_dir: Path | str) -> None:
 # --------------------------------------------------------------------------- #
 # Conversion utilities
 # --------------------------------------------------------------------------- #
+
 
 def pth_to_safetensors(pth_path: Path | str, output_path: Path | str) -> None:
     """
@@ -484,6 +504,7 @@ def convert_checkpoint_folder(
 # --------------------------------------------------------------------------- #
 # Command‑line interface
 # --------------------------------------------------------------------------- #
+
 
 def _cli() -> None:
     parser = argparse.ArgumentParser(

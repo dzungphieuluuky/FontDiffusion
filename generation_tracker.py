@@ -6,6 +6,7 @@ import logging
 
 from filename_utils import compute_file_hash
 
+
 class GenerationTracker:
     """
     ✅ Tracks which (character, style, font) combinations have been generated

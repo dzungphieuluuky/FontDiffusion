@@ -439,37 +439,31 @@ def parse_args() -> Namespace:
         "--num_scales",
         type=int,
         default=4,
-        help="Number of scales in style transformation"
+        help="Number of scales in style transformation",
     )
     parser.add_argument(
         "--feature_dim",
         type=int,
         default=512,
-        help="Feature dimension for style transformation"
+        help="Feature dimension for style transformation",
     )
     parser.add_argument(
         "--hidden_dim",
         type=int,
         default=256,
-        help="Hidden dimension for style transformation"
+        help="Hidden dimension for style transformation",
     )
     parser.add_argument(
-        "--num_heads",
-        type=int,
-        default=8,
-        help="Number of attention heads"
+        "--num_heads", type=int, default=8, help="Number of attention heads"
     )
     parser.add_argument(
-        "--ffn_dim",
-        type=int,
-        default=2048,
-        help="Feedforward Network dimension"
+        "--ffn_dim", type=int, default=2048, help="Feedforward Network dimension"
     )
     parser.add_argument(
         "--style_transform_coefficient",
         type=float,
         default=0.1,
-        help="Loss coefficient for style transformation"
+        help="Loss coefficient for style transformation",
     )
 
     # Generation parameters
@@ -842,6 +836,7 @@ def generate_content_images(
 
     return char_paths
 
+
 def batch_generate_images(
     pipe: FontDiffuserDPMPipeline,
     characters: List[str],
@@ -916,7 +911,9 @@ def batch_generate_images(
     )
     logging.info(f"Unique chars seen:    {len(all_chars_in_checkpoint)}")
     logging.info(f"Unique styles used:   {len(all_styles_in_checkpoint)}")
-    logging.info(f"Style Transform:      {getattr(args, 'enable_style_transform', False)}")  # ✅ ADD THIS
+    logging.info(
+        f"Style Transform:      {getattr(args, 'enable_style_transform', False)}"
+    )  # ✅ ADD THIS
     logging.info("=" * 60 + "\n")
 
     # Use first font for all characters
@@ -970,7 +967,9 @@ def batch_generate_images(
                 style_path,
                 font_manager,
                 primary_font,
-                enable_style_transform=getattr(args, 'enable_style_transform', False),  # ✅ ADD THIS
+                enable_style_transform=getattr(
+                    args, "enable_style_transform", False
+                ),  # ✅ ADD THIS
             )
 
             if images is None:
@@ -993,6 +992,7 @@ def batch_generate_images(
                     target_filename = get_target_filename(char, style_name)
 
                     import re
+
                     expected_pattern = r".+\+.\.png"
                     if not re.match(expected_pattern, target_filename):
                         raise ValueError(
@@ -1018,7 +1018,9 @@ def batch_generate_images(
                         "content_image_path": content_path_rel,
                         "target_image_path": target_path_rel,
                         "content_hash": compute_file_hash(char, "", primary_font),
-                        "target_hash": compute_file_hash(char, style_name, primary_font),
+                        "target_hash": compute_file_hash(
+                            char, style_name, primary_font
+                        ),
                         "content_filename": content_filename,
                         "target_filename": target_filename,
                     }
@@ -1067,6 +1069,7 @@ def batch_generate_images(
         except Exception as e:
             logging.info(f"  ✗ {style_name}: {e}")
             import traceback
+
             traceback.print_exc()
             failed_count += len(chars_to_generate)
 
@@ -1190,9 +1193,11 @@ def sampling_batch_optimized(
     except Exception as e:
         logging.info(f"    ✗ Error in batch sampling: {e}")
         import traceback
+
         traceback.print_exc()
         return None, None, None
-    
+
+
 def _print_checkpoint_status(
     current_style: int,
     total_styles: int,
@@ -1399,9 +1404,7 @@ def log_to_wandb(results: Dict[str, Any], args: Namespace) -> None:
         logging.info("=" * 60)
 
         # Initialize wandb
-        run_name = (
-            args.wandb_run_name
-        )
+        run_name = args.wandb_run_name
 
         wandb.init(
             project=args.wandb_project,

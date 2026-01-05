@@ -45,23 +45,26 @@ from utilities import (
     get_hf_bar,
 )
 
+
 def get_rank():
     try:
         import torch
+
         if torch.distributed.is_available() and torch.distributed.is_initialized():
             return torch.distributed.get_rank()
     except Exception:
         pass
     return int(os.environ.get("LOCAL_RANK", 0))
 
-LOG_FORMAT = (
-    "%(asctime)s [%(levelname)s] [Rank %(rank)d] %(message)s"
-)
+
+LOG_FORMAT = "%(asctime)s [%(levelname)s] [Rank %(rank)d] %(message)s"
+
 
 class RankFilter(logging.Filter):
     def filter(self, record):
         record.rank = get_rank()
         return True
+
 
 # Remove all handlers if already set (prevents duplicate logs in Jupyter/reloads)
 for handler in logging.root.handlers[:]:
@@ -111,6 +114,7 @@ try:
 except ImportError:
     WANDB_AVAILABLE = False
     logger.warning("wandb not available. Install with: pip install wandb")
+
 
 def generate_content_images_with_accelerator(
     characters: List[str],
@@ -201,6 +205,7 @@ def generate_content_images_with_accelerator(
         return merged_char_paths
     else:
         return {}
+
 
 def sampling_batch_with_accelerator(
     args: argparse.Namespace,
@@ -369,7 +374,7 @@ def batch_generate_images_with_accelerator(
         for style_idx, (style_path, style_name) in enumerate(
             get_hf_bar(
                 local_styles,
-                unit= "style",
+                unit="style",
                 desc=f"GPU {accelerator.process_index} generating styles",
                 disable=not accelerator.is_main_process,
             )
@@ -583,6 +588,7 @@ def evaluate_results_with_accelerator(
 
     return results
 
+
 def main():
     """Main entry point."""
     args = parse_args()
@@ -689,14 +695,14 @@ def main():
         if torch.distributed.is_available() and torch.distributed.is_initialized():
             torch.distributed.destroy_process_group()
             logging.info("Process group destroyed successfully")
-    
+
     except Exception as e:
         logging.error(f"Fatal error: {e}")
         import traceback
 
         traceback.print_exc()
         sys.exit(1)
-    
+
     finally:
         # FIX: Properly cleanup multi-GPU resources
         try:

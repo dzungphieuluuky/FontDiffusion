@@ -45,7 +45,9 @@ from utils import (
     save_args_to_yaml,
     x0_from_epsilon,
 )
+
 logger = get_logger(__name__)
+
 
 def parse_args_training():
     """Parse and validate command line arguments.
@@ -153,11 +155,12 @@ def apply_classifier_free_guidance(
             style_images[i, :, :, :] = 1
 
     # Style transformation masking if applicable
-    if samples is not None and 'source_style_image' in samples:
+    if samples is not None and "source_style_image" in samples:
         source_style_images = samples["source_style_image"]
         for i, mask_value in enumerate(context_mask):
             if mask_value == 1:
                 source_style_images[i, :, :, :] = 1
+
 
 def compute_losses(
     noise_pred: torch.Tensor,
@@ -311,8 +314,9 @@ def save_checkpoint(
 
     logging.info(f"Saved checkpoint at step {global_step} to {save_dir}")
     # Log checkpoint save event
-    if hasattr(accelerator, 'log'):
+    if hasattr(accelerator, "log"):
         accelerator.log({"checkpoint_saved": True, "checkpoint_step": global_step})
+
 
 def train_step(
     model: FontDiffuserModel,
@@ -355,7 +359,10 @@ def train_step(
 
     # ✅ No need to call it again for source style
     source_style_images = None
-    if getattr(args, 'enable_style_transform', False) and 'source_style_image' in samples:
+    if (
+        getattr(args, "enable_style_transform", False)
+        and "source_style_image" in samples
+    ):
         source_style_images = samples["source_style_image"]
 
     # Forward pass
@@ -383,23 +390,26 @@ def train_step(
     )
 
     # ✅ ADD STYLE TRANSFORMATION LOSS IF APPLICABLE
-    if getattr(args, 'enable_style_transform', False) and style_transform_feature is not None:
+    if (
+        getattr(args, "enable_style_transform", False)
+        and style_transform_feature is not None
+    ):
         style_transform_loss = F.mse_loss(
             style_transform_feature,
             torch.zeros_like(style_transform_feature),
-            reduction='mean'
+            reduction="mean",
         )
-        loss += getattr(args, 'style_transform_coefficient', 0.1) * style_transform_loss
-        loss_dict['style_transform_loss'] = style_transform_loss.item()
+        loss += getattr(args, "style_transform_coefficient", 0.1) * style_transform_loss
+        loss_dict["style_transform_loss"] = style_transform_loss.item()
 
     if args.phase_2 and scr is not None:
         neg_images = samples["neg_images"]
-        
+
         # Convert list to tensor if needed
         if isinstance(neg_images, list):
             # Stack list of tensors - they should all have same shape now
             neg_images = torch.stack(neg_images)
-        
+
         sc_loss = compute_phase2_loss(
             pred_original_sample_norm=pred_original_sample_norm,
             target_images=target_images,
@@ -410,6 +420,7 @@ def train_step(
         loss += args.sc_coefficient * sc_loss
         loss_dict["sc_loss"] = sc_loss.item()
     return loss, loss_dict
+
 
 def train(
     model: FontDiffuserModel,
@@ -479,7 +490,7 @@ def train(
                 lr_scheduler.step()
                 optimizer.zero_grad()
 
-            # Update progress
+                # Update progress
                 if accelerator.sync_gradients:
                     progress_bar.update(1)
                     global_step += 1
@@ -491,12 +502,12 @@ def train(
                         "epoch": epoch + step / len(train_dataloader),
                         "global_step": global_step,
                     }
-                    
+
                     # Add loss components if available
                     if loss_dict:
                         for loss_name, loss_val in loss_dict.items():
                             log_dict[f"loss/{loss_name}"] = loss_val
-                    
+
                     # Log to wandb
                     accelerator.log(log_dict, step=global_step)
 
@@ -564,14 +575,14 @@ def main():
     noise_scheduler = build_ddpm_scheduler(args)
 
     style_transform_module = None
-    if getattr(args, 'enable_style_transform', False):
+    if getattr(args, "enable_style_transform", False):
         logging.info("Building Style Transformation Module...")
         style_transform_module = StyleTransformationModule(
-            num_scales=getattr(args, 'num_scales', 4),
-            feature_dim=getattr(args, 'feature_dim', 512),
-            hidden_dim=getattr(args, 'hidden_dim', 256),
-            num_heads=getattr(args, 'num_heads', 8),
-            ffn_dim=getattr(args, 'ffn_dim', 2048),
+            num_scales=getattr(args, "num_scales", 4),
+            feature_dim=getattr(args, "feature_dim", 512),
+            hidden_dim=getattr(args, "hidden_dim", 256),
+            num_heads=getattr(args, "num_heads", 8),
+            ffn_dim=getattr(args, "ffn_dim", 2048),
             style_image_size=args.style_image_size[0],
         )
         logging.info("✓ Style Transformation Module built successfully")
@@ -617,7 +628,7 @@ def main():
         phase="train",
         transforms=[content_tfm, style_tfm, target_tfm],
         scr=args.phase_2,
-        include_source_style=getattr(args, 'enable_style_transform', False),
+        include_source_style=getattr(args, "enable_style_transform", False),
     )
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
@@ -666,7 +677,7 @@ def main():
             args=args,
             output_file=f"{args.output_dir}/{args.experience_name}_config.yaml",
         )
-        
+
         # Log configuration to wandb
         config_dict = {
             "model": {
@@ -685,10 +696,12 @@ def main():
                 "perceptual_coefficient": args.perceptual_coefficient,
                 "offset_coefficient": args.offset_coefficient,
                 "sc_coefficient": args.sc_coefficient if args.phase_2 else 0,
-                "style_transform_coefficient": getattr(args, 'style_transform_coefficient', 0.1),
+                "style_transform_coefficient": getattr(
+                    args, "style_transform_coefficient", 0.1
+                ),
             },
             "phase_2_enabled": args.phase_2,
-            "style_transform_enabled": getattr(args, 'enable_style_transform', False),
+            "style_transform_enabled": getattr(args, "enable_style_transform", False),
         }
         accelerator.log(config_dict)
     # Train
@@ -697,7 +710,9 @@ def main():
     logging.info(f"  Num batches per epoch: {len(train_dataloader)}")
     logging.info(f"  Total training steps: {args.max_train_steps}")
     logging.info(f"  Gradient accumulation steps: {args.gradient_accumulation_steps}")
-    logging.info(f"  Style Transform Module: {getattr(args, 'enable_style_transform', False)}")
+    logging.info(
+        f"  Style Transform Module: {getattr(args, 'enable_style_transform', False)}"
+    )
 
     train(
         model=model,

@@ -1,5 +1,7 @@
 import torch
 import logging
+
+
 class CollateFN(object):
     def __init__(self):
         pass
@@ -9,11 +11,11 @@ class CollateFN(object):
 
         for k in batch[0].keys():
             batch_key_data = [ele[k] for ele in batch]
-            
+
             if isinstance(batch_key_data[0], torch.Tensor):
                 # ✅ FIX: Handle variable-size tensors safely
                 first_shape = batch_key_data[0].shape
-                
+
                 # Check if all tensors have the same shape
                 if all(tensor.shape == first_shape for tensor in batch_key_data):
                     # All same shape - use stack
@@ -23,11 +25,11 @@ class CollateFN(object):
                     logging.warning(
                         f"Variable shapes detected for key '{k}': {[t.shape for t in batch_key_data]}"
                     )
-                    
+
                     # Try to standardize shapes
                     try:
                         from torchvision.transforms import functional as TF
-                        
+
                         # Resize all to first tensor's shape
                         resized = []
                         for tensor in batch_key_data:
@@ -35,7 +37,7 @@ class CollateFN(object):
                                 tensor = TF.resize(
                                     tensor,
                                     (first_shape[-2], first_shape[-1]),
-                                    interpolation=TF.InterpolationMode.LANCZOS
+                                    interpolation=TF.InterpolationMode.LANCZOS,
                                 )
                             resized.append(tensor)
                         batched_data[k] = torch.stack(resized)
