@@ -40,7 +40,7 @@ HF_BAR_FORMAT = (
     "{n_fmt}/{total_fmt} "
     "[{elapsed}<{remaining}, {rate_fmt}]"
 )
-class HFTqdm(hf_tqdm):
+class HFTqdm(rich_tqdm):
     """
     Enhanced TQDM progress bar that replicates the Hugging Face download interface.
     Features smooth updates, dynamic colors, and polished formatting.
