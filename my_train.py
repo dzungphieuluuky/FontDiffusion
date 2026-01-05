@@ -39,6 +39,7 @@ from utilities import (
     load_model_checkpoint,
     save_model_checkpoint,
     get_hf_bar,
+    setup_logging,
 )
 from utils import (
     normalize_mean_std,
@@ -46,65 +47,15 @@ from utils import (
     save_args_to_yaml,
     x0_from_epsilon,
 )
-def get_rank():
-    try:
-        import torch
-        if torch.distributed.is_available() and torch.distributed.is_initialized():
-            return torch.distributed.get_rank()
-    except Exception:
-        pass
-    return int(os.environ.get("LOCAL_RANK", 0))
 
-LOG_FORMAT = (
-    "%(asctime)s [%(levelname)s] [Rank %(rank)d] %(message)s"
-)
-
-class RankFilter(logging.Filter):
-    def filter(self, record):
-        record.rank = get_rank()
-        return True
-
-# Remove all handlers if already set (prevents duplicate logs in Jupyter/reloads)
-for handler in logging.root.handlers[:]:
-    logging.root.removeHandler(handler)
-
-handlers = [logging.StreamHandler()]
-
-logging.basicConfig(
-    level=logging.INFO,
-    format=LOG_FORMAT,
-    handlers=handlers,
-)
-for handler in logging.getLogger().handlers:
-    handler.addFilter(RankFilter())
-
-logger = get_logger(__name__)
-
-
-def setup_logging(output_dir: Path) -> None:
-    """Configure logging to file and console.
-
-    Args:
-        output_dir: Directory for log file
-    """
-    log_file = output_dir / "training.log"
-    log_file.parent.mkdir(parents=True, exist_ok=True)
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[logging.FileHandler(log_file), logging.StreamHandler()],
-    )
-
-
-def parse_args():
+def parse_args_training():
     """Parse and validate command line arguments.
 
     Returns:
         Parsed arguments with validated image sizes
     """
     parser = get_parser()
-    args = parser.parse_args()
+    args = parser.parse_args_training()
 
     # Handle distributed training rank
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -191,14 +142,15 @@ def apply_classifier_free_guidance(
         style_images: Style image batch (modified in-place)
         drop_prob: Probability of dropping conditioning
     """
-    bsz = content_images.shape[0]
-    context_mask = torch.bernoulli(torch.zeros(bsz) + drop_prob)
-
-    for i, should_drop in enumerate(context_mask):
-        if should_drop:
-            content_images[i] = 1.0
-            style_images[i] = 1.0
-
+    source_style_images = None
+    if getattr(args, 'enable_style_transform', False) and 'source_style_image' in samples:
+        source_style_images = samples["source_style_image"]
+        # Apply CFG dropout to source style only
+        bsz = source_style_images.shape[0]
+        mask = torch.bernoulli(torch.zeros(bsz) + drop_prob).to(source_style_images.device)
+        for i, should_drop in enumerate(mask):
+            if should_drop:
+                source_style_images[i] = 1.0
 
 def compute_losses(
     noise_pred: torch.Tensor,
@@ -211,7 +163,7 @@ def compute_losses(
     perceptual_loss: ContentPerceptualLoss,
     args,
     device: torch.device,
-) -> tuple[torch.Tensor, dict]:
+) -> tuple[torch.Tensor, dict, torch.Tensor]:
     """Compute all training losses.
 
     Args:
@@ -386,7 +338,8 @@ def train_step(
     noisy_target_images = noise_scheduler.add_noise(target_images, noise, timesteps)
 
     # Apply classifier-free guidance
-    apply_classifier_free_guidance(content_images, style_images, args.drop_prob)
+    drop_prob = getattr(args, "drop_prob", 0.1)
+    apply_classifier_free_guidance(content_images, style_images, drop_prob)
 
     # ✅ PREPARE SOURCE STYLE IMAGES FOR STYLE TRANSFORMATION
     source_style_images = None
@@ -450,10 +403,6 @@ def train_step(
         )
         loss += args.sc_coefficient * sc_loss
         loss_dict["sc_loss"] = sc_loss.item()
-
-    grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
-    loss_dict['grad_norm'] = grad_norm.item() if isinstance(grad_norm, torch.Tensor) else grad_norm
-
     return loss, loss_dict
 
 def train(
@@ -583,7 +532,7 @@ def train(
 
 def main():
     """Main training entry point."""
-    args = parse_args()
+    args = parse_args_training()
 
     # Setup accelerator
     accelerator = Accelerator(
@@ -652,7 +601,7 @@ def main():
                 scr.load_state_dict(load_model_checkpoint(args.scr_ckpt_path))
                 logging.info(f"Loaded SCR from {args.scr_ckpt_path}")
             except FileNotFoundError:
-                logger.warning("SCR checkpoint not found, using untrained SCR")
+                logging.warning("SCR checkpoint not found, using untrained SCR")
         scr.requires_grad_(False)
 
     # Create datasets
