@@ -256,4 +256,11 @@ def get_parser():
     parser.add_argument(
         "--val_interval", type=int, default=100, help="Validation interval in steps."
     )
+
+    parser.add_argument(
+        "--enable_style_transform",
+        action="store_true",
+        default=False,
+        help="Enable style transformation module",
+    )
     return parser
