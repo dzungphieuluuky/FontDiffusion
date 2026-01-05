@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import List, Dict, Optional, Set
 from collections import defaultdict
 from functools import lru_cache
+import logging
+from typing import Any, Dict, List, Optional, Set
 
 import numpy as np
 from PIL import Image
@@ -14,7 +16,7 @@ import pygame
 import pygame.freetype
 from fontTools.ttLib import TTFont
 import cv2
-
+from utils import is_char_in_font, load_ttf
 
 def ttf2im_robust(font, char, canvas_size=256):
     """
@@ -225,279 +227,119 @@ class FontRenderer:
 
 
 class FontManager:
-    """
-    Efficient font manager with robust rendering and Unicode character support checking
-    """
+    """Manages multiple font files"""
 
-    def __init__(
-        self, font_paths: List[str], font_size: int = 256, canvas_size: int = 256
-    ):
+    def __init__(self, ttf_path: str) -> None:
         """
-        Initialize font manager with multiple font paths
+        Initialize font manager
 
         Args:
-            font_paths: List of paths to TTF font files
-            font_size: Default font size for rendering
-            canvas_size: Size of output image
+            ttf_path: Path to a single font file or directory containing fonts
         """
-        self.font_paths = font_paths
-        self.font_size = font_size
-        self.canvas_size = canvas_size
+        self.fonts: Dict[str, Dict[str, Any]] = {}
+        self.font_paths: List[str] = []
+        self._load_fonts(ttf_path)
 
-        self.available_fonts = []
-        self.unicode_coverage_cache = {}
-        self.renderer = FontRenderer(font_size, canvas_size)
+    def _load_fonts(self, ttf_path: str) -> None:
+        """Load font(s) from path"""
+        if "*" in ttf_path:
+            # Handle wildcard path
+            import glob
 
-        self._load_fonts()
+            font_files: List[str] = glob.glob(ttf_path)
+            if not font_files:
+                raise ValueError(f"No font files found for pattern: {ttf_path}")
 
-    def _load_fonts(self):
-        """Load and validate all fonts"""
-        print(f"\nLoading {len(self.font_paths)} font(s)...")
+            self.font_paths = sorted(font_files)
 
-        for font_path in self.font_paths:
-            try:
-                if not os.path.exists(font_path):
-                    print(f"  ✗ Font file not found: {font_path}")
-                    continue
+            logging.info(f"{'=' * 60}")
+            logging.info(f"Loading {len(font_files)} fonts from wildcard path...")
+            logging.info("=" * 60)
 
-                # Load with pygame for rendering
-                font = pygame.freetype.Font(font_path, size=self.font_size)
-
-                # Load with fontTools for Unicode coverage checking
-                ttfont = TTFont(font_path)
-
-                # Get font name for display
+            for font_path in self.font_paths:
+                font_name: str = os.path.splitext(os.path.basename(font_path))[0]
                 try:
-                    name_record = ttfont["name"].getName(4, 3, 1)  # Full font name
-                    font_name = (
-                        name_record.toUnicode() if name_record else Path(font_path).stem
-                    )
-                except:
-                    font_name = Path(font_path).stem
-
-                # Test font rendering with a sample character
-                test_char = (
-                    "A"
-                    if self._has_character(ttfont, ord("A"))
-                    else next(iter(self._get_unicode_coverage(ttfont)), "?")
-                )
-
-                if test_char:
-                    test_image = self.renderer.ttf2im_fixed(
-                        font, test_char, debug=False
-                    )
-                    if test_image is None:
-                        print(f"  ✗ Font '{font_name}' failed rendering test")
-                        continue
-
-                self.available_fonts.append(
-                    {
+                    self.fonts[font_name] = {
                         "path": font_path,
+                        "font": load_ttf(font_path),
                         "name": font_name,
-                        "pygame_font": font,
-                        "ttfont": ttfont,
-                        "unicode_coverage": self._get_unicode_coverage(ttfont),
                     }
-                )
+                    logging.info(f"✓ Loaded: {font_name}")
+                except Exception as e:
+                    logging.info(f"✗ Failed to load {font_name}: {e}")
 
-                print(f"  ✓ Loaded: {font_name}")
+            logging.info("=" * 60)
+            logging.info(f"Successfully loaded {len(self.fonts)} fonts\n")
 
-            except Exception as e:
-                print(f"  ✗ Failed to load font {font_path}: {e}")
+        elif os.path.isfile(ttf_path):
+            # Single font file
+            self.font_paths = [ttf_path]
+            font_name: str = os.path.splitext(os.path.basename(ttf_path))[0]
+            self.fonts[font_name] = {
+                "path": ttf_path,
+                "font": load_ttf(ttf_path),
+                "name": font_name,
+            }
+            logging.info(f"✓ Loaded font: {font_name}")
 
-        if not self.available_fonts:
-            raise ValueError("No valid fonts were loaded")
+        elif os.path.isdir(ttf_path):
+            # Directory with multiple fonts
+            font_extensions: Set[str] = {".ttf", ".otf", ".TTF", ".OTF"}
+            font_files: List[str] = [
+                os.path.join(ttf_path, f)
+                for f in os.listdir(ttf_path)
+                if os.path.splitext(f)[1] in font_extensions
+            ]
 
-        print(f"Successfully loaded {len(self.available_fonts)} font(s)")
+            if not font_files:
+                raise ValueError(f"No font files found in directory: {ttf_path}")
 
-    @lru_cache(maxsize=128)
-    def _get_unicode_coverage(self, ttfont: TTFont) -> Set[int]:
-        """Extract all supported Unicode code points from a font"""
-        coverage = set()
-        if "cmap" in ttfont:
-            cmap = ttfont["cmap"]
-            for subtable in cmap.tables:
-                coverage.update(subtable.cmap.keys())
-        return coverage
+            self.font_paths = sorted(font_files)
 
-    def _has_character(self, ttfont: TTFont, char_code: int) -> bool:
-        """Check if a font has a specific character"""
-        if "cmap" not in ttfont:
-            return False
+            logging.info(f"{'=' * 60}")
+            logging.info(f"Loading {len(font_files)} fonts from directory...")
+            logging.info("=" * 60)
 
-        cmap = ttfont["cmap"]
-        for subtable in cmap.tables:
-            if char_code in subtable.cmap:
-                return True
-        return False
+            for font_path in self.font_paths:
+                font_name: str = os.path.splitext(os.path.basename(font_path))[0]
+                try:
+                    self.fonts[font_name] = {
+                        "path": font_path,
+                        "font": load_ttf(font_path),
+                        "name": font_name,
+                    }
+                    logging.info(f"✓ Loaded: {font_name}")
+                except Exception as e:
+                    logging.info(f"✗ Failed to load {font_name}: {e}")
 
-    @lru_cache(maxsize=1024)
-    def get_supporting_font(self, char: str) -> Optional[Dict]:
-        """
-        Find the first font that supports the given character
+            logging.info("=" * 60)
+            logging.info(f"Successfully loaded {len(self.fonts)} fonts\n")
+        else:
+            raise ValueError(f"Invalid ttf_path: {ttf_path}")
 
-        Args:
-            char: Single character string
+    def get_font_names(self) -> List[str]:
+        """Get list of loaded font names"""
+        return list(self.fonts.keys())
 
-        Returns:
-            Font dictionary or None if no font supports the character
-        """
-        char_code = ord(char)
+    def get_font(self, font_name: str) -> Any:
+        """Get font object by name"""
+        if font_name not in self.fonts:
+            raise ValueError(f"Font not found: {font_name}")
+        return self.fonts[font_name]["font"]
 
-        for font_info in self.available_fonts:
-            if char_code in font_info["unicode_coverage"]:
-                return font_info
+    def get_font_path(self, font_name: str) -> str:
+        """Get font file path by name"""
+        if font_name not in self.fonts:
+            raise ValueError(f"Font not found: {font_name}")
+        return self.fonts[font_name]["path"]
 
-        return None
+    def is_char_in_font(self, font_name: str, char: str) -> bool:
+        """Check if character exists in font"""
+        font_path: str = self.get_font_path(font_name)
+        return is_char_in_font(font_path, char)
 
-    def find_fonts_for_characters(
-        self, characters: List[str]
-    ) -> Dict[str, Optional[str]]:
-        """
-        Find which font supports each character in a list
-
-        Args:
-            characters: List of characters to check
-
-        Returns:
-            Dictionary mapping character to font name (or None if no font supports it)
-        """
-        font_mapping = {}
-
-        for char in characters:
-            font_info = self.get_supporting_font(char)
-            if font_info:
-                font_mapping[char] = font_info["name"]
-            else:
-                font_mapping[char] = None
-
-        return font_mapping
-
-    def can_render_character(self, char: str) -> bool:
-        """Check if any loaded font can render the character"""
-        return self.get_supporting_font(char) is not None
-
-    @lru_cache(maxsize=1024)
-    def render_character(self, char: str) -> Optional[Image.Image]:
-        """
-        Render character using the first available supporting font
-
-        Args:
-            char: Single character string
-
-        Returns:
-            PIL Image or None if character cannot be rendered
-        """
-        font_info = self.get_supporting_font(char)
-        if not font_info:
-            print(f"    No font supports character: '{char}' (U+{ord(char):04X})")
-            return None
-
-        try:
-            # Render with safety checks
-            result = self.renderer.render_with_safety_check(
-                font_info["pygame_font"], char
-            )
-
-            if result is None:
-                print(f"    Failed to render character: '{char}'")
-                return None
-
-            # Additional quality check
-            img_array = np.array(result.convert("L"))
-
-            # Check if image is mostly empty
-            if np.std(img_array) < 5:  # Very low contrast
-                print(f"    Warning: Character '{char}' rendered as mostly blank")
-                # Try alternative rendering approach
-                result = self._render_alternative(char, font_info["pygame_font"])
-
-            return result
-
-        except Exception as e:
-            print(f"    Error rendering character '{char}': {e}")
-            return None
-
-    def _render_alternative(self, char: str, font) -> Image.Image:
-        """Alternative rendering method for difficult characters"""
-        # Create larger surface
-        surface_size = self.canvas_size * 2
-        surface = pygame.Surface((surface_size, surface_size), pygame.SRCALPHA)
-        surface.fill((255, 255, 255, 255))  # White background
-
-        # Render character
-        text_surface, text_rect = font.render(
-            char,
-            fgcolor=(0, 0, 0),  # Black
-            size=self.font_size * 2,  # Larger size
-        )
-
-        # Center
-        text_rect.center = (surface_size // 2, surface_size // 2)
-        surface.blit(text_surface, text_rect)
-
-        # Convert to PIL and resize
-        img_str = pygame.image.tostring(surface, "RGBA")
-        pil_image = Image.frombytes("RGBA", (surface_size, surface_size), img_str)
-
-        # Convert to RGB and resize
-        pil_image = pil_image.convert("RGB").resize(
-            (self.canvas_size, self.canvas_size), Image.LANCZOS
-        )
-
-        return pil_image
-
-    def batch_render_characters(
-        self, characters: List[str]
-    ) -> Dict[str, Optional[Image.Image]]:
-        """
-        Render multiple characters efficiently
-
-        Returns:
-            Dictionary mapping character to rendered image
-        """
-        results = {}
-
-        for char in characters:
-            results[char] = self.render_character(char)
-
-        return results
-
-    def get_font_statistics(self) -> Dict:
-        """Get statistics about loaded fonts"""
-        stats = {
-            "total_fonts": len(self.available_fonts),
-            "font_names": [f["name"] for f in self.available_fonts],
-            "font_paths": [f["path"] for f in self.available_fonts],
-            "total_glyphs_by_font": {},
-            "sample_coverage": {},
-        }
-
-        # Test coverage with common characters
-        test_sets = {
-            "basic_latin": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
-            "common_chinese": "的一是不了人我在有他这为之大来以个中上们",
-            "punctuation": "，。？！；：''（）【】《》",
-        }
-
-        for font_info in self.available_fonts:
-            font_name = font_info["name"]
-            coverage = font_info["unicode_coverage"]
-
-            stats["total_glyphs_by_font"][font_name] = len(coverage)
-
-            # Calculate coverage for each test set
-            coverage_stats = {}
-            for set_name, test_chars in test_sets.items():
-                supported = sum(1 for c in test_chars if ord(c) in coverage)
-                total = len(test_chars)
-                coverage_pct = (supported / total * 100) if total > 0 else 0
-                coverage_stats[set_name] = {
-                    "supported": supported,
-                    "total": total,
-                    "percentage": round(coverage_pct, 1),
-                }
-
-            stats["sample_coverage"][font_name] = coverage_stats
-
-        return stats
+    def get_available_chars_for_font(
+        self, font_name: str, characters: List[str]
+    ) -> List[str]:
+        """Get list of characters available in specific font"""
+        return [char for char in characters if self.is_char_in_font(font_name, char)]
