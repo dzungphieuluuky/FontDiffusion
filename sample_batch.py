@@ -436,12 +436,6 @@ def parse_args() -> Namespace:
     parser.add_argument("--device", type=str, default="cuda", help="Device to use")
 
     parser.add_argument(
-        "--enable_style_transform",
-        action="store_true",
-        default=False,
-        help="Enable style transformation module"
-    )
-    parser.add_argument(
         "--num_scales",
         type=int,
         default=4,
@@ -519,7 +513,7 @@ def parse_args() -> Namespace:
         default=False,
         help="Enable style transformation module",
     )
-    
+
     # Checkpoint and resume
     parser.add_argument(
         "--save_interval",
