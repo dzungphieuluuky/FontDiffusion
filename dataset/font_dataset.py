@@ -237,9 +237,10 @@ class FontDataset(Dataset):
             style: Current style
         
         Returns:
-            Tensor of negative images (num_neg, C, H, W)
+            Tensor of negative images (num_neg, C, H, W) - FIXED SIZE
         """
-        neg_images = None
+        num_neg = getattr(self, 'num_neg', 1)
+        neg_images_list = []
         
         if content in self.content_to_styles:
             # Get all styles for this content except current style
@@ -248,12 +249,12 @@ class FontDataset(Dataset):
             ]
             
             # Limit to num_neg styles
-            num_neg = min(self.num_neg, len(available_styles))
+            num_available = min(num_neg, len(available_styles))
             
-            if num_neg > 0:
-                selected_styles = random.sample(available_styles, num_neg)
+            if num_available > 0:
+                selected_styles = random.sample(available_styles, num_available)
                 
-                for style_idx, neg_style in enumerate(selected_styles):
+                for neg_style in selected_styles:
                     neg_image_paths = self.content_to_styles[content][neg_style]
                     neg_image_path = random.choice(neg_image_paths)
                     
@@ -263,12 +264,7 @@ class FontDataset(Dataset):
                         if self.transforms is not None:
                             neg_image = self.transforms[2](neg_image)
                         
-                        if neg_images is None:
-                            neg_images = neg_image[None, :, :, :]
-                        else:
-                            neg_images = torch.cat(
-                                [neg_images, neg_image[None, :, :, :]], dim=0
-                            )
+                        neg_images_list.append(neg_image)
                     
                     except Exception as e:
                         print(
@@ -276,16 +272,16 @@ class FontDataset(Dataset):
                         )
                         continue
         
-        # Fallback: if no negative images found, create dummy tensor
-        if neg_images is None:
-            num_neg = getattr(self, 'num_neg', 1)
-            # Use a black image as fallback
-            neg_images = torch.zeros(
-                num_neg, 3, 256, 256, dtype=torch.float32
-            )
+        # Pad with black images to ensure consistent size
+        while len(neg_images_list) < num_neg:
+            # Create black image with same shape as transforms output
+            black_image = torch.zeros(3, 256, 256, dtype=torch.float32)
+            neg_images_list.append(black_image)
         
+        # Stack to (num_neg, C, H, W) and truncate to num_neg if needed
+        neg_images = torch.stack(neg_images_list[:num_neg])
         return neg_images
-
+    
     def __len__(self) -> int:
         return len(self.target_images)
 
