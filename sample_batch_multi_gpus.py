@@ -686,6 +686,12 @@ def main():
             logging.info("✅ GENERATION COMPLETE!")
             logging.info("=" * 60)
 
+        accelerator.free_memory()
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            torch.distributed.destroy_process_group()
+            logging.info("Process group destroyed successfully")
+
+
     except Exception as e:
         logging.error(f"Fatal error: {e}")
         import traceback
