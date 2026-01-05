@@ -639,6 +639,7 @@ def main():
             accelerator,
         )
 
+        accelerator.wait_for_everyone()
         # Evaluate on main process
         if accelerator.is_main_process:
             if args.evaluate and args.ground_truth_dir:
@@ -658,8 +659,6 @@ def main():
             logging.info("=" * 60)
             logging.info("✅ GENERATION COMPLETE!")
             logging.info("=" * 60)
-
-        accelerator.wait_for_everyone()
 
     except Exception as e:
         logging.error(f"Fatal error: {e}")
