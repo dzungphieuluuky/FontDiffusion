@@ -209,92 +209,93 @@ def sampling_batch_with_accelerator(
     style_image_path: Union[str, Image.Image],
     font_manager: FontManager,
     font_name: str,
-    accelerator: Accelerator,
 ) -> Tuple[Optional[List[Image.Image]], Optional[List[str]], Optional[float]]:
+    """Batch sampling for multiple characters.
+
+    Args:
+        args: Arguments
+        pipe: Pipeline
+        characters: List of characters
+        style_image_path: Style image path or PIL image
+        font_manager: Font manager
+        font_name: Font name to use
+
+    Returns:
+        Tuple of (images, valid_chars, batch_time)
     """
-    Batch sampling for multiple characters with multi-GPU support.
-    
-    Style transformation is NOT applied during inference.
-    It's only used during training (Phase 2).
-    """
+    # Get available characters for this font
+    available_chars = font_manager.get_available_chars_for_font(font_name, characters)
+    if not available_chars:
+        return None, None, None
+
     try:
+        # Load style image
         if isinstance(style_image_path, str):
             style_image = Image.open(style_image_path).convert("RGB")
         else:
-            style_image = style_image_path
+            style_image = style_image_path.convert("RGB")
 
         style_transform = get_style_transform(args.style_image_size)
-        style_image = style_transform(style_image)
-
+        font = font_manager.get_font(font_name)
         content_transform = get_content_transform(args.content_image_size)
-        
-        images = []
-        valid_chars = []
-        generation_times = []
 
-        # Distribute characters across GPUs
-        char_batches = [
-            characters[i::accelerator.num_processes]
-            for i in range(accelerator.num_processes)
-        ]
-        local_chars = char_batches[accelerator.local_process_index]
+        # Generate content images
+        content_images = []
+        for char in available_chars:
+            try:
+                content_image = ttf2im(font=font, char=char)
+                content_images.append(content_transform(content_image))
+            except Exception as e:
+                logging.warning(f"Error processing '{char}': {e}")
 
-        with get_hf_bar(
-            total=len(local_chars),
-            desc=f"GPU {accelerator.process_index} generating {font_name}",
-            unit="char",
-            disable=not accelerator.is_local_main_process,
-        ) as pbar:
-            for char in local_chars:
-                try:
-                    if not is_char_in_font(font_manager.get_font_path(font_name), char):
-                        pbar.update(1)
-                        continue
+        if not content_images:
+            return None, None, None
 
-                    content_image = ttf2im(
-                        load_ttf(font_manager.get_font_path(font_name)),
-                        char,
-                        args.content_image_size,
-                    )
-                    content_image = content_transform(content_image)
+        # Prepare batches
+        content_batch = torch.stack(content_images)
+        style_batch = style_transform(style_image)[None, :].repeat(
+            len(content_images), 1, 1, 1
+        )
 
-                    start_time = time.time()
-                    gen_images = pipe.generate(
-                        content_images=content_image.unsqueeze(0).to(pipe.model.device),
-                        style_images=style_image.unsqueeze(0).to(pipe.model.device),
-                        batch_size=1,
-                        order=args.order,
-                        num_inference_step=args.num_inference_steps,
-                        content_encoder_downsample_size=args.content_encoder_downsample_size,
-                        t_start=args.t_start,
-                        t_end=args.t_end,
-                        dm_size=args.content_image_size,
-                        algorithm_type=args.algorithm_type,
-                        skip_type=args.skip_type,
-                        method=args.method,
-                        correcting_x0_fn=args.correcting_x0_fn,
-                    )
-                    generation_times.append(time.time() - start_time)
+        with torch.inference_mode():
+            dtype = torch.float16 if args.fp16 else torch.float32
+            content_batch = content_batch.to(args.device, dtype=dtype)
+            style_batch = style_batch.to(args.device, dtype=dtype)
 
-                    images.extend(gen_images)
-                    valid_chars.append(char)
+            start = time.perf_counter()
 
-                except Exception as e:
-                    logger.warning(
-                        f"GPU {accelerator.process_index}: Failed to generate '{char}': {e}"
-                    )
-                    continue
-                finally:
-                    pbar.update(1)
+            # Process in batches
+            all_images = []
+            for i in range(0, len(content_batch), args.batch_size):
+                batch_content = content_batch[i : i + args.batch_size]
+                batch_style = style_batch[i : i + args.batch_size]
 
-        avg_time = sum(generation_times) / len(generation_times) if generation_times else 0
-        return images, valid_chars, avg_time
+                images = pipe.generate(
+                    content_images=batch_content,
+                    style_images=batch_style,
+                    batch_size=len(batch_content),
+                    order=args.order,
+                    num_inference_step=args.num_inference_steps,
+                    content_encoder_downsample_size=args.content_encoder_downsample_size,
+                    t_start=args.t_start,
+                    t_end=args.t_end,
+                    dm_size=args.content_image_size,
+                    algorithm_type=args.algorithm_type,
+                    skip_type=args.skip_type,
+                    method=args.method,
+                    correcting_x0_fn=args.correcting_x0_fn,
+                )
+                all_images.extend(images)
+
+            end = time.perf_counter()
+            total_time = end - start
+
+            return all_images, available_chars, total_time
 
     except Exception as e:
-        logger.error(
-            f"GPU {accelerator.process_index}: Batch generation failed: {e}"
-        )
+        logging.error(f"Batch sampling failed: {e}")
         return None, None, None
+
 
 def batch_generate_images_with_accelerator(
     pipe: FontDiffuserDPMPipeline,
@@ -398,7 +399,6 @@ def batch_generate_images_with_accelerator(
                     style_path,
                     font_manager,
                     primary_font,
-                    accelerator,
                 )
 
                 if images is None:
@@ -686,10 +686,13 @@ def main():
             logging.info("✅ GENERATION COMPLETE!")
             logging.info("=" * 60)
 
-        accelerator.free_memory()
-        if torch.distributed.is_available() and torch.distributed.is_initialized():
-            torch.distributed.destroy_process_group()
-            logging.info("Process group destroyed successfully")
+        try:
+            accelerator.free_memory()
+            if torch.distributed.is_available() and torch.distributed.is_initialized():
+                torch.distributed.destroy_process_group()
+                logging.info("Process group destroyed successfully")
+        except Exception as e:
+            logging.warning(f"Error during cleanup: {e}")
 
 
     except Exception as e:
