@@ -132,24 +132,32 @@ def create_transforms(args):
 
 
 def apply_classifier_free_guidance(
-    content_images: torch.Tensor, style_images: torch.Tensor, drop_prob: float
+    content_images: torch.Tensor,
+    style_images: torch.Tensor,
+    drop_prob: float,
+    samples: Optional[Dict[str, torch.Tensor]] = None,
 ) -> None:
-    """Apply classifier-free guidance by masking inputs.
+    """Apply classifier-free guidance by masking inputs (in-place modification).
 
     Args:
         content_images: Content image batch (modified in-place)
         style_images: Style image batch (modified in-place)
         drop_prob: Probability of dropping conditioning
+        samples: Optional sample batch for style transform
     """
-    source_style_images = None
-    if getattr(args, 'enable_style_transform', False) and 'source_style_image' in samples:
+    bsz = content_images.shape[0]
+    context_mask = torch.bernoulli(torch.zeros(bsz) + drop_prob)
+    for i, mask_value in enumerate(context_mask):
+        if mask_value == 1:
+            content_images[i, :, :, :] = 1
+            style_images[i, :, :, :] = 1
+
+    # Style transformation masking if applicable
+    if samples is not None and 'source_style_image' in samples:
         source_style_images = samples["source_style_image"]
-        # Apply CFG dropout to source style only
-        bsz = source_style_images.shape[0]
-        mask = torch.bernoulli(torch.zeros(bsz) + drop_prob).to(source_style_images.device)
-        for i, should_drop in enumerate(mask):
-            if should_drop:
-                source_style_images[i] = 1.0
+        for i, mask_value in enumerate(context_mask):
+            if mask_value == 1:
+                source_style_images[i, :, :, :] = 1
 
 def compute_losses(
     noise_pred: torch.Tensor,
@@ -336,19 +344,19 @@ def train_step(
     # Add noise (forward diffusion)
     noisy_target_images = noise_scheduler.add_noise(target_images, noise, timesteps)
 
-    # Apply classifier-free guidance
+    # ✅ PASS samples parameter to CFG function
     drop_prob = getattr(args, "drop_prob", 0.1)
-    apply_classifier_free_guidance(content_images, style_images, drop_prob)
+    apply_classifier_free_guidance(
+        content_images,
+        style_images,
+        drop_prob,
+        samples=samples,  # ✅ ADD THIS
+    )
 
-    # ✅ PREPARE SOURCE STYLE IMAGES FOR STYLE TRANSFORMATION
+    # ✅ No need to call it again for source style
     source_style_images = None
     if getattr(args, 'enable_style_transform', False) and 'source_style_image' in samples:
         source_style_images = samples["source_style_image"]
-        apply_classifier_free_guidance(
-            torch.zeros_like(source_style_images),
-            source_style_images,
-            args.drop_prob
-        )
 
     # Forward pass
     noise_pred, offset_out_sum, style_transform_feature = model(
@@ -357,7 +365,7 @@ def train_step(
         style_images=style_images,
         content_images=content_images,
         content_encoder_downsample_size=args.content_encoder_downsample_size,
-        source_style_images=source_style_images,  # ✅ ADD THIS
+        source_style_images=source_style_images,
     )
 
     # Compute losses
