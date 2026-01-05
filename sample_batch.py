@@ -513,6 +513,13 @@ def parse_args() -> Namespace:
         help="Use fast sampling mode",
     )
 
+    parser.add_argument(
+        "--enable_style_transform",
+        action="store_true",
+        default=False,
+        help="Enable style transformation module",
+    )
+    
     # Checkpoint and resume
     parser.add_argument(
         "--save_interval",
