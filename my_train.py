@@ -9,6 +9,7 @@ import math
 import os
 from pathlib import Path
 from typing import Optional
+import logging
 
 import torch
 import torch.nn.functional as F
@@ -45,9 +46,39 @@ from utils import (
     save_args_to_yaml,
     x0_from_epsilon,
 )
+def get_rank():
+    try:
+        import torch
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            return torch.distributed.get_rank()
+    except Exception:
+        pass
+    return int(os.environ.get("LOCAL_RANK", 0))
+
+LOG_FORMAT = (
+    "%(asctime)s [%(levelname)s] [Rank %(rank)d] %(message)s"
+)
+
+class RankFilter(logging.Filter):
+    def filter(self, record):
+        record.rank = get_rank()
+        return True
+
+# Remove all handlers if already set (prevents duplicate logs in Jupyter/reloads)
+for handler in logging.root.handlers[:]:
+    logging.root.removeHandler(handler)
+
+handlers = [logging.StreamHandler()]
+
+logging.basicConfig(
+    level=logging.INFO,
+    format=LOG_FORMAT,
+    handlers=handlers,
+)
+for handler in logging.getLogger().handlers:
+    handler.addFilter(RankFilter())
 
 logger = get_logger(__name__)
-logger.info("Logger initialized.")
 
 
 def setup_logging(output_dir: Path) -> None:
@@ -97,12 +128,12 @@ def load_phase1_checkpoints(model_components: dict, ckpt_dir: str) -> None:
     Raises:
         FileNotFoundError: If required checkpoint is missing
     """
-    logger.info("Loading Phase 1 checkpoints...")
+    logging.info("Loading Phase 1 checkpoints...")
 
     for name, component in model_components.items():
         ckpt_path = find_checkpoint(ckpt_dir, name)
         component.load_state_dict(load_model_checkpoint(ckpt_path))
-        logger.info(f"Loaded {name} from {ckpt_path}")
+        logging.info(f"Loaded {name} from {ckpt_path}")
 
 
 def create_transforms(args):
@@ -319,7 +350,7 @@ def save_checkpoint(
             save_dir / "scr.safetensors",
         )
 
-    logger.info(f"Saved checkpoint at step {global_step} to {save_dir}")
+    logging.info(f"Saved checkpoint at step {global_step} to {save_dir}")
     # Log checkpoint save event
     if hasattr(accelerator, 'log'):
         accelerator.log({"checkpoint_saved": True, "checkpoint_step": global_step})
@@ -508,7 +539,7 @@ def train(
                     accelerator.log(log_dict, step=global_step)
 
                     if global_step % args.log_interval == 0:
-                        logger.info(
+                        logging.info(
                             f"Step {global_step}: loss={train_loss:.4f}, "
                             f"lr={lr_scheduler.get_last_lr()[0]:.6f}"
                         )
@@ -573,7 +604,7 @@ def main():
     # ✅ BUILD STYLE TRANSFORMATION MODULE
     style_transform_module = None
     if getattr(args, 'enable_style_transform', False):
-        logger.info("Building Style Transformation Module...")
+        logging.info("Building Style Transformation Module...")
         style_transform_module = StyleTransformationModule(
             num_scales=getattr(args, 'num_scales', 4),
             feature_dim=getattr(args, 'feature_dim', 512),
@@ -581,7 +612,7 @@ def main():
             num_heads=getattr(args, 'num_heads', 8),
             ffn_dim=getattr(args, 'ffn_dim', 2048),
         )
-        logger.info("✓ Style Transformation Module built successfully")
+        logging.info("✓ Style Transformation Module built successfully")
 
     # Load Phase 1 checkpoints if provided
     if args.phase_1_ckpt_dir is not None:
@@ -612,7 +643,7 @@ def main():
         if args.scr_ckpt_path:
             try:
                 scr.load_state_dict(load_model_checkpoint(args.scr_ckpt_path))
-                logger.info(f"Loaded SCR from {args.scr_ckpt_path}")
+                logging.info(f"Loaded SCR from {args.scr_ckpt_path}")
             except FileNotFoundError:
                 logger.warning("SCR checkpoint not found, using untrained SCR")
         scr.requires_grad_(False)
@@ -699,12 +730,12 @@ def main():
         }
         accelerator.log(config_dict)
     # Train
-    logger.info("Starting training...")
-    logger.info(f"  Num examples: {len(train_dataset)}")
-    logger.info(f"  Num batches per epoch: {len(train_dataloader)}")
-    logger.info(f"  Total training steps: {args.max_train_steps}")
-    logger.info(f"  Gradient accumulation steps: {args.gradient_accumulation_steps}")
-    logger.info(f"  Style Transform Module: {getattr(args, 'enable_style_transform', False)}")
+    logging.info("Starting training...")
+    logging.info(f"  Num examples: {len(train_dataset)}")
+    logging.info(f"  Num batches per epoch: {len(train_dataloader)}")
+    logging.info(f"  Total training steps: {args.max_train_steps}")
+    logging.info(f"  Gradient accumulation steps: {args.gradient_accumulation_steps}")
+    logging.info(f"  Style Transform Module: {getattr(args, 'enable_style_transform', False)}")
 
     train(
         model=model,
@@ -719,7 +750,7 @@ def main():
     )
 
     accelerator.end_training()
-    logger.info("Training completed!")
+    logging.info("Training completed!")
 
 
 if __name__ == "__main__":
