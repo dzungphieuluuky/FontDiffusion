@@ -4,6 +4,7 @@ import argparse
 import json
 import logging
 import shutil
+import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Tuple
@@ -68,15 +69,17 @@ HF_BAR_FORMAT = (
 )
 
 
-class HFTqdm(rich_tqdm):
+class HFTqdm(rich_tqdm, hf_tqdm):
     """
     Enhanced tqdm progress bar that mimics the Hugging‑Face download UI.
+    Optimized for Kaggle notebooks (eliminates duplicate bars).
 
     Features
     -------
-    * Smooth animation (100 ms updates)
+    * Smooth animation (100 ms updates)
     * Dynamic colour changes (blue → green on completion)
     * Emoji‑friendly description updates
+    * Single progress bar display on Kaggle
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -91,10 +94,12 @@ class HFTqdm(rich_tqdm):
         kwargs.setdefault("maxinterval", 1.0)
         kwargs.setdefault("smoothing", 0.3)
         kwargs.setdefault("leave", True)
+        kwargs.setdefault("file", sys.stderr)  # ✅ Force stderr to avoid duplication
 
         self._base_desc = kwargs.get("desc", "Processing")
 
-        super().__init__(*args, **kwargs)
+        # ✅ Only initialize rich_tqdm to avoid duplicate bars
+        rich_tqdm.__init__(self, *args, **kwargs)
 
         self._start_time = time.time()
         self._warning_shown = False
@@ -134,7 +139,6 @@ class HFTqdm(rich_tqdm):
             self.set_description(f"✗ {self._base_desc} (failed)", refresh=False)
         self.close()
         return False
-
 
 def get_hf_bar(
     iterable: Optional[Iterable[Any]] = None,
