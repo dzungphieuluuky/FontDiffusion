@@ -572,9 +572,10 @@ def main():
             hidden_dim=getattr(args, 'hidden_dim', 256),
             num_heads=getattr(args, 'num_heads', 8),
             ffn_dim=getattr(args, 'ffn_dim', 2048),
+            input_feature_dim=getattr(args, 'input_feature_dim', 1024),  # ✅ ADD THIS
         )
         logging.info("✓ Style Transformation Module built successfully")
-
+        
     # Load Phase 1 checkpoints if provided
     if args.phase_1_ckpt_dir is not None:
         load_phase1_checkpoints(

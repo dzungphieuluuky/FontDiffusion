@@ -69,21 +69,12 @@ HF_BAR_FORMAT = (
 )
 
 
-class HFTqdm(rich_tqdm, hf_tqdm):
-    """
-    Enhanced tqdm progress bar that mimics the Hugging‑Face download UI.
-    Optimized for Kaggle notebooks (eliminates duplicate bars).
+import warnings
 
-    Features
-    -------
-    * Smooth animation (100 ms updates)
-    * Dynamic colour changes (blue → green on completion)
-    * Emoji‑friendly description updates
-    * Single progress bar display on Kaggle
-    """
+class HFTqdm(rich_tqdm, hf_tqdm):
+    """Enhanced tqdm progress bar."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        # Default values matching the Hugging‑Face style
         kwargs.setdefault("unit", "it")
         kwargs.setdefault("unit_scale", True)
         kwargs.setdefault("bar_format", HF_BAR_FORMAT)
@@ -94,12 +85,13 @@ class HFTqdm(rich_tqdm, hf_tqdm):
         kwargs.setdefault("maxinterval", 1.0)
         kwargs.setdefault("smoothing", 0.3)
         kwargs.setdefault("leave", True)
-        kwargs.setdefault("file", sys.stderr)  # ✅ Force stderr to avoid duplication
+        kwargs.setdefault("file", sys.stderr)
 
         self._base_desc = kwargs.get("desc", "Processing")
 
-        # ✅ Only initialize rich_tqdm to avoid duplicate bars
-        rich_tqdm.__init__(self, *args, **kwargs)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning, message=".*rich.*experimental.*")
+            super().__init__(*args, **kwargs)
 
         self._start_time = time.time()
         self._warning_shown = False
