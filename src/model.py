@@ -514,7 +514,4 @@ class FontDiffuserModelDPM(ModelMixin, ConfigMixin):
             content_encoder_downsample_size=content_encoder_downsample_size,
         )
         noise_pred = out[0]
-        if self.style_transform_module is not None:
-            return noise_pred, style_transform_feature
-        else:
-            return noise_pred
+        return noise_pred
