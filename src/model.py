@@ -314,7 +314,7 @@ class FontDiffuserModel(ModelMixin, ConfigMixin):
             noise_pred, offset_out_sum, style_transform_feature
         """
         # Extract target style features
-        style_img_feature, _, style_residual_features = self.style_encoder(style_images)
+        style_img_feature, _, style_residual_features = self.config.style_encoder(style_images)
 
         batch_size, channel, height, width = style_img_feature.shape
         style_hidden_states = style_img_feature.permute(0, 2, 3, 1).reshape(
@@ -322,13 +322,13 @@ class FontDiffuserModel(ModelMixin, ConfigMixin):
         )
 
         # Get content features
-        content_img_feature, content_residual_features = self.content_encoder(
+        content_img_feature, content_residual_features = self.config.content_encoder(
             content_images
         )
         content_residual_features.append(content_img_feature)
 
         # Get reference content features from style image
-        style_content_feature, style_content_res_features = self.content_encoder(
+        style_content_feature, style_content_res_features = self.config.content_encoder(
             style_images
         )
         style_content_res_features.append(style_content_feature)
@@ -337,12 +337,12 @@ class FontDiffuserModel(ModelMixin, ConfigMixin):
         style_transform_feature = None
         style_diff = None
 
-        if source_style_images is not None and self.style_transform_module is not None:
+        if source_style_images is not None and self.config.style_transform_module is not None:
             # Extract source style features
-            source_style_img_feature, _, _ = self.style_encoder(source_style_images)
+            source_style_img_feature, _, _ = self.config.style_encoder(source_style_images)
 
             # ✅ CORRECT: Pass only source and target style features
-            style_transform_feature, style_diff = self.style_transform_module(
+            style_transform_feature, style_diff = self.config.style_transform_module(
                 source_style_features=source_style_img_feature,
                 target_style_features=style_img_feature,
             )
@@ -351,8 +351,8 @@ class FontDiffuserModel(ModelMixin, ConfigMixin):
             style_diff = torch.zeros(
                 batch_size,
                 (
-                    self.style_transform_module.feature_dim
-                    if self.style_transform_module is not None
+                    self.config.style_transform_module.feature_dim
+                    if self.config.style_transform_module is not None
                     else 256
                 ),
                 device=style_img_feature.device,
@@ -366,7 +366,7 @@ class FontDiffuserModel(ModelMixin, ConfigMixin):
             style_diff,
         ]
 
-        out = self.unet(
+        out = self.config.unet(
             x_t,
             timesteps,
             encoder_hidden_states=input_hidden_states,
@@ -420,7 +420,7 @@ class FontDiffuserModelDPM(ModelMixin, ConfigMixin):
         style_images = cond[1]
 
         # Extract target style features
-        style_img_feature, _, style_residual_features = self.style_encoder(style_images)
+        style_img_feature, _, style_residual_features = self.config.style_encoder(style_images)
 
         batch_size, channel, height, width = style_img_feature.shape
         style_hidden_states = style_img_feature.permute(0, 2, 3, 1).reshape(
@@ -428,13 +428,13 @@ class FontDiffuserModelDPM(ModelMixin, ConfigMixin):
         )
 
         # Get content features
-        content_img_feature, content_residual_features = self.content_encoder(
+        content_img_feature, content_residual_features = self.config.content_encoder(
             content_images
         )
         content_residual_features.append(content_img_feature)
 
         # Get reference content features
-        style_content_feature, style_content_res_features = self.content_encoder(
+        style_content_feature, style_content_res_features = self.config.content_encoder(
             style_images
         )
         style_content_res_features.append(style_content_feature)
@@ -443,14 +443,14 @@ class FontDiffuserModelDPM(ModelMixin, ConfigMixin):
         style_transform_feature = None
         style_diff = None
 
-        if source_cond is not None and self.style_transform_module is not None:
+        if source_cond is not None and self.config.style_transform_module is not None:
             source_content_images, source_style_images = source_cond
 
             # Extract source style features
-            source_style_img_feature, _, _ = self.style_encoder(source_style_images)
+            source_style_img_feature, _, _ = self.config.style_encoder(source_style_images)
 
             # ✅ CORRECT: Pass only source and target style features
-            style_transform_feature, style_diff = self.style_transform_module(
+            style_transform_feature, style_diff = self.config.style_transform_module(
                 source_style_features=source_style_img_feature,
                 target_style_features=style_img_feature,
             )
@@ -458,8 +458,8 @@ class FontDiffuserModelDPM(ModelMixin, ConfigMixin):
             style_diff = torch.zeros(
                 batch_size,
                 (
-                    self.style_transform_module.feature_dim
-                    if self.style_transform_module is not None
+                    self.config.style_transform_module.feature_dim
+                    if self.config.style_transform_module is not None
                     else 256
                 ),
                 device=style_img_feature.device,
@@ -473,7 +473,7 @@ class FontDiffuserModelDPM(ModelMixin, ConfigMixin):
             style_diff,
         ]
 
-        out = self.unet(
+        out = self.config.unet(
             x_t,
             timesteps,
             encoder_hidden_states=input_hidden_states,
