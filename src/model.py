@@ -76,27 +76,14 @@ class StyleTransformationModule(nn.Module):
         hidden_dim: int = 256,
         num_heads: int = 8,
         ffn_dim: int = 2048,
-        style_image_size: int = 96,  # ✅ CHANGED: Auto-compute or None
+        style_image_size: int = 96,
+        input_channels: int = 1,  # ✅ ADD THIS
     ):
         super().__init__()
         self.num_scales = num_scales
         self.feature_dim = feature_dim
-        self.hidden_dim = hidden_dim
-        self.num_heads = num_heads
-        self.ffn_dim = ffn_dim
-
-        # ✅ FIX: Don't use input_feature_dim, work with spatial features directly
-        # Style encoder outputs (B, C, H, W) - we'll process spatial dims
-        # For 96x96 images with 1 channel: (B, 1, 96, 96)
-        # Reshape to (B, 9216) then project to feature_dim
-
-        # Compute input dimension from typical style encoder output
-        # Assuming style_encoder output is (B, 1, 96, 96) for 96x96 input
-        self.spatial_size = (
-            style_image_size * style_image_size
-        )  # H * W for standard 96x96 images
-
-        # ✅ Project spatial features to feature_dim
+        
+        self.spatial_size = input_channels * style_image_size * style_image_size
         self.feature_projection = nn.Linear(self.spatial_size, feature_dim)
 
         # Multi-scale transformer blocks
@@ -196,45 +183,33 @@ class StyleTransformationModule(nn.Module):
         source_style_features: torch.Tensor,
         target_style_features: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Forward pass for style transformation.
-
-        Args:
-            source_style_features: Source style features (B, C, H, W) from style encoder
-            target_style_features: Target style features (B, C, H, W) from style encoder
-
-        Returns:
-            Tuple of (transformed_features, style_difference)
-        """
+        """Forward pass for style transformation."""
         # Extract multi-scale features
         source_features = self.extract_style_features(source_style_features)
         target_features = self.extract_style_features(target_style_features)
 
-        # Compute style difference
         batch_size = source_style_features.shape[0]
-        style_diff = torch.zeros(
-            batch_size,
-            self.feature_dim,
-            device=source_style_features.device,
-            dtype=source_style_features.dtype,
-        )
-
+        
+        # ✅ Compute style differences across scales
+        style_diffs = []
         for src_kv, tgt_kv in zip(source_features, target_features):
             src_key, src_val = src_kv
             tgt_key, tgt_val = tgt_kv
-            # Accumulate style difference
-            style_diff += F.mse_loss(src_key, tgt_key, reduction="none").mean(
-                dim=1, keepdim=True
-            )
-            style_diff += F.mse_loss(src_val, tgt_val, reduction="none").mean(
-                dim=1, keepdim=True
-            )
+            
+            # MSE between source and target
+            key_diff = F.mse_loss(src_key, tgt_key, reduction='none').mean(dim=1)  # (B,)
+            val_diff = F.mse_loss(src_val, tgt_val, reduction='none').mean(dim=1)  # (B,)
+            style_diffs.append(key_diff + val_diff)
+        
+        # Average style difference: (B,)
+        style_diff = torch.stack(style_diffs).mean(dim=0)
 
-        style_diff = style_diff / (2 * self.num_scales)
-
-        # Return transformed feature (use first scale's key) and style difference
+        # Return transformed feature (can be used for additional conditioning)
+        # Return as (B, feature_dim) - simple vector representation
         transformed = source_features[0][0]  # (B, feature_dim)
+        
         return transformed, style_diff
-
+    
     def _scaled_dot_product_attention(
         self,
         query: torch.Tensor,
@@ -404,73 +379,48 @@ class FontDiffuserModelDPM(ModelMixin, ConfigMixin):
         version,
         source_cond: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
     ):
-        """
-        Args:
-            x_t: Noisy latent
-            timesteps: Diffusion timesteps
-            cond: Tuple of (content_images, target_style_images)
-            content_encoder_downsample_size: Downsampling size
-            version: Model version
-            source_cond: Optional tuple (source_content, source_style) for style transformation
-
-        Returns:
-            noise_pred
-        """
         content_images = cond[0]
         style_images = cond[1]
 
-        # Extract target style features
+        # Extract style features
         style_img_feature, _, style_residual_features = self.config.style_encoder(style_images)
-
         batch_size, channel, height, width = style_img_feature.shape
+        
         style_hidden_states = style_img_feature.permute(0, 2, 3, 1).reshape(
             batch_size, height * width, channel
         )
-
-        # Get content features
+        
+        # Extract content features
         content_img_feature, content_residual_features = self.config.content_encoder(
             content_images
         )
         content_residual_features.append(content_img_feature)
-
-        # Get reference content features
+        
         style_content_feature, style_content_res_features = self.config.content_encoder(
             style_images
         )
         style_content_res_features.append(style_content_feature)
 
-        # ✅ FIXED: Compute style transformation with correct arguments
+        # ✅ Compute style transformation if provided
         style_transform_feature = None
-        style_diff = None
-
         if source_cond is not None and self.config.style_transform_module is not None:
             source_content_images, source_style_images = source_cond
-
-            # Extract source style features
             source_style_img_feature, _, _ = self.config.style_encoder(source_style_images)
-
-            # ✅ CORRECT: Pass only source and target style features
+            
+            # Get style transformation output
             style_transform_feature, style_diff = self.config.style_transform_module(
                 source_style_features=source_style_img_feature,
                 target_style_features=style_img_feature,
             )
-        else:
-            style_diff = torch.zeros(
-                batch_size,
-                (
-                    self.config.style_transform_module.feature_dim
-                    if self.config.style_transform_module is not None
-                    else 256
-                ),
-                device=style_img_feature.device,
-            )
+            # style_diff can be used for loss calculation or returned separately
+            # but NOT included in encoder_hidden_states
 
+        # ✅ FIXED: Only 4 elements - style_diff NOT included
         input_hidden_states = [
-            style_img_feature,
-            content_residual_features,
-            style_hidden_states,
-            style_content_res_features,
-            style_diff,
+            style_img_feature,           # Index 0: (B, C, H, W)
+            content_residual_features,   # Index 1: List of tensors
+            style_hidden_states,         # Index 2: (B, H*W, C)
+            style_content_res_features,  # Index 3: List of tensors
         ]
 
         out = self.config.unet(
@@ -479,5 +429,6 @@ class FontDiffuserModelDPM(ModelMixin, ConfigMixin):
             encoder_hidden_states=input_hidden_states,
             content_encoder_downsample_size=content_encoder_downsample_size,
         )
+        
         noise_pred = out[0]
         return noise_pred
