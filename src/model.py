@@ -146,7 +146,7 @@ class StyleTransformationModule(nn.Module):
             nn.Linear(hidden_dim, hidden_dim),
         )
         
-        # Scaling factor for attention
+        # Scaling factor for attention: square root of dimension
         self.scale = math.sqrt(feature_dim)
     
     def extract_style_features(
