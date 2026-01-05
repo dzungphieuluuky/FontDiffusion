@@ -8,7 +8,7 @@ import logging
 import math
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict
 
 import torch
 import torch.nn.functional as F
@@ -135,7 +135,7 @@ def apply_classifier_free_guidance(
     content_images: torch.Tensor,
     style_images: torch.Tensor,
     drop_prob: float,
-    samples: Optional[Dict[str, torch.Tensor]] = None,
+    samples: Optional[dict[str, torch.Tensor]] = None,
 ) -> None:
     """Apply classifier-free guidance by masking inputs (in-place modification).
 
