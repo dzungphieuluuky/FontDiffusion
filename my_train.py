@@ -54,7 +54,7 @@ def parse_args_training():
         Parsed arguments with validated image sizes
     """
     parser = get_parser()
-    args = parser.parse_args_training()
+    args = parser.parse_args()
 
     # Handle distributed training rank
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
