@@ -214,12 +214,6 @@ def parse_args() -> Namespace:
         default=False,
         help="Use fast sampling mode",
     )
-    opt.add_argument(
-        "--enable_style_transform",
-        action="store_true",
-        default=False,
-        help="Enable style transformation module",
-    )
 
     # -----------------------------------------------------------------
     # Checkpoint & resume
@@ -631,7 +625,6 @@ def batch_generate_images(
     )
     logging.info(f"Unique chars seen:    {len(all_chars_in_checkpoint)}")
     logging.info(f"Unique styles used:   {len(all_styles_in_checkpoint)}")
-    logging.info(f"Style Transform:      {getattr(args, 'enable_style_transform', False)}")  # ✅ ADD THIS
     logging.info("=" * 60 + "\n")
 
     # Use first font for all characters
@@ -685,7 +678,6 @@ def batch_generate_images(
                 style_path,
                 font_manager,
                 primary_font,
-                enable_style_transform=getattr(args, 'enable_style_transform', False),  # ✅ ADD THIS
             )
 
             if images is None:
@@ -804,110 +796,79 @@ def sampling_batch_optimized(
     style_image_path: Union[str, Image.Image],
     font_manager: FontManager,
     font_name: str,
-    enable_style_transform: bool = False,  # ✅ ADD THIS PARAMETER
 ) -> Tuple[Optional[List[Image.Image]], Optional[List[str]], Optional[float]]:
-    """Batch sampling for multiple characters with specific font"""
-
-    # Get available characters for this font
-    available_chars: List[str] = font_manager.get_available_chars_for_font(
-        font_name, characters
-    )
-
-    if not available_chars:
-        return None, None, None
-
+    """
+    Batch sampling for multiple characters.
+    
+    Style transformation is NOT applied during inference.
+    It's only used during training (Phase 2).
+    """
     try:
-        # Load style image
         if isinstance(style_image_path, str):
-            style_image: Image.Image = Image.open(style_image_path).convert("RGB")
+            style_image = Image.open(style_image_path).convert("RGB")
         else:
-            style_image: Image.Image = style_image_path.convert("RGB")
-        style_transform: transforms.Compose = get_style_transform(args.style_image_size)
+            style_image = style_image_path
 
-        font: Any = font_manager.get_font(font_name)
-        content_transform: transforms.Compose = get_content_transform(
-            args.content_image_size
-        )
+        style_transform = get_style_transform(args.style_image_size)
+        style_image = style_transform(style_image)
 
-        # Generate content images
-        content_images: List[torch.Tensor] = []
-        content_images_pil: List[Image.Image] = []
+        content_transform = get_content_transform(args.content_image_size)
+        
+        images = []
+        valid_chars = []
+        generation_times = []
 
-        for char in get_hf_bar(
-            available_chars,
-            desc=f"  📸 Preparing {font_name}",
-            colour="cyan",
-        ):
-            try:
-                content_image: Image.Image = ttf2im(font=font, char=char)
-                content_images_pil.append(content_image.copy())
-                content_images.append(content_transform(content_image))
-            except Exception as e:
-                logging.info(f"    ✗ Error processing '{char}': {e}")
-                continue
+        with get_hf_bar(
+            total=len(characters),
+            desc=f"Generating {font_name}",
+            unit="char",
+        ) as pbar:
+            for char in characters:
+                try:
+                    if not is_char_in_font(font_manager.get_font_path(font_name), char):
+                        continue
 
-        if not content_images:
-            return None, None, None
+                    content_image = ttf2im(
+                        load_ttf(font_manager.get_font_path(font_name)),
+                        char,
+                        args.content_image_size,
+                    )
+                    content_image = content_transform(content_image)
 
-        # Stack into batch
-        content_batch: torch.Tensor = torch.stack(content_images)
-        style_batch: torch.Tensor = style_transform(style_image)[None, :].repeat(
-            len(content_images), 1, 1, 1
-        )
+                    start_time = time.time()
+                    gen_images = pipe.generate(
+                        content_images=content_image.unsqueeze(0),
+                        style_images=style_image.unsqueeze(0),
+                        batch_size=1,
+                        order=args.order,
+                        num_inference_step=args.num_inference_steps,
+                        content_encoder_downsample_size=args.content_encoder_downsample_size,
+                        t_start=args.t_start,
+                        t_end=args.t_end,
+                        dm_size=args.content_image_size,
+                        algorithm_type=args.algorithm_type,
+                        skip_type=args.skip_type,
+                        method=args.method,
+                        correcting_x0_fn=args.correcting_x0_fn,
+                    )
+                    generation_times.append(time.time() - start_time)
 
-        with torch.inference_mode():
-            dtype: torch.dtype = torch.float16 if args.fp16 else torch.float32
-            content_batch = content_batch.to(args.device, dtype=dtype)
-            style_batch = style_batch.to(args.device, dtype=dtype)
+                    images.extend(gen_images)
+                    valid_chars.append(char)
 
-            start: float = time.perf_counter()
+                except Exception as e:
+                    logging.warning(f"Failed to generate character '{char}': {e}")
+                    continue
+                finally:
+                    pbar.update(1)
 
-            # Process in batches
-            all_images: List[Image.Image] = []
-            batch_size: int = args.batch_size
-
-            num_batches = (len(content_batch) + batch_size - 1) // batch_size
-            batch_pbar = get_hf_bar(
-                range(0, len(content_batch), batch_size),
-                desc="    🚀 Batch Inference",
-                colour="#1055C9",
-            )
-            for batch_idx, i in enumerate(batch_pbar):
-                batch_content: torch.Tensor = content_batch[i : i + batch_size]
-                batch_style: torch.Tensor = style_batch[i : i + batch_size]
-
-                # ✅ PASS STYLE TRANSFORM FLAG TO PIPELINE
-                images: List[Image.Image] = pipe.generate(
-                    content_images=batch_content,
-                    style_images=batch_style,
-                    batch_size=len(batch_content),
-                    order=args.order,
-                    num_inference_step=args.num_inference_steps,
-                    content_encoder_downsample_size=args.content_encoder_downsample_size,
-                    t_start=args.t_start,
-                    t_end=args.t_end,
-                    dm_size=args.content_image_size,
-                    algorithm_type=args.algorithm_type,
-                    skip_type=args.skip_type,
-                    method=args.method,
-                    correcting_x0_fn=args.correcting_x0_fn,
-                    enable_style_transform=enable_style_transform,  # ✅ ADD THIS
-                )
-
-                all_images.extend(images)
-                batch_pbar.update(1)
-
-            end: float = time.perf_counter()
-            total_time: float = end - start
-
-            return all_images, available_chars, total_time
+        avg_time = sum(generation_times) / len(generation_times) if generation_times else 0
+        return images, valid_chars, avg_time
 
     except Exception as e:
-        logging.info(f"    ✗ Error in batch sampling: {e}")
-        import traceback
-        traceback.print_exc()
+        logging.error(f"Batch generation failed: {e}")
         return None, None, None
-    
+        
 def _print_checkpoint_status(
     current_style: int,
     total_styles: int,
