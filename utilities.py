@@ -86,13 +86,7 @@ class HFTqdm(rich_tqdm):
         kwargs.setdefault("smoothing", 0.3)
         kwargs.setdefault("leave", True)
         kwargs.setdefault("file", sys.stderr)
-
         self._base_desc = kwargs.get("desc", "Processing")
-
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=UserWarning, message=".*rich.*experimental.*")
-            super().__init__(*args, **kwargs)
-
         self._start_time = time.time()
         self._warning_shown = False
 
