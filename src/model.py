@@ -252,13 +252,13 @@ class FontDiffuserModel(ModelMixin, ConfigMixin):
             style_images: Target style images
             content_images: Content images
             content_encoder_downsample_size: Downsampling size
-            source_style_images: Source style images (optional)
+            source_style_images: Source style images (optional) for style transformation
         
         Returns:
             noise_pred, offset_out_sum, style_transform_feature
         """
         # Extract target style features
-        style_img_feature, _, style_residual_features = self.config.style_encoder(
+        style_img_feature, _, style_residual_features = self.style_encoder(
             style_images
         )
 
@@ -268,36 +268,44 @@ class FontDiffuserModel(ModelMixin, ConfigMixin):
         )
 
         # Get content features
-        content_img_feature, content_residual_features = self.config.content_encoder(
+        content_img_feature, content_residual_features = self.content_encoder(
             content_images
         )
         content_residual_features.append(content_img_feature)
         
         # Get reference content features from style image
-        style_content_feature, style_content_res_features = self.config.content_encoder(
+        style_content_feature, style_content_res_features = self.content_encoder(
             style_images
         )
         style_content_res_features.append(style_content_feature)
 
-        # ✅ Compute style transformation if source style provided
+        # ✅ FIXED: Compute style transformation with correct arguments
         style_transform_feature = None
         style_diff = None
         
-        if source_style_images is not None and self.config.style_transform_module is not None:
+        if (
+            source_style_images is not None 
+            and self.style_transform_module is not None
+        ):
             # Extract source style features
-            source_style_img_feature, _, _ = self.config.style_encoder(
+            source_style_img_feature, _, _ = self.style_encoder(
                 source_style_images
             )
-            
-            # Compute style transformation (Equations 3-9)
-            style_transform_feature, style_diff = self.config.style_transform_module(
-                source_style_img_feature,
-                style_img_feature,
-                content_img_feature,
+
+            # ✅ CORRECT: Pass only source and target style features
+            style_transform_feature, style_diff = self.style_transform_module(
+                source_style_features=source_style_img_feature,
+                target_style_features=style_img_feature
             )
         else:
             # Default style difference encoding
-            style_diff = torch.zeros(batch_size, 256, device=style_img_feature.device)
+            style_diff = torch.zeros(
+                batch_size, 
+                self.style_transform_module.feature_dim 
+                if self.style_transform_module is not None 
+                else 256,
+                device=style_img_feature.device
+            )
 
         input_hidden_states = [
             style_img_feature,
@@ -307,7 +315,7 @@ class FontDiffuserModel(ModelMixin, ConfigMixin):
             style_diff,
         ]
 
-        out = self.config.unet(
+        out = self.unet(
             x_t,
             timesteps,
             encoder_hidden_states=input_hidden_states,
@@ -317,7 +325,6 @@ class FontDiffuserModel(ModelMixin, ConfigMixin):
         offset_out_sum = out[1]
 
         return noise_pred, offset_out_sum, style_transform_feature
-
 
 class FontDiffuserModelDPM(ModelMixin, ConfigMixin):
     """DPM Forward function for FontDiffuser with style transformation module."""
@@ -352,16 +359,16 @@ class FontDiffuserModelDPM(ModelMixin, ConfigMixin):
             cond: Tuple of (content_images, target_style_images)
             content_encoder_downsample_size: Downsampling size
             version: Model version
-            source_cond: Optional tuple (source_content, source_style)
+            source_cond: Optional tuple (source_content, source_style) for style transformation
         
         Returns:
-            noise_pred, style_transform_feature
+            noise_pred
         """
         content_images = cond[0]
         style_images = cond[1]
 
         # Extract target style features
-        style_img_feature, _, style_residual_features = self.config.style_encoder(
+        style_img_feature, _, style_residual_features = self.style_encoder(
             style_images
         )
 
@@ -371,37 +378,42 @@ class FontDiffuserModelDPM(ModelMixin, ConfigMixin):
         )
 
         # Get content features
-        content_img_feature, content_residual_features = self.config.content_encoder(
+        content_img_feature, content_residual_features = self.content_encoder(
             content_images
         )
         content_residual_features.append(content_img_feature)
         
         # Get reference content features
-        style_content_feature, style_content_res_features = self.config.content_encoder(
+        style_content_feature, style_content_res_features = self.content_encoder(
             style_images
         )
         style_content_res_features.append(style_content_feature)
 
-        # ✅ Compute style transformation
+        # ✅ FIXED: Compute style transformation with correct arguments
         style_transform_feature = None
         style_diff = None
         
-        if source_cond is not None and self.config.style_transform_module is not None:
+        if source_cond is not None and self.style_transform_module is not None:
             source_content_images, source_style_images = source_cond
             
             # Extract source style features
-            source_style_img_feature, _, _ = self.config.style_encoder(
+            source_style_img_feature, _, _ = self.style_encoder(
                 source_style_images
             )
             
-            # Compute style transformation
-            style_transform_feature, style_diff = self.config.style_transform_module(
-                source_style_img_feature,
-                style_img_feature,
-                content_img_feature,
+            # ✅ CORRECT: Pass only source and target style features
+            style_transform_feature, style_diff = self.style_transform_module(
+                source_style_features=source_style_img_feature,
+                target_style_features=style_img_feature
             )
         else:
-            style_diff = torch.zeros(batch_size, 256, device=style_img_feature.device)
+            style_diff = torch.zeros(
+                batch_size,
+                self.style_transform_module.feature_dim
+                if self.style_transform_module is not None
+                else 256,
+                device=style_img_feature.device
+            )
 
         input_hidden_states = [
             style_img_feature,
@@ -411,7 +423,7 @@ class FontDiffuserModelDPM(ModelMixin, ConfigMixin):
             style_diff,
         ]
 
-        out = self.config.unet(
+        out = self.unet(
             x_t,
             timesteps,
             encoder_hidden_states=input_hidden_states,
