@@ -572,10 +572,10 @@ def main():
             hidden_dim=getattr(args, 'hidden_dim', 256),
             num_heads=getattr(args, 'num_heads', 8),
             ffn_dim=getattr(args, 'ffn_dim', 2048),
-            input_feature_dim=getattr(args, 'input_feature_dim', 1024),  # ✅ ADD THIS
+            style_image_size=args.style_image_size[0],
         )
         logging.info("✓ Style Transformation Module built successfully")
-        
+
     # Load Phase 1 checkpoints if provided
     if args.phase_1_ckpt_dir is not None:
         load_phase1_checkpoints(
@@ -592,7 +592,7 @@ def main():
         unet=unet,
         style_encoder=style_encoder,
         content_encoder=content_encoder,
-        style_transform_module=style_transform_module,  # ✅ ADD THIS
+        style_transform_module=style_transform_module,
     )
 
     # Build perceptual loss

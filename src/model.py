@@ -78,7 +78,7 @@ class StyleTransformationModule(nn.Module):
         hidden_dim: int = 256,
         num_heads: int = 8,
         ffn_dim: int = 2048,
-        input_feature_dim: int = 1024,  # ✅ ADD THIS for extracted features
+        style_image_size: int = 96,  # ✅ CHANGED: Auto-compute or None
     ):
         super().__init__()
         self.num_scales = num_scales
@@ -86,10 +86,28 @@ class StyleTransformationModule(nn.Module):
         self.hidden_dim = hidden_dim
         self.num_heads = num_heads
         self.ffn_dim = ffn_dim
-        self.input_feature_dim = input_feature_dim
+        
+        # ✅ FIX: Don't use input_feature_dim, work with spatial features directly
+        # Style encoder outputs (B, C, H, W) - we'll process spatial dims
+        # For 96x96 images with 1 channel: (B, 1, 96, 96)
+        # Reshape to (B, 9216) then project to feature_dim
+        
+        # Compute input dimension from typical style encoder output
+        # Assuming style_encoder output is (B, 1, 96, 96) for 96x96 input
+        self.spatial_size = style_image_size * style_image_size  # H * W for standard 96x96 images
+        
+        # ✅ Project spatial features to feature_dim
+        self.feature_projection = nn.Linear(self.spatial_size, feature_dim)
 
-        # ✅ ADD: Projection layer to map extracted features to feature_dim
-        self.feature_projection = nn.Linear(input_feature_dim, feature_dim)
+        # Multi-scale transformer blocks
+        self.transformer_blocks = nn.ModuleList([
+            MultiScaleTransformerBlock(
+                feature_dim=feature_dim,
+                num_heads=num_heads,
+                ffn_dim=ffn_dim,
+            )
+            for _ in range(num_scales)
+        ])
 
         # Key/value weights for each scale
         self.key_weights = nn.ParameterList([
@@ -106,32 +124,103 @@ class StyleTransformationModule(nn.Module):
             nn.init.orthogonal_(weight)
         for weight in self.value_weights:
             nn.init.orthogonal_(weight)
-    
-    def extract_style_features(self, style_feature: torch.Tensor) -> list:
-        """Extract multi-scale style features.
+
+    def extract_style_features(self, style_feature: torch.Tensor) -> List[Tuple[torch.Tensor, torch.Tensor]]:
+        """Extract multi-scale style features from style encoder output.
         
         Args:
-            style_feature: Input style feature (B, C, H, W) or (B, D)
+            style_feature: Input style feature (B, C, H, W) from style encoder
             
         Returns:
-            List of projected features for each scale
+            List of (key, value) tuples for each scale
         """
-        # Flatten if needed
-        if style_feature.dim() == 4:  # (B, C, H, W)
-            style_feature = style_feature.view(style_feature.size(0), -1)  # (B, C*H*W)
+        # Flatten spatial dimensions: (B, C, H, W) -> (B, C*H*W)
+        batch_size = style_feature.shape[0]
+        style_feature_flat = style_feature.view(batch_size, -1)  # (B, C*H*W)
         
-        # ✅ PROJECT: (B, input_feature_dim) -> (B, feature_dim)
-        projected = self.feature_projection(style_feature)  # (B, feature_dim)
+        # ✅ PROJECT: (B, C*H*W) -> (B, feature_dim)
+        projected = self.feature_projection(style_feature_flat)  # (B, feature_dim)
 
         features = []
         for scale_idx in range(self.num_scales):
             # ✅ NOW SHAPES MATCH: (B, feature_dim) @ (feature_dim, feature_dim)
-            key = projected @ self.key_weights[scale_idx]
-            value = projected @ self.value_weights[scale_idx]
+            key = projected @ self.key_weights[scale_idx]  # (B, feature_dim)
+            value = projected @ self.value_weights[scale_idx]  # (B, feature_dim)
             features.append((key, value))
 
         return features
-    
+
+    def compute_style_difference(
+        self,
+        source_features: List[Tuple[torch.Tensor, torch.Tensor]],
+        target_features: List[Tuple[torch.Tensor, torch.Tensor]],
+    ) -> torch.Tensor:
+        """Compute style difference between source and target.
+        
+        Args:
+            source_features: List of (key, value) from source
+            target_features: List of (key, value) from target
+            
+        Returns:
+            Aggregated style difference tensor
+        """
+        style_diffs = []
+        
+        for src_kv, tgt_kv in zip(source_features, target_features):
+            src_key, src_val = src_kv
+            tgt_key, tgt_val = tgt_kv
+            
+            # Contrastive loss: minimize difference between source and target
+            diff = F.mse_loss(src_key, tgt_key) + F.mse_loss(src_val, tgt_val)
+            style_diffs.append(diff)
+        
+        # Average across scales and expand for batch dimension
+        style_diff_avg = torch.stack(style_diffs).mean()
+        
+        # Return expanded tensor matching batch size
+        batch_size = source_features[0][0].shape[0]
+        return style_diff_avg.unsqueeze(0).expand(batch_size, -1).mean(dim=1, keepdim=True)
+
+    def forward(
+        self,
+        source_style_features: torch.Tensor,
+        target_style_features: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Forward pass for style transformation.
+        
+        Args:
+            source_style_features: Source style features (B, C, H, W) from style encoder
+            target_style_features: Target style features (B, C, H, W) from style encoder
+            
+        Returns:
+            Tuple of (transformed_features, style_difference)
+        """
+        # Extract multi-scale features
+        source_features = self.extract_style_features(source_style_features)
+        target_features = self.extract_style_features(target_style_features)
+
+        # Compute style difference
+        batch_size = source_style_features.shape[0]
+        style_diff = torch.zeros(
+            batch_size,
+            self.feature_dim,
+            device=source_style_features.device,
+            dtype=source_style_features.dtype,
+        )
+        
+        for src_kv, tgt_kv in zip(source_features, target_features):
+            src_key, src_val = src_kv
+            tgt_key, tgt_val = tgt_kv
+            # Accumulate style difference
+            style_diff += F.mse_loss(src_key, tgt_key, reduction='none').mean(dim=1, keepdim=True)
+            style_diff += F.mse_loss(src_val, tgt_val, reduction='none').mean(dim=1, keepdim=True)
+        
+        style_diff = style_diff / (2 * self.num_scales)
+
+        # Return transformed feature (use first scale's key) and style difference
+        transformed = source_features[0][0]  # (B, feature_dim)
+        return transformed, style_diff
+        
     def _scaled_dot_product_attention(
         self,
         query: torch.Tensor,
@@ -145,25 +234,7 @@ class StyleTransformationModule(nn.Module):
         attn_weights = torch.softmax(scores, dim=-1)
         attn_output = torch.matmul(attn_weights, value)
         return attn_output
-    
-    def compute_style_difference(
-        self,
-        source_features: List[torch.Tensor],
-        target_features: List[torch.Tensor],
-    ) -> List[torch.Tensor]:
-        """
-        Compute style differences at each scale (Equation 7).
         
-        L_xy = L_y - L_x (difference between target and source)
-        """
-        style_differences = []
-        for src_feat, tgt_feat in zip(source_features, target_features):
-            # Element-wise difference
-            diff = tgt_feat - src_feat
-            style_differences.append(diff)
-        
-        return style_differences
-    
     def fuse_style_differences(
         self,
         style_differences: List[torch.Tensor],
@@ -184,39 +255,6 @@ class StyleTransformationModule(nn.Module):
             fused = self.mlp_channel_adjust(concatenated)
         
         return fused
-    
-    def forward(
-        self,
-        source_style_features: torch.Tensor,
-        target_style_features: torch.Tensor,
-    ) -> tuple:
-        """Forward pass for style transformation.
-        
-        Args:
-            source_style_features: Source style features (B, 1024) or (B, C, H, W)
-            target_style_features: Target style features (B, 1024) or (B, C, H, W)
-            
-        Returns:
-            Tuple of (transformed_features, style_difference)
-        """
-        # Extract multi-scale features
-        source_features = self.extract_style_features(source_style_features)
-        target_features = self.extract_style_features(target_style_features)
-
-        # Compute style difference
-        style_diff = 0
-        for src_kv, tgt_kv in zip(source_features, target_features):
-            src_key, src_val = src_kv
-            tgt_key, tgt_val = tgt_kv
-            # Contrastive loss: minimize difference between source and target
-            style_diff += F.mse_loss(src_key, tgt_key) + F.mse_loss(src_val, tgt_val)
-
-        style_diff = style_diff / self.num_scales
-
-        # Return transformed feature and difference
-        transformed = source_features[0][0]  # Use first scale's key as output
-        return transformed, style_diff
-
 class FontDiffuserModel(ModelMixin, ConfigMixin):
     """Forward function for FontDiffuser with content encoder,
     style encoder, style transformation module, and unet.
