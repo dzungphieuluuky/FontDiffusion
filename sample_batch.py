@@ -2,26 +2,17 @@ import os
 import sys
 import time
 import json
-import hashlib
-import argparse
-from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Any, Set, Union
 from huggingface_hub.utils import tqdm, enable_progress_bars
 import logging
 import wandb
 
 import numpy as np
-import torch
-import torch.nn.functional as F
 from PIL import Image
-import torchvision.transforms as transforms
 from argparse import Namespace, ArgumentParser
 
 from src.dpm_solver.pipeline_dpm_solver import FontDiffuserDPMPipeline
-from src.model import StyleTransformationModule
 from utilities import (
-    save_model_checkpoint,
-    load_model_checkpoint,
     get_hf_bar,
 )
 from font_manager import FontManager
