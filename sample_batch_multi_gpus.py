@@ -45,12 +45,38 @@ from utilities import (
     get_hf_bar,
 )
 
-# Configure logging for multi-GPU
+def get_rank():
+    try:
+        import torch
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            return torch.distributed.get_rank()
+    except Exception:
+        pass
+    return int(os.environ.get("LOCAL_RANK", 0))
+
+LOG_FORMAT = (
+    "%(asctime)s [%(levelname)s] [Rank %(rank)d] %(message)s"
+)
+
+class RankFilter(logging.Filter):
+    def filter(self, record):
+        record.rank = get_rank()
+        return True
+
+# Remove all handlers if already set (prevents duplicate logs in Jupyter/reloads)
+for handler in logging.root.handlers[:]:
+    logging.root.removeHandler(handler)
+
+handlers = [logging.StreamHandler()]
+
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler()],
+    format=LOG_FORMAT,
+    handlers=handlers,
 )
+for handler in logging.getLogger().handlers:
+    handler.addFilter(RankFilter())
+
 logger = logging.getLogger(__name__)
 
 # Optional dependencies
@@ -659,13 +685,11 @@ def main():
             logging.info("=" * 60)
             logging.info("✅ GENERATION COMPLETE!")
             logging.info("=" * 60)
-
         accelerator.free_memory()
         if torch.distributed.is_available() and torch.distributed.is_initialized():
             torch.distributed.destroy_process_group()
             logging.info("Process group destroyed successfully")
-
-
+    
     except Exception as e:
         logging.error(f"Fatal error: {e}")
         import traceback
