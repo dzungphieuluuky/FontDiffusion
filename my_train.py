@@ -432,12 +432,19 @@ def train_step(
         loss += getattr(args, 'style_transform_coefficient', 0.1) * style_transform_loss
         loss_dict['style_transform_loss'] = style_transform_loss.item()
 
-    # Add Phase 2 loss if applicable
+    # ✅ FIX: Handle neg_images which may be a list of tensors
     if args.phase_2 and scr is not None:
+        neg_images = samples["neg_images"]
+        
+        # Convert list to tensor if needed
+        if isinstance(neg_images, list):
+            # Stack list of tensors - they should all have same shape now
+            neg_images = torch.stack(neg_images)
+        
         sc_loss = compute_phase2_loss(
             pred_original_sample_norm=pred_original_sample_norm,
             target_images=target_images,
-            neg_images=samples["neg_images"],
+            neg_images=neg_images,
             scr=scr,
             args=args,
         )
