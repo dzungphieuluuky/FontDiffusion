@@ -151,7 +151,7 @@ def generate_content_images_with_accelerator(
             local_chars,
             desc=f"GPU {accelerator.process_index} generating content images",
             unit="char",
-            disable=not accelerator.is_local_main_process,
+            disable=not accelerator.is_main_process,
         ):
             # Find font containing character
             found_font = None
@@ -371,7 +371,7 @@ def batch_generate_images_with_accelerator(
                 local_styles,
                 unit= "style",
                 desc=f"GPU {accelerator.process_index} generating styles",
-                disable=not accelerator.is_local_main_process,
+                disable=not accelerator.is_main_process,
             )
         ):
             try:
