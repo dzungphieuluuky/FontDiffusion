@@ -1,3 +1,4 @@
+import logging
 import os
 import random
 from PIL import Image
@@ -261,26 +262,28 @@ class FontDataset(Dataset):
                     try:
                         neg_image = Image.open(neg_image_path).convert("RGB")
                         
+                        # ✅ FIX: Apply BOTH target and style transforms to ensure consistent size
+                        # Use the style transform which standardizes to (256, 256)
                         if self.transforms is not None:
-                            neg_image = self.transforms[2](neg_image)
+                            neg_image = self.transforms[1](neg_image)  # style_transform: (256, 256)
                         
                         neg_images_list.append(neg_image)
                     
                     except Exception as e:
-                        print(
+                        logging.warning(
                             f"Warning: Could not load negative image from {neg_image_path}: {e}"
                         )
                         continue
         
-        # Pad with black images to ensure consistent size
+        # ✅ FIX: Pad with zeros (not random) to ensure consistent size
         while len(neg_images_list) < num_neg:
-            # Create black image with same shape as transforms output
+            # Create black image matching the standardized style image size (3, 256, 256)
             black_image = torch.zeros(3, 256, 256, dtype=torch.float32)
             neg_images_list.append(black_image)
         
         # Stack to (num_neg, C, H, W) and truncate to num_neg if needed
         neg_images = torch.stack(neg_images_list[:num_neg])
-        return neg_images
+        return neg_images    
     
     def __len__(self) -> int:
         return len(self.target_images)
