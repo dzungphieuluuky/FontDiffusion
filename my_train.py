@@ -9,7 +9,6 @@ import math
 import os
 from pathlib import Path
 from typing import Optional
-import logging
 
 import torch
 import torch.nn.functional as F
@@ -27,7 +26,6 @@ from src import (
     ContentPerceptualLoss,
     FontDiffuserModel,
     StyleTransformationModule,
-
     build_content_encoder,
     build_ddpm_scheduler,
     build_scr,
@@ -47,6 +45,7 @@ from utils import (
     save_args_to_yaml,
     x0_from_epsilon,
 )
+logger = get_logger(__name__)
 
 def parse_args_training():
     """Parse and validate command line arguments.
