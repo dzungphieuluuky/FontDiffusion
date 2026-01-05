@@ -71,10 +71,11 @@ HF_BAR_FORMAT = (
 
 import warnings
 
-class HFTqdm(rich_tqdm, hf_tqdm):
+class HFTqdm(rich_tqdm):
     """Enhanced tqdm progress bar."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__()
         kwargs.setdefault("unit", "it")
         kwargs.setdefault("unit_scale", True)
         kwargs.setdefault("bar_format", HF_BAR_FORMAT)

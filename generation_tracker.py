@@ -4,7 +4,7 @@ import hashlib
 from typing import Any, Dict, List, Optional, Set
 import logging
 
-from utilities import compute_file_hash
+from filename_utils import compute_file_hash
 
 class GenerationTracker:
     """
