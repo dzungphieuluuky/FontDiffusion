@@ -36,7 +36,7 @@ def hex_to_ansi(hex_color):
 RESET = "\033[0m"
 LEVEL_COLORS = {
     'DEBUG':    hex_to_ansi('#B31E6F'),
-    'INFO':     hex_to_ansi('#22EAAA'),
+    'INFO':     hex_to_ansi('#000000'),
     'WARNING':  hex_to_ansi('#FFB174'),
     'ERROR':    hex_to_ansi('#9E2A3A'),
     'CRITICAL': hex_to_ansi('#FF0000'),
