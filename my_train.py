@@ -46,8 +46,7 @@ from utils import (
     x0_from_epsilon,
 )
 
-logger = get_logger(__name__)
-
+logger = setup_logging()
 
 def parse_args_training():
     """Parse and validate command line arguments.
@@ -558,7 +557,6 @@ def main():
         log_with=args.report_to,
         project_dir=f"{args.output_dir}/{args.logging_dir}",
     )
-
     # Setup output directory and logging
     if accelerator.is_main_process:
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
@@ -576,7 +574,8 @@ def main():
 
     style_transform_module = None
     if getattr(args, "enable_style_transform", False):
-        logger.info("Building Style Transformation Module...")
+        if accelerator.is_main_process:
+            logger.info("Building Style Transformation Module...")
         style_transform_module = StyleTransformationModule(
             num_scales=getattr(args, "num_scales", 4),
             feature_dim=getattr(args, "feature_dim", 512),
@@ -585,7 +584,8 @@ def main():
             ffn_dim=getattr(args, "ffn_dim", 2048),
             style_image_size=args.style_image_size[0],
         )
-        logger.info("✓ Style Transformation Module built successfully")
+        if accelerator.is_main_process:
+            logger.info("✓ Style Transformation Module built successfully")
 
     # Load Phase 1 checkpoints if provided
     if args.phase_1_ckpt_dir is not None:
@@ -616,9 +616,11 @@ def main():
         if args.scr_ckpt_path:
             try:
                 scr.load_state_dict(load_model_checkpoint(args.scr_ckpt_path))
-                logger.info(f"Loaded SCR from {args.scr_ckpt_path}")
+                if accelerator.is_main_process:
+                    logger.info(f"Loaded SCR from {args.scr_ckpt_path}")
             except FileNotFoundError:
-                logger.warning("SCR checkpoint not found, using untrained SCR")
+                if accelerator.is_main_process:
+                    logger.warning("SCR checkpoint not found, using untrained SCR")
         scr.requires_grad_(False)
 
     # Create datasets
@@ -705,14 +707,15 @@ def main():
         }
         accelerator.log(config_dict)
     # Train
-    logger.info("Starting training...")
-    logger.info(f"  Num examples: {len(train_dataset)}")
-    logger.info(f"  Num batches per epoch: {len(train_dataloader)}")
-    logger.info(f"  Total training steps: {args.max_train_steps}")
-    logger.info(f"  Gradient accumulation steps: {args.gradient_accumulation_steps}")
-    logger.info(
-        f"  Style Transform Module: {getattr(args, 'enable_style_transform', False)}"
-    )
+    if accelerator.is_main_process:
+        logger.info("Starting training...")
+        logger.info(f"  Num examples: {len(train_dataset)}")
+        logger.info(f"  Num batches per epoch: {len(train_dataloader)}")
+        logger.info(f"  Total training steps: {args.max_train_steps}")
+        logger.info(f"  Gradient accumulation steps: {args.gradient_accumulation_steps}")
+        logger.info(
+            f"  Style Transform Module: {getattr(args, 'enable_style_transform', False)}"
+        )
 
     train(
         model=model,

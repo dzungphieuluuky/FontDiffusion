@@ -31,7 +31,7 @@ class TqdmLoggingHandler(logging.Handler):
             self.handleError(record)
 
 
-def setup_logging(output_dir: Path) -> None:
+def setup_logging(output_dir: Path) -> None | logging.Logger:
     """
     Configure root logger to write to a file and the console.
 
@@ -40,18 +40,25 @@ def setup_logging(output_dir: Path) -> None:
     output_dir : Path
         Directory where the log file will be created.
     """
-    log_file = output_dir / "training.log"
-    log_file.parent.mkdir(parents=True, exist_ok=True)
+    if output_dir is not None:
+        log_file = output_dir / "training.log"
+        log_file.parent.mkdir(parents=True, exist_ok=True)
 
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=[
-            logging.FileHandler(log_file),
             logging.StreamHandler(),
             TqdmLoggingHandler(),
         ],
     )
+    if output_dir is not None:
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(logging.INFO)
+        formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        file_handler.setFormatter(formatter)
+        logging.getLogger().addHandler(file_handler)
+    return logging.getLogger()
 
 # --------------------------------------------------------------------------- #
 # Hugging‑Face style progress bar
@@ -83,6 +90,9 @@ class HFTqdm(rich_tqdm, hf_tqdm):
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
+        rich_tqdm.__init__(self, *args, **kwargs)
+        hf_tqdm.__init__(self, *args, **kwargs)
+
         # Default values matching the Hugging‑Face style
         kwargs.setdefault("unit", "it")
         kwargs.setdefault("unit_scale", True)
@@ -99,7 +109,6 @@ class HFTqdm(rich_tqdm, hf_tqdm):
         self._base_desc = kwargs.get("desc", "Processing")
 
         # ✅ Only initialize rich_tqdm to avoid duplicate bars
-        rich_tqdm.__init__(self, *args, **kwargs)
 
         self._start_time = time.time()
         self._warning_shown = False
