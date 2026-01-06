@@ -8,12 +8,11 @@ import logging
 import math
 import os
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
 from accelerate import Accelerator
-from accelerate.logging import get_logger
 from accelerate.utils import set_seed
 from diffusers.optimization import get_scheduler
 from torchvision import transforms
@@ -37,7 +36,6 @@ from utilities import (
     load_model_checkpoint,
     save_model_checkpoint,
     get_hf_bar,
-    setup_logging,
 )
 from utils import (
     normalize_mean_std,
@@ -45,8 +43,8 @@ from utils import (
     save_args_to_yaml,
     x0_from_epsilon,
 )
-
-logger = setup_logging()
+from logging_utils import setup_logging
+logger = setup_logging(level=logging.INFO, name="FontDiffuserTrain")
 
 def parse_args_training():
     """Parse and validate command line arguments.
