@@ -27,6 +27,29 @@ class TqdmLoggingHandler(logging.Handler):
         except Exception:
             self.handleError(record)
 
+# ANSI escape code helper for 24-bit color
+def hex_to_ansi(hex_color):
+    hex_color = hex_color.lstrip('#')
+    r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+    return f"\033[38;2;{r};{g};{b}m"
+
+RESET = "\033[0m"
+LEVEL_COLORS = {
+    'DEBUG':    hex_to_ansi('#B31E6F'),
+    'INFO':     hex_to_ansi('#22EAAA'),
+    'WARNING':  hex_to_ansi('#FFB174'),
+    'ERROR':    hex_to_ansi('#9E2A3A'),
+    'CRITICAL': hex_to_ansi('#FF0000'),
+}
+
+class HexColorFormatter(logging.Formatter):
+    def format(self, record):
+        color = LEVEL_COLORS.get(record.levelname, "")
+        msg = super().format(record)
+        if color and sys.stdout.isatty():
+            msg = f"{color}{msg}{RESET}"
+        return msg
+
 def setup_logging(level=logging.INFO, name=None, use_tqdm=False):
     # Remove all handlers from root logger
     root_logger = logging.getLogger()
@@ -36,18 +59,7 @@ def setup_logging(level=logging.INFO, name=None, use_tqdm=False):
     log_format = "%(asctime)s [%(levelname)s] [Rank %(rank)d] [%(name)s] %(message)s"
     date_format = "%Y-%m-%d %H:%M:%S"
 
-    try:
-        from colorlog import ColoredFormatter
-        formatter = ColoredFormatter(
-            "%(log_color)s" + log_format,
-            datefmt=date_format,
-            log_colors={
-                'DEBUG': '#B31E6F', 'INFO': '#22EAAA', 'WARNING': '#FFB174',
-                'ERROR': '#9E2A3A', 'CRITICAL': '#FF0000',
-            }
-        )
-    except ImportError:
-        formatter = logging.Formatter(log_format, datefmt=date_format)
+    formatter = HexColorFormatter(log_format, datefmt=date_format)
 
     logger = logging.getLogger(name)
     logger.setLevel(level)
@@ -66,6 +78,6 @@ def setup_logging(level=logging.INFO, name=None, use_tqdm=False):
 
     return logger
 
-# Usage example (put this at the top of your script/module):
+# Usage example:
 # logger = setup_logging()
 # logger.info("Logging is configured!")
