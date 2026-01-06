@@ -90,7 +90,7 @@ class HFTqdm(hf_tqdm):
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__()
+        super().__init__(*args, **kwargs)
         # Default values matching the Hugging‑Face style
         kwargs.setdefault("unit", "it")
         kwargs.setdefault("unit_scale", True)
