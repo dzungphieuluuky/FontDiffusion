@@ -2,19 +2,7 @@ import logging
 import os
 import sys
 
-class TqdmLoggingHandler(logging.Handler):
-    """Handler that writes log records to a tqdm progress bar."""
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            msg = self.format(record)
-            logging.info(msg)
-            self.flush()
-        except Exception:
-            self.handleError(record)
-
 def get_rank():
-    """Get distributed rank for logging (if available)."""
     try:
         import torch
         if torch.distributed.is_available() and torch.distributed.is_initialized():
@@ -24,25 +12,34 @@ def get_rank():
     return int(os.environ.get("LOCAL_RANK", 0))
 
 class RankFilter(logging.Filter):
-    """Injects rank info into log records."""
     def filter(self, record):
         record.rank = get_rank()
         return True
 
-def setup_logging(level=logging.INFO, name="app"):
-    # 1. Clean up the root logger to prevent duplicates
+class TqdmLoggingHandler(logging.Handler):
+    """Handler that writes log records using tqdm.write (safe with progress bars)."""
+    def emit(self, record):
+        try:
+            from tqdm.auto import tqdm
+            msg = self.format(record)
+            tqdm.write(msg)
+            self.flush()
+        except Exception:
+            self.handleError(record)
+
+def setup_logging(level=logging.INFO, name=None, use_tqdm=False):
+    # Remove all handlers from root logger
     root_logger = logging.getLogger()
     while root_logger.hasHandlers():
         root_logger.removeHandler(root_logger.handlers[0])
 
-    # 2. Define the format (handling potential missing 'rank' attribute)
-    log_format = "%(asctime)s [%(levelname)s] [%(name)s] %(message)s"
+    log_format = "%(asctime)s [%(levelname)s] [Rank %(rank)d] [%(name)s] %(message)s"
     date_format = "%Y-%m-%d %H:%M:%S"
 
     try:
         from colorlog import ColoredFormatter
         formatter = ColoredFormatter(
-            f"%(log_color)s{log_format}",
+            "%(log_color)s" + log_format,
             datefmt=date_format,
             log_colors={
                 'DEBUG': 'cyan', 'INFO': 'green', 'WARNING': 'yellow',
@@ -52,23 +49,20 @@ def setup_logging(level=logging.INFO, name="app"):
     except ImportError:
         formatter = logging.Formatter(log_format, datefmt=date_format)
 
-    # 3. Create the specific named logger
     logger = logging.getLogger(name)
     logger.setLevel(level)
-    
-    # Standard StreamHandler for notebook/console output
-    stream_handler = logging.StreamHandler(sys.stdout)
-    stream_handler.setFormatter(formatter)
-    tqdm_handler = TqdmLoggingHandler()
-    tqdm_handler.setFormatter(formatter)
+    logger.addFilter(RankFilter())
 
-    # Important: Remove any old handlers from *this* specific logger too
     while logger.hasHandlers():
         logger.removeHandler(logger.handlers[0])
-        
-    logger.addHandler(stream_handler)
-    logger.addHandler(tqdm_handler)
-    logger.propagate = False  # Avoid sending logs to the root logger
+
+    if use_tqdm:
+        handler = TqdmLoggingHandler()
+    else:
+        handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.propagate = False
 
     return logger
 
