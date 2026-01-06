@@ -594,16 +594,15 @@ def main():
     args = parse_args()
     args = create_args_namespace(args)
 
-    logging.info("=" * 60)
-    logging.info("FONTDIFFUSER MULTI-GPU SYNTHESIS")
-    logging.info("=" * 60)
-
     # Initialize accelerator
     accelerator = Accelerator(
         mixed_precision="fp16" if args.fp16 else "no",
     )
 
     if accelerator.is_main_process:
+        logging.info("=" * 60)
+        logging.info("FONTDIFFUSER MULTI-GPU SYNTHESIS")
+        logging.info("=" * 60)
         logging.info(f"Using {accelerator.num_processes} GPUs")
 
     try:
@@ -612,23 +611,26 @@ def main():
         style_paths_with_names = load_style_images(args.style_images)
 
         # Initialize font manager
-        logging.info(f"Initializing font manager...")
+        if accelerator.is_main_process:
+            logging.info(f"Initializing font manager...")
         font_manager: FontManager = FontManager(args.ttf_path)
-        logging.info(f"✓ Loaded {len(font_manager.get_font_names())} fonts.")
 
-        logging.info(f"📊 Configuration:")
-        logging.info(f"  Dataset split: {args.dataset_split}")
-        logging.info(
-            f"  Characters: {len(characters)} (lines {args.start_line}-{args.end_line or 'end'})"
-        )
-        logging.info(f"  Styles: {len(style_paths_with_names)}")
-        logging.info(f"  Output Directory: {args.output_dir}")
-        logging.info(f"  Checkpoint Directory: {args.ckpt_dir}")
-        logging.info(f"  Device: {args.device}")
-        logging.info(f"  Batch Size: {args.batch_size}")
-        logging.info(
-            f"  Results checkpoint path: {os.path.join(args.output_dir, 'results_checkpoint.json')}"
-        )
+        if accelerator.is_main_process:
+            logging.info(f"✓ Loaded {len(font_manager.get_font_names())} fonts.")
+
+            logging.info(f"📊 Configuration:")
+            logging.info(f"  Dataset split: {args.dataset_split}")
+            logging.info(
+                f"  Characters: {len(characters)} (lines {args.start_line}-{args.end_line or 'end'})"
+            )
+            logging.info(f"  Styles: {len(style_paths_with_names)}")
+            logging.info(f"  Output Directory: {args.output_dir}")
+            logging.info(f"  Checkpoint Directory: {args.ckpt_dir}")
+            logging.info(f"  Device: {args.device}")
+            logging.info(f"  Batch Size: {args.batch_size}")
+            logging.info(
+                f"  Results checkpoint path: {os.path.join(args.output_dir, 'results_checkpoint.json')}"
+            )
         # Create output directory
         os.makedirs(args.output_dir, exist_ok=True)
 
@@ -648,13 +650,17 @@ def main():
             logging.info("=" * 60)
 
         pipe = load_fontdiffuser_pipeline(pipeline_args)
+
+        if accelerator.is_main_process:
+            logging.info("✓ Pipeline loaded successfully.")
         pipe = accelerator.prepare(pipe)
+        if accelerator.is_main_process:
+            logging.info("✓ Pipeline prepared with Accelerator.")
 
         # Initialize evaluator
         evaluator = QualityEvaluator(device=args.device)
-
-        # Generate images
         if accelerator.is_main_process:
+            logging.info("✓ Quality evaluator initialized.")
             logging.info(
                 f"Generating {len(characters)} × {len(style_paths_with_names)} images"
             )
@@ -689,8 +695,12 @@ def main():
                 log_to_wandb(results, args)
 
             logging.info("=" * 60)
-            logging.info("✅ GENERATION COMPLETE!")
+            logging.info("✅ NomGenie dataset generation complete!")
             logging.info("=" * 60)
+        
+        if accelerator.is_main_process:
+            logging.info("Cleaning up resources...")
+            
         accelerator.free_memory()
         if torch.distributed.is_available() and torch.distributed.is_initialized():
             torch.distributed.destroy_process_group()
