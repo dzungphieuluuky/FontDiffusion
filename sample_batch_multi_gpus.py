@@ -548,8 +548,10 @@ def evaluate_results_with_accelerator(
         }
         logger.info(f"SSIM: mean={results['metrics']['ssim']['mean']:.4f}")
 
-    logger.info(f"Evaluated {evaluated} image pairs")
-    logger.info("=" * 60)
+    accelerator.wait_for_everyone()
+    if accelerator.is_main_process:
+        logger.info(f"Evaluated {evaluated} image pairs")
+        logger.info("=" * 60)
 
     return results
 
@@ -618,12 +620,15 @@ def main():
 
         if accelerator.is_main_process:
             logger.info("✓ Pipeline loaded successfully.")
+
         pipe = accelerator.prepare(pipe)
+        accelerator.wait_for_everyone()
         if accelerator.is_main_process:
             logger.info("✓ Pipeline prepared with Accelerator.")
 
         # Initialize evaluator
         evaluator = QualityEvaluator(device=args.device)
+        accelerator.wait_for_everyone()
         if accelerator.is_main_process:
             logger.info("✓ Quality evaluator initialized.")
             logger.info(
@@ -641,7 +646,7 @@ def main():
             generation_tracker,
             accelerator,
         )
-
+        accelerator.wait_for_everyone()
         # Evaluate on main process
         if accelerator.is_main_process:
             if args.evaluate and args.ground_truth_dir:
