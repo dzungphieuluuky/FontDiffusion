@@ -6,12 +6,15 @@ from PIL import Image
 import torch
 from torchvision import transforms
 
+from logging_utils import setup_logging
+
+logger = setup_logging(level=logging.INFO, name="QualityEvaluator")
 try:
     import lpips
 
     LPIPS_AVAILABLE: bool = True
 except ImportError:
-    logging.info("Warning: lpips not available. Install with: pip install lpips")
+    logger.info("Warning: lpips not available. Install with: pip install lpips")
     LPIPS_AVAILABLE: bool = False
 
 try:
@@ -19,7 +22,7 @@ try:
 
     FID_AVAILABLE: bool = True
 except ImportError:
-    logging.info(
+    logger.info(
         "Warning: pytorch-fid not available. Install with: pip install pytorch-fid"
     )
     FID_AVAILABLE: bool = False
@@ -29,7 +32,7 @@ try:
 
     SSIM_AVAILABLE: bool = True
 except ImportError:
-    logging.info(
+    logger.info(
         "Warning: scikit-image not available. Install with: pip install scikit-image"
     )
     SSIM_AVAILABLE: bool = False
@@ -39,7 +42,7 @@ try:
 
     WANDB_AVAILABLE: bool = True
 except ImportError:
-    logging.info("Warning: wandb not available. Install with: pip install wandb")
+    logger.info("Warning: wandb not available. Install with: pip install wandb")
     WANDB_AVAILABLE: bool = False
 
 
@@ -77,7 +80,7 @@ class QualityEvaluator:
 
             return lpips_value
         except Exception as e:
-            logging.info(f"Error computing LPIPS: {e}")
+            logger.info(f"Error computing LPIPS: {e}")
             return -1.0
 
     def compute_ssim(self, img1: Image.Image, img2: Image.Image) -> float:
@@ -93,7 +96,7 @@ class QualityEvaluator:
             ssim_value: float = ssim(img1_gray, img2_gray, data_range=255)
             return ssim_value
         except Exception as e:
-            logging.info(f"Error computing SSIM: {e}")
+            logger.info(f"Error computing SSIM: {e}")
             return -1.0
 
     def compute_fid(self, real_dir: str, fake_dir: str) -> float:
@@ -107,7 +110,7 @@ class QualityEvaluator:
             )
             return fid_value
         except Exception as e:
-            logging.info(f"Error computing FID: {e}")
+            logger.info(f"Error computing FID: {e}")
             return -1.0
 
     def save_image(self, image: Image.Image, path: str) -> None:
@@ -116,4 +119,4 @@ class QualityEvaluator:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             image.save(path)
         except Exception as e:
-            logging.info(f"Error saving image to {path}: {e}")
+            logger.info(f"Error saving image to {path}: {e}")

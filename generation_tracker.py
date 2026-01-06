@@ -3,10 +3,10 @@ import json
 import hashlib
 from typing import Any, Dict, List, Optional, Set
 import logging
-
+from logging_utils import setup_logging
 from filename_utils import compute_file_hash
 
-
+logger = setup_logging(level=logging.INFO, name="GenerationTracker")
 class GenerationTracker:
     """
     ✅ Tracks which (character, style, font) combinations have been generated
@@ -68,15 +68,15 @@ class GenerationTracker:
             # ✅ Store only unique generations
             self.generations = unique_generations
 
-            logging.info(
+            logger.info(
                 f"✓ Loaded checkpoint: {len(self.generations)} unique generations"
             )
             if duplicate_count > 0:
-                logging.info(f"  ⚠️  Removed {duplicate_count} duplicate entries")
-            logging.info(f"  Total raw entries: {len(raw_generations)}")
+                logger.info(f"  ⚠️  Removed {duplicate_count} duplicate entries")
+            logger.info(f"  Total raw entries: {len(raw_generations)}")
 
         except Exception as e:
-            logging.info(f"⚠ Error loading checkpoint: {e}")
+            logger.info(f"⚠ Error loading checkpoint: {e}")
             import traceback
 
             traceback.print_exc()

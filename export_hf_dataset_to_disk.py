@@ -16,13 +16,9 @@ from PIL import Image
 from utilities import get_hf_bar
 
 from filename_utils import compute_file_hash, get_content_filename, get_target_filename
+from logging_utils import setup_logging
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
-
+logger = setup_logging(level=logging.INFO, name="DatasetExporter")
 
 @dataclass
 class ExportConfig:

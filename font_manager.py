@@ -17,8 +17,9 @@ import pygame.freetype
 from fontTools.ttLib import TTFont
 import cv2
 from utils import is_char_in_font, load_ttf
+from logging_utils import setup_logging
 
-
+logger = setup_logging(level=logging.INFO, name="FontManager")
 def ttf2im_robust(font, char, canvas_size=256):
     """
     Robust font rendering with proper centering and edge protection.
@@ -253,9 +254,9 @@ class FontManager:
 
             self.font_paths = sorted(font_files)
 
-            logging.info(f"{'=' * 60}")
-            logging.info(f"Loading {len(font_files)} fonts from wildcard path...")
-            logging.info("=" * 60)
+            logger.info(f"{'=' * 60}")
+            logger.info(f"Loading {len(font_files)} fonts from wildcard path...")
+            logger.info("=" * 60)
 
             for font_path in self.font_paths:
                 font_name: str = os.path.splitext(os.path.basename(font_path))[0]
@@ -265,12 +266,12 @@ class FontManager:
                         "font": load_ttf(font_path),
                         "name": font_name,
                     }
-                    logging.info(f"✓ Loaded: {font_name}")
+                    logger.info(f"✓ Loaded: {font_name}")
                 except Exception as e:
-                    logging.info(f"✗ Failed to load {font_name}: {e}")
+                    logger.info(f"✗ Failed to load {font_name}: {e}")
 
-            logging.info("=" * 60)
-            logging.info(f"Successfully loaded {len(self.fonts)} fonts\n")
+            logger.info("=" * 60)
+            logger.info(f"Successfully loaded {len(self.fonts)} fonts\n")
 
         elif os.path.isfile(ttf_path):
             # Single font file
@@ -281,7 +282,7 @@ class FontManager:
                 "font": load_ttf(ttf_path),
                 "name": font_name,
             }
-            logging.info(f"✓ Loaded font: {font_name}")
+            logger.info(f"✓ Loaded font: {font_name}")
 
         elif os.path.isdir(ttf_path):
             # Directory with multiple fonts
@@ -297,9 +298,9 @@ class FontManager:
 
             self.font_paths = sorted(font_files)
 
-            logging.info(f"{'=' * 60}")
-            logging.info(f"Loading {len(font_files)} fonts from directory...")
-            logging.info("=" * 60)
+            logger.info(f"{'=' * 60}")
+            logger.info(f"Loading {len(font_files)} fonts from directory...")
+            logger.info("=" * 60)
 
             for font_path in self.font_paths:
                 font_name: str = os.path.splitext(os.path.basename(font_path))[0]
@@ -309,12 +310,12 @@ class FontManager:
                         "font": load_ttf(font_path),
                         "name": font_name,
                     }
-                    logging.info(f"✓ Loaded: {font_name}")
+                    logger.info(f"✓ Loaded: {font_name}")
                 except Exception as e:
-                    logging.info(f"✗ Failed to load {font_name}: {e}")
+                    logger.info(f"✗ Failed to load {font_name}: {e}")
 
-            logging.info("=" * 60)
-            logging.info(f"Successfully loaded {len(self.fonts)} fonts\n")
+            logger.info("=" * 60)
+            logger.info(f"Successfully loaded {len(self.fonts)} fonts\n")
         else:
             raise ValueError(f"Invalid ttf_path: {ttf_path}")
 

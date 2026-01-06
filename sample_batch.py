@@ -32,6 +32,8 @@ from utilities import (
     get_hf_bar,
 )
 
+from logging_utils import setup_logging
+logger = setup_logging(level=logging.INFO, name="SampleBatch")
 enable_progress_bars()
 # Import evaluation metrics
 try:
@@ -39,7 +41,7 @@ try:
 
     LPIPS_AVAILABLE: bool = True
 except ImportError:
-    logging.info("Warning: lpips not available. Install with: pip install lpips")
+    logger.info("Warning: lpips not available. Install with: pip install lpips")
     LPIPS_AVAILABLE: bool = False
 
 try:
@@ -47,7 +49,7 @@ try:
 
     FID_AVAILABLE: bool = True
 except ImportError:
-    logging.info(
+    logger.info(
         "Warning: pytorch-fid not available. Install with: pip install pytorch-fid"
     )
     FID_AVAILABLE: bool = False
@@ -57,7 +59,7 @@ try:
 
     SSIM_AVAILABLE: bool = True
 except ImportError:
-    logging.info(
+    logger.info(
         "Warning: scikit-image not available. Install with: pip install scikit-image"
     )
     SSIM_AVAILABLE: bool = False
@@ -67,7 +69,7 @@ try:
 
     WANDB_AVAILABLE: bool = True
 except ImportError:
-    logging.info("Warning: wandb not available. Install with: pip install wandb")
+    logger.info("Warning: wandb not available. Install with: pip install wandb")
     WANDB_AVAILABLE: bool = False
 
 # Import FontDiffuser modules
@@ -115,9 +117,9 @@ class FontManager:
 
             self.font_paths = sorted(font_files)
 
-            logging.info(f"{'=' * 60}")
-            logging.info(f"Loading {len(font_files)} fonts from wildcard path...")
-            logging.info("=" * 60)
+            logger.info(f"{'=' * 60}")
+            logger.info(f"Loading {len(font_files)} fonts from wildcard path...")
+            logger.info("=" * 60)
 
             for font_path in self.font_paths:
                 font_name: str = os.path.splitext(os.path.basename(font_path))[0]
@@ -127,12 +129,12 @@ class FontManager:
                         "font": load_ttf(font_path),
                         "name": font_name,
                     }
-                    logging.info(f"✓ Loaded: {font_name}")
+                    logger.info(f"✓ Loaded: {font_name}")
                 except Exception as e:
-                    logging.info(f"✗ Failed to load {font_name}: {e}")
+                    logger.info(f"✗ Failed to load {font_name}: {e}")
 
-            logging.info("=" * 60)
-            logging.info(f"Successfully loaded {len(self.fonts)} fonts\n")
+            logger.info("=" * 60)
+            logger.info(f"Successfully loaded {len(self.fonts)} fonts\n")
 
         elif os.path.isfile(ttf_path):
             # Single font file
@@ -143,7 +145,7 @@ class FontManager:
                 "font": load_ttf(ttf_path),
                 "name": font_name,
             }
-            logging.info(f"✓ Loaded font: {font_name}")
+            logger.info(f"✓ Loaded font: {font_name}")
 
         elif os.path.isdir(ttf_path):
             # Directory with multiple fonts
@@ -159,9 +161,9 @@ class FontManager:
 
             self.font_paths = sorted(font_files)
 
-            logging.info(f"{'=' * 60}")
-            logging.info(f"Loading {len(font_files)} fonts from directory...")
-            logging.info("=" * 60)
+            logger.info(f"{'=' * 60}")
+            logger.info(f"Loading {len(font_files)} fonts from directory...")
+            logger.info("=" * 60)
 
             for font_path in self.font_paths:
                 font_name: str = os.path.splitext(os.path.basename(font_path))[0]
@@ -171,12 +173,12 @@ class FontManager:
                         "font": load_ttf(font_path),
                         "name": font_name,
                     }
-                    logging.info(f"✓ Loaded: {font_name}")
+                    logger.info(f"✓ Loaded: {font_name}")
                 except Exception as e:
-                    logging.info(f"✗ Failed to load {font_name}: {e}")
+                    logger.info(f"✗ Failed to load {font_name}: {e}")
 
-            logging.info("=" * 60)
-            logging.info(f"Successfully loaded {len(self.fonts)} fonts\n")
+            logger.info("=" * 60)
+            logger.info(f"Successfully loaded {len(self.fonts)} fonts\n")
         else:
             raise ValueError(f"Invalid ttf_path: {ttf_path}")
 
@@ -269,15 +271,15 @@ class GenerationTracker:
             # ✅ Store only unique generations
             self.generations = unique_generations
 
-            logging.info(
+            logger.info(
                 f"✓ Loaded checkpoint: {len(self.generations)} unique generations"
             )
             if duplicate_count > 0:
-                logging.info(f"  ⚠️  Removed {duplicate_count} duplicate entries")
-            logging.info(f"  Total raw entries: {len(raw_generations)}")
+                logger.info(f"  ⚠️  Removed {duplicate_count} duplicate entries")
+            logger.info(f"  Total raw entries: {len(raw_generations)}")
 
         except Exception as e:
-            logging.info(f"⚠ Error loading checkpoint: {e}")
+            logger.info(f"⚠ Error loading checkpoint: {e}")
             import traceback
 
             traceback.print_exc()
@@ -337,7 +339,7 @@ class QualityEvaluator:
 
             return lpips_value
         except Exception as e:
-            logging.info(f"Error computing LPIPS: {e}")
+            logger.info(f"Error computing LPIPS: {e}")
             return -1.0
 
     def compute_ssim(self, img1: Image.Image, img2: Image.Image) -> float:
@@ -353,7 +355,7 @@ class QualityEvaluator:
             ssim_value: float = ssim(img1_gray, img2_gray, data_range=255)
             return ssim_value
         except Exception as e:
-            logging.info(f"Error computing SSIM: {e}")
+            logger.info(f"Error computing SSIM: {e}")
             return -1.0
 
     def compute_fid(self, real_dir: str, fake_dir: str) -> float:
@@ -367,7 +369,7 @@ class QualityEvaluator:
             )
             return fid_value
         except Exception as e:
-            logging.info(f"Error computing FID: {e}")
+            logger.info(f"Error computing FID: {e}")
             return -1.0
 
     def save_image(self, image: Image.Image, path: str) -> None:
@@ -376,7 +378,7 @@ class QualityEvaluator:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             image.save(path)
         except Exception as e:
-            logging.info(f"Error saving image to {path}: {e}")
+            logger.info(f"Error saving image to {path}: {e}")
 
 
 def parse_args() -> Namespace:
@@ -593,11 +595,11 @@ def load_characters(
                 f"   Make sure start_line <= end_line and both are within file bounds."
             )
 
-        logging.info(f"📖 Loading characters from file: {characters_arg}")
-        logging.info(
+        logger.info(f"📖 Loading characters from file: {characters_arg}")
+        logger.info(
             f"   Lines {start_line} to {end_idx} (total file: {len(all_lines)} lines)"
         )
-        logging.info(f"   Processing {end_idx - start_idx} lines...")
+        logger.info(f"   Processing {end_idx - start_idx} lines...")
 
         for line_num, line in get_hf_bar(
             enumerate(all_lines[start_idx:end_idx], start=start_line),
@@ -609,7 +611,7 @@ def load_characters(
             if not char:
                 continue
             if len(char) != 1:
-                logging.info(
+                logger.info(
                     f"Warning: Skipping line {line_num}: expected 1 char, got {len(char)}: '{char}'"
                 )
                 continue
@@ -630,7 +632,7 @@ def load_characters(
             f"   Check your character file or line range (start={start_line}, end={end_line})"
         )
 
-    logging.info(f"✅ Successfully loaded {len(chars)} single characters.")
+    logger.info(f"✅ Successfully loaded {len(chars)} single characters.")
     return chars
 
 
@@ -649,7 +651,7 @@ def load_style_images(style_images_arg: str) -> List[Tuple[str, str]]:
         ]
         style_paths.sort()
 
-        logging.info(f"📂 Loading {len(style_paths)} style images from directory...")
+        logger.info(f"📂 Loading {len(style_paths)} style images from directory...")
         verified_paths = []
         for path in get_hf_bar(
             style_paths,
@@ -746,10 +748,10 @@ def save_checkpoint(results: Dict[str, Any], output_dir: str) -> None:
             json.dump(results, f, indent=2, ensure_ascii=False)
 
         num_gens = len(results.get("generations", []))
-        logging.info(f"  ✅ Saved results_checkpoint.json ({num_gens} generations)")
+        logger.info(f"  ✅ Saved results_checkpoint.json ({num_gens} generations)")
 
     except Exception as e:
-        logging.info(f"  ⚠ Error saving checkpoint: {e}")
+        logger.info(f"  ⚠ Error saving checkpoint: {e}")
 
 
 def generate_content_images(
@@ -770,11 +772,11 @@ def generate_content_images(
     if not font_names:
         raise ValueError("No fonts loaded")
 
-    logging.info(f"{'=' * 60}")
-    logging.info(f"Generating Content Images")
-    logging.info(f"Using {len(font_names)} fonts")
-    logging.info(f"Characters: {len(characters)}")
-    logging.info("=" * 60)
+    logger.info(f"{'=' * 60}")
+    logger.info(f"Generating Content Images")
+    logger.info(f"Using {len(font_names)} fonts")
+    logger.info(f"Characters: {len(characters)}")
+    logger.info("=" * 60)
 
     char_paths: Dict[str, str] = {}
     chars_without_fonts: List[str] = []
@@ -793,7 +795,7 @@ def generate_content_images(
                 break
 
         if not found_font:
-            logging.info(f"  ⚠ Warning: '{char}' not in any font, skipping...")
+            logger.info(f"  ⚠ Warning: '{char}' not in any font, skipping...")
             chars_without_fonts.append(char)
             continue
 
@@ -804,7 +806,7 @@ def generate_content_images(
 
             # ✅ Check if content image already exists
             if os.path.exists(char_path):
-                logging.info(
+                logger.info(
                     f"  ✓ Content image already exists for '{char}' at {char_path}"
                 )
                 char_paths[char] = char_path
@@ -816,23 +818,23 @@ def generate_content_images(
             content_img: Image.Image = ttf2im(font=font, char=char)
 
             content_img.save(char_path)
-            logging.info(
+            logger.info(
                 f"  ✓ Generated new content image for '{char}' at {char_path}."
             )
             char_paths[char] = char_path
             generated_new += 1
 
         except Exception as e:
-            logging.info(f"  ✗ Error generating '{char}': {e}")
+            logger.info(f"  ✗ Error generating '{char}': {e}")
 
-    logging.info(f"{'=' * 60}")
-    logging.info(f"Content Image Generation Summary:")
-    logging.info(f"  Total characters:       {len(characters)}")
-    logging.info(f"  Generated (new):        {generated_new}")
-    logging.info(f"  Already exist (reused): {len(chars_already_exist)}")
-    logging.info(f"  Not in any font:        {len(chars_without_fonts)}")
-    logging.info(f"  Total usable:           {len(char_paths)}")
-    logging.info("=" * 60)
+    logger.info(f"{'=' * 60}")
+    logger.info(f"Content Image Generation Summary:")
+    logger.info(f"  Total characters:       {len(characters)}")
+    logger.info(f"  Generated (new):        {generated_new}")
+    logger.info(f"  Already exist (reused): {len(chars_already_exist)}")
+    logger.info(f"  Not in any font:        {len(chars_without_fonts)}")
+    logger.info(f"  Total usable:           {len(char_paths)}")
+    logger.info("=" * 60)
 
     return char_paths
 
@@ -852,9 +854,9 @@ def batch_generate_images(
     """
 
     # Generate ALL content images first
-    logging.info(f"{'=' * 60}")
-    logging.info(f"{'GENERATING CONTENT IMAGES':^60}")
-    logging.info("=" * 60)
+    logger.info(f"{'=' * 60}")
+    logger.info(f"{'GENERATING CONTENT IMAGES':^60}")
+    logger.info("=" * 60)
 
     char_paths = generate_content_images(
         characters, font_manager, output_dir, generation_tracker
@@ -898,23 +900,23 @@ def batch_generate_images(
     os.makedirs(target_base_dir, exist_ok=True)
 
     # Print configuration
-    logging.info(f"{'=' * 60}")
-    logging.info(f"{'BATCH IMAGE GENERATION':^60}")
-    logging.info("=" * 60)
-    logging.info(f"Fonts:                {len(font_manager.get_font_names())}")
-    logging.info(f"Styles:               {len(style_paths_with_names)}")
-    logging.info(f"Characters (input):   {len(characters)}")
-    logging.info(f"Characters (content): {len(char_paths)}")
-    logging.info(f"Batch size:           {args.batch_size}")
-    logging.info(
+    logger.info(f"{'=' * 60}")
+    logger.info(f"{'BATCH IMAGE GENERATION':^60}")
+    logger.info("=" * 60)
+    logger.info(f"Fonts:                {len(font_manager.get_font_names())}")
+    logger.info(f"Styles:               {len(style_paths_with_names)}")
+    logger.info(f"Characters (input):   {len(characters)}")
+    logger.info(f"Characters (content): {len(char_paths)}")
+    logger.info(f"Batch size:           {args.batch_size}")
+    logger.info(
         f"Previously generated: {len(generation_tracker.generations)} unique pairs"
     )
-    logging.info(f"Unique chars seen:    {len(all_chars_in_checkpoint)}")
-    logging.info(f"Unique styles used:   {len(all_styles_in_checkpoint)}")
-    logging.info(
+    logger.info(f"Unique chars seen:    {len(all_chars_in_checkpoint)}")
+    logger.info(f"Unique styles used:   {len(all_styles_in_checkpoint)}")
+    logger.info(
         f"Style Transform:      {getattr(args, 'enable_style_transform', False)}"
     )  # ✅ ADD THIS
-    logging.info("=" * 60 + "\n")
+    logger.info("=" * 60 + "\n")
 
     # Use first font for all characters
     font_names = font_manager.get_font_names()
@@ -922,8 +924,8 @@ def batch_generate_images(
         raise ValueError("No fonts loaded!")
 
     primary_font = font_names[0]
-    logging.info(f"Using font: {primary_font}")
-    logging.info("=" * 60 + "\n")
+    logger.info(f"Using font: {primary_font}")
+    logger.info("=" * 60 + "\n")
 
     # Initialize counters
     generated_count = 0
@@ -949,13 +951,13 @@ def batch_generate_images(
             ]
 
             if not chars_to_generate:
-                logging.info(
+                logger.info(
                     f"  ⊘ {style_name}: All characters already generated, skipping"
                 )
                 skipped_count += len(characters)
                 continue
 
-            logging.info(
+            logger.info(
                 f"  🔄 {style_name}: Generating {len(chars_to_generate)}/{len(characters)} new images"
             )
 
@@ -973,17 +975,17 @@ def batch_generate_images(
             )
 
             if images is None:
-                logging.info(f"  ⚠️ {style_name}: No images generated")
+                logger.info(f"  ⚠️ {style_name}: No images generated")
                 skipped_count += len(chars_to_generate)
                 continue
 
-            logging.info(f"  ✓ {style_name}: {len(images)} images in {batch_time:.2f}s")
+            logger.info(f"  ✓ {style_name}: {len(images)} images in {batch_time:.2f}s")
 
             # Save images and metadata
             for char, img in zip(valid_chars, images):
                 try:
                     if not font_manager.is_char_in_font(primary_font, char):
-                        logging.error(
+                        logger.error(
                             f"    ✗ Character '{char}' (U+{ord(char):04X}) not in font {primary_font}, skipping"
                         )
                         failed_count += 1
@@ -1006,7 +1008,7 @@ def batch_generate_images(
                     target_path_rel = f"TargetImage/{style_name}/{target_filename}"
 
                     evaluator.save_image(img, img_path)
-                    logging.info(
+                    logger.info(
                         f"    ✓ Saved generated image for '{char}' (U+{ord(char):04X}) at {img_path}."
                     )
 
@@ -1038,10 +1040,10 @@ def batch_generate_images(
                     generated_count += 1
 
                 except ValueError as e:
-                    logging.error(f"    ✗ Invalid filename for '{char}': {e}")
+                    logger.error(f"    ✗ Invalid filename for '{char}': {e}")
                     failed_count += 1
                 except Exception as e:
-                    logging.error(f"    ✗ Error saving '{char}': {e}")
+                    logger.error(f"    ✗ Error saving '{char}': {e}")
                     failed_count += 1
 
             # Track inference time
@@ -1067,7 +1069,7 @@ def batch_generate_images(
                 save_checkpoint(results, output_dir)
 
         except Exception as e:
-            logging.info(f"  ✗ {style_name}: {e}")
+            logger.info(f"  ✗ {style_name}: {e}")
             import traceback
 
             traceback.print_exc()
@@ -1131,7 +1133,7 @@ def sampling_batch_optimized(
                 content_images_pil.append(content_image.copy())
                 content_images.append(content_transform(content_image))
             except Exception as e:
-                logging.info(f"    ✗ Error processing '{char}': {e}")
+                logger.info(f"    ✗ Error processing '{char}': {e}")
                 continue
 
         if not content_images:
@@ -1191,7 +1193,7 @@ def sampling_batch_optimized(
             return all_images, available_chars, total_time
 
     except Exception as e:
-        logging.info(f"    ✗ Error in batch sampling: {e}")
+        logger.info(f"    ✗ Error in batch sampling: {e}")
         import traceback
 
         traceback.print_exc()
@@ -1213,15 +1215,15 @@ def _print_checkpoint_status(
         else 0
     )
 
-    logging.info(f"{'=' * 60}")
-    logging.info(f"{'CHECKPOINT':^60}")
-    logging.info("=" * 60)
-    logging.info(f"Progress:           {current_style}/{total_styles} styles")
-    logging.info(f"Generated:          {generated} pairs")
-    logging.info(f"Skipped:            {skipped} pairs")
-    logging.info(f"Elapsed time:       {elapsed / 60:.1f} minutes")
-    logging.info(f"Est. remaining:     {remaining / 60:.1f} minutes")
-    logging.info("=" * 60)
+    logger.info(f"{'=' * 60}")
+    logger.info(f"{'CHECKPOINT':^60}")
+    logger.info("=" * 60)
+    logger.info(f"Progress:           {current_style}/{total_styles} styles")
+    logger.info(f"Generated:          {generated} pairs")
+    logger.info(f"Skipped:            {skipped} pairs")
+    logger.info(f"Elapsed time:       {elapsed / 60:.1f} minutes")
+    logger.info(f"Est. remaining:     {remaining / 60:.1f} minutes")
+    logger.info("=" * 60)
 
 
 def _print_generation_summary(
@@ -1230,22 +1232,22 @@ def _print_generation_summary(
     """Print final generation summary"""
     elapsed = time.time() - start_time
 
-    logging.info("=" * 60)
-    logging.info(f"{'GENERATION COMPLETE':^60}")
-    logging.info("=" * 60)
-    logging.info(f"Pair Statistics:")
-    logging.info(f"  Total possible:     {total}")
-    logging.info(f"  Generated (new):    {generated}")
-    logging.info(f"  Skipped (exist):    {skipped}")
-    logging.info(f"  Failed (no font):   {failed}")
-    logging.info(f"Timing:")
-    logging.info(f"  Total time:         {elapsed / 60:.1f} minutes ({elapsed:.0f}s)")
-    logging.info(
+    logger.info("=" * 60)
+    logger.info(f"{'GENERATION COMPLETE':^60}")
+    logger.info("=" * 60)
+    logger.info(f"Pair Statistics:")
+    logger.info(f"  Total possible:     {total}")
+    logger.info(f"  Generated (new):    {generated}")
+    logger.info(f"  Skipped (exist):    {skipped}")
+    logger.info(f"  Failed (no font):   {failed}")
+    logger.info(f"Timing:")
+    logger.info(f"  Total time:         {elapsed / 60:.1f} minutes ({elapsed:.0f}s)")
+    logger.info(
         f"  Avg per pair:       {elapsed / generated * 1000:.1f}ms"
         if generated > 0
         else "  Avg per pair:       N/A"
     )
-    logging.info("=" * 60)
+    logger.info("=" * 60)
 
 
 def evaluate_results(
@@ -1257,14 +1259,14 @@ def evaluate_results(
     """Evaluate generated images against ground truth"""
 
     if not ground_truth_dir or not os.path.exists(ground_truth_dir):
-        logging.info(
+        logger.info(
             "\n⚠ No ground truth directory provided or not found, skipping evaluation"
         )
         return results
 
-    logging.info("=" * 60)
-    logging.info(f"{'EVALUATING GENERATED IMAGES':^60}")
-    logging.info("=" * 60)
+    logger.info("=" * 60)
+    logger.info(f"{'EVALUATING GENERATED IMAGES':^60}")
+    logger.info("=" * 60)
 
     lpips_scores: List[float] = []
     ssim_scores: List[float] = []
@@ -1323,7 +1325,7 @@ def evaluate_results(
             evaluated_pairs += 1
 
         except Exception as e:
-            logging.info(f"  ⚠ Error evaluating {char}/{style}: {e}")
+            logger.info(f"  ⚠ Error evaluating {char}/{style}: {e}")
             continue
 
     # Compute aggregate metrics
@@ -1335,11 +1337,11 @@ def evaluate_results(
             "max": float(np.max(lpips_scores)),
             "median": float(np.median(lpips_scores)),
         }
-        logging.info(f"📊 LPIPS Statistics:")
-        logging.info(f"  Mean:   {results['metrics']['lpips']['mean']:.4f}")
-        logging.info(f"  Std:    {results['metrics']['lpips']['std']:.4f}")
-        logging.info(f"  Median: {results['metrics']['lpips']['median']:.4f}")
-        logging.info(
+        logger.info(f"📊 LPIPS Statistics:")
+        logger.info(f"  Mean:   {results['metrics']['lpips']['mean']:.4f}")
+        logger.info(f"  Std:    {results['metrics']['lpips']['std']:.4f}")
+        logger.info(f"  Median: {results['metrics']['lpips']['median']:.4f}")
+        logger.info(
             f"  Range:  [{results['metrics']['lpips']['min']:.4f}, {results['metrics']['lpips']['max']:.4f}]"
         )
 
@@ -1351,17 +1353,17 @@ def evaluate_results(
             "max": float(np.max(ssim_scores)),
             "median": float(np.median(ssim_scores)),
         }
-        logging.info(f"📊 SSIM Statistics:")
-        logging.info(f"  Mean:   {results['metrics']['ssim']['mean']:.4f}")
-        logging.info(f"  Std:    {results['metrics']['ssim']['std']:.4f}")
-        logging.info(f"  Median: {results['metrics']['ssim']['median']:.4f}")
-        logging.info(
+        logger.info(f"📊 SSIM Statistics:")
+        logger.info(f"  Mean:   {results['metrics']['ssim']['mean']:.4f}")
+        logger.info(f"  Std:    {results['metrics']['ssim']['std']:.4f}")
+        logger.info(f"  Median: {results['metrics']['ssim']['median']:.4f}")
+        logger.info(
             f"  Range:  [{results['metrics']['ssim']['min']:.4f}, {results['metrics']['ssim']['max']:.4f}]"
         )
 
     # Compute FID if requested
     if compute_fid and FID_AVAILABLE:
-        logging.info("\n📊 Computing FID score...")
+        logger.info("\n📊 Computing FID score...")
         try:
             # Create temporary directories for FID computation
             fake_dir = os.path.join(
@@ -1373,20 +1375,20 @@ def evaluate_results(
                 fid_value: float = evaluator.compute_fid(real_dir, fake_dir)
                 if fid_value >= 0:
                     results["metrics"]["fid"] = fid_value
-                    logging.info(f"  FID Score: {fid_value:.2f}")
+                    logger.info(f"  FID Score: {fid_value:.2f}")
             else:
-                logging.info("  ⚠ Cannot compute FID: directories not found")
+                logger.info("  ⚠ Cannot compute FID: directories not found")
         except Exception as e:
-            logging.info(f"  ⚠ Error computing FID: {e}")
+            logger.info(f"  ⚠ Error computing FID: {e}")
 
-    logging.info("=" * 60)
-    logging.info(f"{'EVALUATION SUMMARY':^60}")
-    logging.info("=" * 60)
-    logging.info(f"Evaluated pairs:    {evaluated_pairs}")
-    logging.info(f"Missing GT images:  {missing_gt}")
-    logging.info(f"LPIPS samples:      {len(lpips_scores)}")
-    logging.info(f"SSIM samples:       {len(ssim_scores)}")
-    logging.info("=" * 60)
+    logger.info("=" * 60)
+    logger.info(f"{'EVALUATION SUMMARY':^60}")
+    logger.info("=" * 60)
+    logger.info(f"Evaluated pairs:    {evaluated_pairs}")
+    logger.info(f"Missing GT images:  {missing_gt}")
+    logger.info(f"LPIPS samples:      {len(lpips_scores)}")
+    logger.info(f"SSIM samples:       {len(ssim_scores)}")
+    logger.info("=" * 60)
 
     return results
 
@@ -1395,13 +1397,13 @@ def log_to_wandb(results: Dict[str, Any], args: Namespace) -> None:
     """Log results to Weights & Biases"""
 
     if not WANDB_AVAILABLE:
-        logging.info("\n⚠ Wandb not available, skipping logging")
+        logger.info("\n⚠ Wandb not available, skipping logging")
         return
 
     try:
-        logging.info("=" * 60)
-        logging.info(f"{'LOGGING TO WEIGHTS & BIASES':^60}")
-        logging.info("=" * 60)
+        logger.info("=" * 60)
+        logger.info(f"{'LOGGING TO WEIGHTS & BIASES':^60}")
+        logger.info("=" * 60)
 
         # Initialize wandb
         run_name = args.wandb_run_name
@@ -1488,7 +1490,7 @@ def log_to_wandb(results: Dict[str, Any], args: Namespace) -> None:
                 )
 
         # Log sample images
-        logging.info("\n📸 Logging sample images...")
+        logger.info("\n📸 Logging sample images...")
         sample_generations = results.get("generations", [])[:20]  # Log first 20
 
         sample_images = []
@@ -1506,11 +1508,11 @@ def log_to_wandb(results: Dict[str, Any], args: Namespace) -> None:
                             )
                         )
                     except Exception as e:
-                        logging.info(f"  ⚠ Error loading image {full_path}: {e}")
+                        logger.info(f"  ⚠ Error loading image {full_path}: {e}")
 
         if sample_images:
             wandb.log({"sample_images": sample_images})
-            logging.info(f"✓ Logged {len(sample_images)} sample images")
+            logger.info(f"✓ Logged {len(sample_images)} sample images")
 
         # Create summary table
         generation_table = wandb.Table(
@@ -1541,13 +1543,13 @@ def log_to_wandb(results: Dict[str, Any], args: Namespace) -> None:
         # Finish run
         wandb.finish()
 
-        logging.info("\n✓ Successfully logged to Weights & Biases")
-        logging.info(f"  Project: {args.wandb_project}")
-        logging.info(f"  Run: {run_name}")
-        logging.info("=" * 60)
+        logger.info("\n✓ Successfully logged to Weights & Biases")
+        logger.info(f"  Project: {args.wandb_project}")
+        logger.info(f"  Run: {run_name}")
+        logger.info("=" * 60)
 
     except Exception as e:
-        logging.info(f"⚠ Error logging to wandb: {e}")
+        logger.info(f"⚠ Error logging to wandb: {e}")
         import traceback
 
         traceback.print_exc()
@@ -1558,9 +1560,9 @@ def main() -> None:
     args: Namespace = parse_args()
     results: Dict[str, Any] = {}
 
-    logging.info("=" * 60)
-    logging.info("FONTDIFFUSER SYNTHESIS DATA GENERATION MAGIC")
-    logging.info("=" * 60)
+    logger.info("=" * 60)
+    logger.info("FONTDIFFUSER SYNTHESIS DATA GENERATION MAGIC")
+    logger.info("=" * 60)
 
     try:
         # Load characters
@@ -1573,21 +1575,21 @@ def main() -> None:
             args.style_images
         )
 
-        logging.info(f"Initializing font manager...")
+        logger.info(f"Initializing font manager...")
         font_manager: FontManager = FontManager(args.ttf_path)
-        logging.info(f"✓ Loaded {len(font_manager.get_font_names())} fonts.")
+        logger.info(f"✓ Loaded {len(font_manager.get_font_names())} fonts.")
 
-        logging.info(f"📊 Configuration:")
-        logging.info(f"  Dataset split: {args.dataset_split}")
-        logging.info(
+        logger.info(f"📊 Configuration:")
+        logger.info(f"  Dataset split: {args.dataset_split}")
+        logger.info(
             f"  Characters: {len(characters)} (lines {args.start_line}-{args.end_line or 'end'})"
         )
-        logging.info(f"  Styles: {len(style_paths_with_names)}")
-        logging.info(f"  Output Directory: {args.output_dir}")
-        logging.info(f"  Checkpoint Directory: {args.ckpt_dir}")
-        logging.info(f"  Device: {args.device}")
-        logging.info(f"  Batch Size: {args.batch_size}")
-        logging.info(
+        logger.info(f"  Styles: {len(style_paths_with_names)}")
+        logger.info(f"  Output Directory: {args.output_dir}")
+        logger.info(f"  Checkpoint Directory: {args.ckpt_dir}")
+        logger.info(f"  Device: {args.device}")
+        logger.info(f"  Batch Size: {args.batch_size}")
+        logger.info(
             f"  Results checkpoint path: {os.path.join(args.output_dir, 'results_checkpoint.json')}"
         )
 
@@ -1602,14 +1604,14 @@ def main() -> None:
         # Create args namespace for pipeline
         pipeline_args: Namespace = create_args_namespace(args)
 
-        logging.info("\nLoading FontDiffuser pipeline...")
+        logger.info("\nLoading FontDiffuser pipeline...")
         pipe: FontDiffuserDPMPipeline = load_fontdiffuser_pipeline(pipeline_args)
 
         # Add this block to enable torch.compile if requested
         if getattr(args, "compile", False):
             import torch
 
-            logging.info("🔧 Compiling model components with torch.compile...")
+            logger.info("🔧 Compiling model components with torch.compile...")
             try:
                 if hasattr(pipe.model.config, "unet"):
                     pipe.model.config.unet = torch.compile(pipe.model.config.unet)
@@ -1621,9 +1623,9 @@ def main() -> None:
                     pipe.model.config.content_encoder = torch.compile(
                         pipe.model.config.content_encoder
                     )
-                logging.info("✓ Compilation complete.")
+                logger.info("✓ Compilation complete.")
             except Exception as e:
-                logging.info(f"⚠ Compilation failed: {e}")
+                logger.info(f"⚠ Compilation failed: {e}")
 
         evaluator: QualityEvaluator = QualityEvaluator(device=args.device)
 
@@ -1646,37 +1648,37 @@ def main() -> None:
             )
 
         # Save final checkpoint
-        logging.info("\n💾 Saving final checkpoint...")
+        logger.info("\n💾 Saving final checkpoint...")
         save_checkpoint(results, args.output_dir)
 
         if args.use_wandb:
             log_to_wandb(results, args)
 
-        logging.info("=" * 60)
-        logging.info("✅ GENERATION COMPLETE!")
-        logging.info("=" * 60)
-        logging.info(f"Output structure:")
-        logging.info(f"  {args.output_dir}/")
-        logging.info(f"    ├── ContentImage/")
-        logging.info(f"    │   ├── U+XXXX_char_hash.png")
-        logging.info(f"    │   └── ...")
-        logging.info(f"    ├── TargetImage/")
-        logging.info(f"    │   ├── style0/")
-        logging.info(f"    │   │   ├── U+XXXX_char_style0_hash.png")
-        logging.info(f"    │   │   └── ...")
-        logging.info(f"    │   └── ...")
-        logging.info(f"    └── results_checkpoint.json ✅ (single source of truth)")
+        logger.info("=" * 60)
+        logger.info("✅ GENERATION COMPLETE!")
+        logger.info("=" * 60)
+        logger.info(f"Output structure:")
+        logger.info(f"  {args.output_dir}/")
+        logger.info(f"    ├── ContentImage/")
+        logger.info(f"    │   ├── U+XXXX_char_hash.png")
+        logger.info(f"    │   └── ...")
+        logger.info(f"    ├── TargetImage/")
+        logger.info(f"    │   ├── style0/")
+        logger.info(f"    │   │   ├── U+XXXX_char_style0_hash.png")
+        logger.info(f"    │   │   └── ...")
+        logger.info(f"    │   └── ...")
+        logger.info(f"    └── results_checkpoint.json ✅ (single source of truth)")
 
     except KeyboardInterrupt:
-        logging.info("\n\n⚠ Generation interrupted by user!")
-        logging.info("💾 Saving emergency checkpoint...")
+        logger.info("\n\n⚠ Generation interrupted by user!")
+        logger.info("💾 Saving emergency checkpoint...")
         if "results" in locals() and results:
             save_checkpoint(results, args.output_dir)
-            logging.info("✓ Latest state saved to results_checkpoint.json")
+            logger.info("✓ Latest state saved to results_checkpoint.json")
         sys.exit(1)
 
     except Exception as e:
-        logging.info(f"✗ Fatal error: {e}")
+        logger.info(f"✗ Fatal error: {e}")
         import traceback
 
         traceback.print_exc()

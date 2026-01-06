@@ -12,9 +12,10 @@ import logging
 from safetensors.torch import save_file
 from huggingface_hub import HfApi, create_repo, login
 
+from logging_utils import setup_logging
 from utilities import load_model_checkpoint, save_model_checkpoint, find_checkpoint
 
-
+logger = setup_logging(level=logging.INFO, name="ModelsUploader")
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Convert PyTorch .pth weights to SafeTensors format and upload to HF Hub",
@@ -97,7 +98,7 @@ def get_token(token_arg: Optional[str]) -> Optional[str]:
         return token_arg
     token_env = os.getenv("HF_TOKEN")
     if token_env:
-        logging.info("Using HF token from environment variable")
+        logger.info("Using HF token from environment variable")
         return token_env
     try:
         from huggingface_hub import HfFolder
