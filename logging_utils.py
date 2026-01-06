@@ -42,8 +42,8 @@ def setup_logging(level=logging.INFO, name=None, use_tqdm=False):
             "%(log_color)s" + log_format,
             datefmt=date_format,
             log_colors={
-                'DEBUG': 'cyan', 'INFO': 'green', 'WARNING': 'yellow',
-                'ERROR': 'red', 'CRITICAL': 'bold_red',
+                'DEBUG': '#B31E6F', 'INFO': '#22EAAA', 'WARNING': '#FFB174',
+                'ERROR': '#9E2A3A', 'CRITICAL': '#FF0000',
             }
         )
     except ImportError:
