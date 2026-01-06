@@ -18,50 +18,43 @@ class RankFilter(logging.Filter):
         record.rank = get_rank()
         return True
 
-def setup_logging(level=logging.INFO, name=None):
-    """
-    Unified logging setup for scripts and notebooks.
-    Args:
-        level: Logging level (default: INFO)
-        name: Logger name (default: root)
-    Returns:
-        Configured logger
-    """
-    # Remove all handlers (prevents duplicate logs in notebooks/reloads)
+def setup_logging(level=logging.INFO, name="app"):
+    # 1. Clean up the root logger to prevent duplicates
     root_logger = logging.getLogger()
-    for handler in root_logger.handlers[:]:
-        root_logger.removeHandler(handler)
+    while root_logger.hasHandlers():
+        root_logger.removeHandler(root_logger.handlers[0])
 
-    # Try colorlog for notebook friendliness
+    # 2. Define the format (handling potential missing 'rank' attribute)
+    log_format = "%(asctime)s [%(levelname)s] [%(name)s] %(message)s"
+    date_format = "%Y-%m-%d %H:%M:%S"
+
     try:
         from colorlog import ColoredFormatter
         formatter = ColoredFormatter(
-            "%(log_color)s%(asctime)s [%(levelname)s] [Rank %(rank)d] [%(name)s] %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
+            f"%(log_color)s{log_format}",
+            datefmt=date_format,
             log_colors={
-                'DEBUG':    'cyan',
-                'INFO':     'green',
-                'WARNING':  'yellow',
-                'ERROR':    'red',
-                'CRITICAL': 'bold_red',
+                'DEBUG': 'cyan', 'INFO': 'green', 'WARNING': 'yellow',
+                'ERROR': 'red', 'CRITICAL': 'bold_red',
             }
         )
     except ImportError:
-        formatter = logging.Formatter(
-            "%(asctime)s [%(levelname)s] [Rank %(rank)d] [%(name)s] %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S"
-        )
+        formatter = logging.Formatter(log_format, datefmt=date_format)
 
-    # StreamHandler for stdout (works in notebooks and scripts)
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(formatter)
-
-    # Set up logger
+    # 3. Create the specific named logger
     logger = logging.getLogger(name)
     logger.setLevel(level)
+    
+    # Standard StreamHandler for notebook/console output
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(formatter)
+    
+    # Important: Remove any old handlers from *this* specific logger too
+    while logger.hasHandlers():
+        logger.removeHandler(logger.handlers[0])
+        
     logger.addHandler(handler)
-    logger.addFilter(RankFilter())
-    logger.propagate = False  # Prevent double logging
+    logger.propagate = False  # Avoid sending logs to the root logger
 
     return logger
 
