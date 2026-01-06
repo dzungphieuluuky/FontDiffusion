@@ -67,7 +67,7 @@ HF_BAR_FORMAT = (
 )
 
 
-class HFTqdm(auto_tqdm):
+class HFTqdm(rich_tqdm):
     """
     Enhanced tqdm progress bar that mimics the Hugging‑Face download UI.
     Optimized for Kaggle notebooks (eliminates duplicate bars).
@@ -93,7 +93,6 @@ class HFTqdm(auto_tqdm):
         kwargs.setdefault("maxinterval", 1.0)
         kwargs.setdefault("smoothing", 0.3)
         kwargs.setdefault("leave", True)
-        kwargs.setdefault("file", sys.stderr) 
 
         self._base_desc = kwargs.get("desc", "Processing")
         self._start_time = time.time()
