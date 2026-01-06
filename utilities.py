@@ -29,27 +29,6 @@ class TqdmLoggingHandler(logging.Handler):
             self.flush()
         except Exception:
             self.handleError(record)
-
-
-def setup_logging() -> None | logging.Logger:
-    """
-    Configure root logger to write to a file and the console.
-
-    Parameters
-    ----------
-    output_dir : Path
-        Directory where the log file will be created.
-    """
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.StreamHandler(),
-            TqdmLoggingHandler(),
-        ],
-    )
-    return logging.getLogger()
-
 # --------------------------------------------------------------------------- #
 # Hugging‑Face style progress bar
 # --------------------------------------------------------------------------- #

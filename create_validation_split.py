@@ -24,48 +24,17 @@ from filename_utils import (
     parse_target_filename,
     get_content_filename,
     get_target_filename,
+    compute_file_hash,
 )
 from utilities import get_hf_bar
+from logging_utils import setup_logging
 
-
-# Setup logging with tqdm compatibility
-class TqdmLoggingHandler(logging.Handler):
-    def emit(self, record):
-        try:
-            msg = self.format(record)
-            tqdm.write(msg)
-            self.flush()
-        except Exception:
-            self.handleError(record)
-
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    handlers=[TqdmLoggingHandler()],
-)
+logger = setup_logging(level=logging.INFO, name="ValidationSplitCreator")
 
 
 # ============================================================================
 # UTILITY FUNCTIONS - For filename parsing and hashing
 # ============================================================================
-
-
-def compute_file_hash(char: str, style: str, font: str = "") -> str:
-    """
-    Compute deterministic hash for a (character, style, font) combination
-
-    Args:
-        char: Unicode character
-        style: Style name
-        font: Font name (optional)
-
-    Returns:
-        8-character hash string
-    """
-    content = f"{char}_{style}_{font}"
-    return hashlib.sha256(content.encode("utf-8")).hexdigest()[:8]
-
 
 @dataclass
 class ValidationSplitConfig:
@@ -111,7 +80,7 @@ class ValidationSplitCreator:
             raise ValueError(f"ContentImage not found in {source_dir}")
 
         self.source_train_dir: Path = source_dir
-        logging.info(f"✓ Using source directory: {self.source_train_dir}")
+        logger.info(f"✓ Using source directory: {self.source_train_dir}")
 
     def analyze_data(
         self,
@@ -125,9 +94,9 @@ class ValidationSplitCreator:
             - target_files: {(char, style) -> file_path}
             - char_to_styles: {char -> [styles]}
         """
-        logging.info("\n" + "=" * 60)
-        logging.info("ANALYZING TRAINING DATA")
-        logging.info("=" * 60)
+        logger.info("\n" + "=" * 60)
+        logger.info("ANALYZING TRAINING DATA")
+        logger.info("=" * 60)
 
         content_dir: Path = self.source_train_dir / "ContentImage"
         target_dir: Path = self.source_train_dir / "TargetImage"
@@ -137,7 +106,7 @@ class ValidationSplitCreator:
         char_to_styles: Dict[str, List[str]] = defaultdict(set)
 
         # Scan content images
-        logging.info("\n🔍 Scanning content images...")
+        logger.info("\n🔍 Scanning content images...")
         if content_dir.exists():
             for img_file in get_hf_bar(
                 list(content_dir.glob("*.png")),
@@ -148,10 +117,10 @@ class ValidationSplitCreator:
                 if char:
                     content_files[char] = str(img_file)
 
-        logging.info(f"  ✓ Found {len(content_files)} content images")
+        logger.info(f"  ✓ Found {len(content_files)} content images")
 
         # Scan target images with detailed diagnostics
-        logging.info("\n🔍 Scanning target images...")
+        logger.info("\n🔍 Scanning target images...")
         total_targets = 0
         style_mismatch_count = 0
         parse_error_count = 0
@@ -201,21 +170,21 @@ class ValidationSplitCreator:
                 char_to_styles[char].add(style)
                 total_targets += 1
 
-        logging.info(f"  ✓ Found {total_targets} valid target images")
+        logger.info(f"  ✓ Found {total_targets} valid target images")
 
         # ✅ Print parse error diagnostics
         if parse_error_count > 0:
-            logging.info(f"⚠️  PARSE ERROR DIAGNOSTICS:")
-            logging.info(f"  Total parse errors: {parse_error_count}")
-            logging.info(f"  First 10 unparseable files:")
+            logger.info(f"⚠️  PARSE ERROR DIAGNOSTICS:")
+            logger.info(f"  Total parse errors: {parse_error_count}")
+            logger.info(f"  First 10 unparseable files:")
             for item in unparseable_files[:10]:
-                logging.info(f"    Folder: {item['folder']}")
-                logging.info(f"    File:   {item['filename']}")
+                logger.info(f"    Folder: {item['folder']}")
+                logger.info(f"    File:   {item['filename']}")
                 stem = item["filename"][:-4]
                 parts = stem.split("_")
-                logging.info(f"    Parts:  {parts} (count: {len(parts)})")
+                logger.info(f"    Parts:  {parts} (count: {len(parts)})")
             if len(unparseable_files) > 10:
-                logging.info(f"    ... and {len(unparseable_files) - 10} more")
+                logger.info(f"    ... and {len(unparseable_files) - 10} more")
 
             # --- Export unparseable files to a txt file ---
             unparseable_txt_path = self.data_root / "unparseable_files.txt"
@@ -230,25 +199,25 @@ class ValidationSplitCreator:
                         ).resolve()
                     )
                     f.write(abs_path + "\n")
-            logging.info(f"✓ Exported unparseable file list to {unparseable_txt_path}")
+            logger.info(f"✓ Exported unparseable file list to {unparseable_txt_path}")
 
         # ✅ Print style mismatch diagnostics
         if style_mismatch_count > 0:
-            logging.info(f"⚠️  STYLE MISMATCH DIAGNOSTICS:")
-            logging.info(f"  Total mismatches: {style_mismatch_count}")
+            logger.info(f"⚠️  STYLE MISMATCH DIAGNOSTICS:")
+            logger.info(f"  Total mismatches: {style_mismatch_count}")
             for style_folder, mismatches in style_mismatch_details.items():
-                logging.info(f"  Folder: {style_folder}")
-                logging.info(f"    Mismatch count: {len(mismatches)}")
+                logger.info(f"  Folder: {style_folder}")
+                logger.info(f"    Mismatch count: {len(mismatches)}")
                 for mismatch in mismatches[:3]:
-                    logging.info(f"      - {mismatch['filename']}")
-                    logging.info(
+                    logger.info(f"      - {mismatch['filename']}")
+                    logger.info(
                         f"        Extracted: '{mismatch['extracted_style']}' vs Expected: '{mismatch['folder_style']}'"
                     )
                 if len(mismatches) > 3:
-                    logging.info(f"      ... and {len(mismatches) - 3} more")
+                    logger.info(f"      ... and {len(mismatches) - 3} more")
 
         # Validate content↔target pairing
-        logging.info("\n🔍 Validating content ↔ target pairs...")
+        logger.info("\n🔍 Validating content ↔ target pairs...")
         valid_pairs: Dict[Tuple[str, str], bool] = {}
         missing_content_count = 0
 
@@ -272,17 +241,17 @@ class ValidationSplitCreator:
         }
 
         # ✅ COMPREHENSIVE ANALYSIS SUMMARY
-        logging.info(f"" + "=" * 60)
-        logging.info(f"📊 DATA ANALYSIS SUMMARY")
-        logging.info(f"=" * 60)
-        logging.info(f"Content images found:        {len(content_files):,}")
-        logging.info(f"Target images scanned:       {total_targets:,}")
-        logging.info(f"  ├─ Parse errors:          {parse_error_count:,}")
-        logging.info(f"  └─ Style mismatches:      {style_mismatch_count:,}")
-        logging.info(f"Target images after filter:  {len(target_files):,}")
-        logging.info(f"Missing content images:      {missing_content_count:,}")
-        logging.info(f"Final valid pairs:           {len(valid_target_files):,}")
-        logging.info(f"=" * 60)
+        logger.info(f"" + "=" * 60)
+        logger.info(f"📊 DATA ANALYSIS SUMMARY")
+        logger.info(f"=" * 60)
+        logger.info(f"Content images found:        {len(content_files):,}")
+        logger.info(f"Target images scanned:       {total_targets:,}")
+        logger.info(f"  ├─ Parse errors:          {parse_error_count:,}")
+        logger.info(f"  └─ Style mismatches:      {style_mismatch_count:,}")
+        logger.info(f"Target images after filter:  {len(target_files):,}")
+        logger.info(f"Missing content images:      {missing_content_count:,}")
+        logger.info(f"Final valid pairs:           {len(valid_target_files):,}")
+        logger.info(f"=" * 60)
 
         # ✅ Calculate and show loss
         expected_total = total_targets
@@ -294,21 +263,21 @@ class ValidationSplitCreator:
         )
 
         if total_lost > 0:
-            logging.info(f"⚠️  IMAGE LOSS BREAKDOWN:")
-            logging.info(f"  Total scanned:          {expected_total:,}")
-            logging.info(
+            logger.info(f"⚠️  IMAGE LOSS BREAKDOWN:")
+            logger.info(f"  Total scanned:          {expected_total:,}")
+            logger.info(
                 f"  Lost to parse errors:   {lost_to_parse_error:,} ({lost_to_parse_error*100/expected_total:.2f}%)"
             )
-            logging.info(
+            logger.info(
                 f"  Lost to style mismatch: {lost_to_style_mismatch:,} ({lost_to_style_mismatch*100/expected_total:.2f}%)"
             )
-            logging.info(
+            logger.info(
                 f"  Lost to missing content:{lost_to_missing_content:,} ({lost_to_missing_content*100/expected_total:.2f}%)"
             )
-            logging.info(
+            logger.info(
                 f"  Total lost:             {total_lost:,} ({total_lost*100/expected_total:.2f}%)"
             )
-            logging.info(
+            logger.info(
                 f"  Usable for split:       {len(valid_target_files):,} ({len(valid_target_files)*100/expected_total:.2f}%)"
             )
 
@@ -325,9 +294,9 @@ class ValidationSplitCreator:
         - Randomly split both characters and styles
         - Only pairs (char, style) where both char and style are in the split are included
         """
-        logging.info("\n" + "=" * 60)
-        logging.info("CREATING TRAIN/VAL SPLITS (random char & style)")
-        logging.info("=" * 60)
+        logger.info("\n" + "=" * 60)
+        logger.info("CREATING TRAIN/VAL SPLITS (random char & style)")
+        logger.info("=" * 60)
 
         all_chars = sorted(list(content_files.keys()))
         all_styles = sorted({style for (_, style) in target_files.keys()})
@@ -364,18 +333,18 @@ class ValidationSplitCreator:
             },
         }
 
-        logging.info("\n📊 Split Statistics:")
-        logging.info(
+        logger.info("\n📊 Split Statistics:")
+        logger.info(
             f"  Total chars: {num_chars} → train: {num_train_chars}, val: {num_val_chars}"
         )
-        logging.info(
+        logger.info(
             f"  Total styles: {num_styles} → train: {num_train_styles}, val: {num_val_styles}"
         )
 
         for split_name, split_data in scenarios.items():
-            logging.info(f"  {split_name}:")
-            logging.info(f"    Chars: {len(split_data['characters'])}")
-            logging.info(f"    Styles: {len(split_data['styles'])}")
+            logger.info(f"  {split_name}:")
+            logger.info(f"    Chars: {len(split_data['characters'])}")
+            logger.info(f"    Styles: {len(split_data['styles'])}")
 
         return scenarios
 
@@ -407,7 +376,7 @@ class ValidationSplitCreator:
         skipped = 0
 
         # Copy content images
-        logging.info(f"  📥 Copying content images for {split_name}...")
+        logger.info(f"  📥 Copying content images for {split_name}...")
         for char in get_hf_bar(
             sorted(allowed_chars),
             desc="  Content",
@@ -439,7 +408,7 @@ class ValidationSplitCreator:
                 content_copied += 1
 
         # Copy target images
-        logging.info(f"  📥 Copying target images for {split_name}...")
+        logger.info(f"  📥 Copying target images for {split_name}...")
         for (char, style), target_path_str in get_hf_bar(
             sorted(target_files.items()),
             desc="  Target",
@@ -470,7 +439,7 @@ class ValidationSplitCreator:
             else:
                 target_copied += 1
 
-        logging.info(
+        logger.info(
             f"  ✓ {split_name}: {content_copied:,} content, {target_copied:,} target (skipped: {skipped})"
         )
 
@@ -488,19 +457,19 @@ class ValidationSplitCreator:
         Filter results_checkpoint.json to only include generations
         that have both content and target in this split
         """
-        logging.info(f"  📋 Filtering checkpoint for {split_name}...")
+        logger.info(f"  📋 Filtering checkpoint for {split_name}...")
 
         original_checkpoint_path = self.source_train_dir / "results_checkpoint.json"
 
         if not original_checkpoint_path.exists():
-            logging.info(f"    ⚠️  No checkpoint found, skipping")
+            logger.info(f"    ⚠️  No checkpoint found, skipping")
             return
 
         try:
             with open(original_checkpoint_path, "r", encoding="utf-8") as f:
                 original_data = json.load(f)
         except Exception as e:
-            logging.info(f"    ⚠️  Error loading checkpoint: {e}")
+            logger.info(f"    ⚠️  Error loading checkpoint: {e}")
             return
 
         # Filter generations
@@ -549,15 +518,15 @@ class ValidationSplitCreator:
         with open(split_checkpoint_path, "w", encoding="utf-8") as f:
             json.dump(split_checkpoint, f, indent=2, ensure_ascii=False)
 
-        logging.info(
+        logger.info(
             f"    ✓ Saved: {len(filtered_generations):,}/{len(original_generations):,} generations"
         )
 
     def create_splits(self) -> None:
         """Main function to create train/val splits"""
-        logging.info("\n" + "=" * 60)
-        logging.info("FONTDIFFUSION VALIDATION SPLIT CREATOR")
-        logging.info("=" * 60)
+        logger.info("\n" + "=" * 60)
+        logger.info("FONTDIFFUSION VALIDATION SPLIT CREATOR")
+        logger.info("=" * 60)
 
         # Step 1: Analyze data
         content_files, target_files, char_to_styles = self.analyze_data()
@@ -568,7 +537,7 @@ class ValidationSplitCreator:
         )
 
         # Step 3: Create train split
-        logging.info("\n📁 CREATING TRAIN SPLIT...")
+        logger.info("\n📁 CREATING TRAIN SPLIT...")
         train_chars = set(scenarios["train"]["characters"])
         train_styles = set(scenarios["train"]["styles"])
 
@@ -584,7 +553,7 @@ class ValidationSplitCreator:
         )
 
         # Step 4: Create val split
-        logging.info(f"📁 CREATING VAL SPLIT...")
+        logger.info(f"📁 CREATING VAL SPLIT...")
         val_chars = set(scenarios["val"]["characters"])
         val_styles = set(scenarios["val"]["styles"])
 
@@ -609,7 +578,7 @@ class ValidationSplitCreator:
         with open(metadata_path, "w", encoding="utf-8") as f:
             json.dump(scenarios, f, indent=2, ensure_ascii=False)
 
-        logging.info(f"✓ Saved split metadata to {metadata_path}")
+        logger.info(f"✓ Saved split metadata to {metadata_path}")
 
 
 # ============================================================================
@@ -632,22 +601,22 @@ def create_validation_split(
     creator = ValidationSplitCreator(config)
     creator.create_splits()
 
-    logging.info("\n" + "=" * 60)
-    logging.info("✓ SPLIT CREATION COMPLETE")
-    logging.info("=" * 60)
-    logging.info("\n✅ Created:")
-    logging.info("  📁 train/")
-    logging.info("    ├── ContentImage/ (training chars)")
-    logging.info("    ├── TargetImage/ (training styles)")
-    logging.info("    └── results_checkpoint.json (filtered)")
-    logging.info("  📁 val/")
-    logging.info("    ├── ContentImage/ (validation chars)")
-    logging.info("    ├── TargetImage/ (validation styles)")
-    logging.info("    └── results_checkpoint.json (filtered)")
-    logging.info("\n💡 Guarantees:")
-    logging.info("  ✓ Every target has matching content")
-    logging.info("  ✓ Checkpoint contains only relevant generations")
-    logging.info("  ✓ Train and val are completely disjoint")
+    logger.info("\n" + "=" * 60)
+    logger.info("✓ SPLIT CREATION COMPLETE")
+    logger.info("=" * 60)
+    logger.info("\n✅ Created:")
+    logger.info("  📁 train/")
+    logger.info("    ├── ContentImage/ (training chars)")
+    logger.info("    ├── TargetImage/ (training styles)")
+    logger.info("    └── results_checkpoint.json (filtered)")
+    logger.info("  📁 val/")
+    logger.info("    ├── ContentImage/ (validation chars)")
+    logger.info("    ├── TargetImage/ (validation styles)")
+    logger.info("    └── results_checkpoint.json (filtered)")
+    logger.info("\n💡 Guarantees:")
+    logger.info("  ✓ Every target has matching content")
+    logger.info("  ✓ Checkpoint contains only relevant generations")
+    logger.info("  ✓ Train and val are completely disjoint")
 
 
 if __name__ == "__main__":
@@ -673,7 +642,7 @@ if __name__ == "__main__":
             random_seed=args.seed,
         )
     except Exception as e:
-        logging.error(f"❌ Error: {e}")
+        logger.error(f"❌ Error: {e}")
         import traceback
 
         traceback.print_exc()
