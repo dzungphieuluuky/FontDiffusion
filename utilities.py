@@ -14,6 +14,7 @@ import torch
 from safetensors.torch import save_file
 from tqdm.rich import tqdm_rich as rich_tqdm
 from huggingface_hub.utils import tqdm as hf_tqdm
+from tqdm.auto import tqdm as auto_tqdm
 
 # --------------------------------------------------------------------------- #
 # Logging
@@ -66,7 +67,7 @@ HF_BAR_FORMAT = (
 )
 
 
-class HFTqdm(hf_tqdm):
+class HFTqdm(auto_tqdm):
     """
     Enhanced tqdm progress bar that mimics the Hugging‑Face download UI.
     Optimized for Kaggle notebooks (eliminates duplicate bars).
