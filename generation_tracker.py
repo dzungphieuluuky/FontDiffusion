@@ -7,6 +7,8 @@ from logging_utils import setup_logging
 from filename_utils import compute_file_hash
 
 logger = setup_logging(level=logging.INFO, name="GenerationTracker")
+
+
 class GenerationTracker:
     """
     ✅ Tracks which (character, style, font) combinations have been generated

@@ -20,6 +20,8 @@ from utils import is_char_in_font, load_ttf
 from logging_utils import setup_logging
 
 logger = setup_logging(level=logging.INFO, name="FontManager")
+
+
 def ttf2im_robust(font, char, canvas_size=256):
     """
     Robust font rendering with proper centering and edge protection.

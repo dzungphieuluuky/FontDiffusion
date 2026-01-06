@@ -33,6 +33,7 @@ from utilities import (
 )
 
 from logging_utils import setup_logging
+
 logger = setup_logging(level=logging.INFO, name="SampleBatch")
 enable_progress_bars()
 # Import evaluation metrics
@@ -818,9 +819,7 @@ def generate_content_images(
             content_img: Image.Image = ttf2im(font=font, char=char)
 
             content_img.save(char_path)
-            logger.info(
-                f"  ✓ Generated new content image for '{char}' at {char_path}."
-            )
+            logger.info(f"  ✓ Generated new content image for '{char}' at {char_path}.")
             char_paths[char] = char_path
             generated_new += 1
 

@@ -663,10 +663,10 @@ def main():
             logger.info("=" * 60)
             logger.info("✅ NomGenie dataset generation complete!")
             logger.info("=" * 60)
-        
+
         if accelerator.is_main_process:
             logger.info("Cleaning up resources...")
-            
+
         accelerator.free_memory()
         if torch.distributed.is_available() and torch.distributed.is_initialized():
             torch.distributed.destroy_process_group()

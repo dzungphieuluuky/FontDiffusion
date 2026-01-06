@@ -44,7 +44,9 @@ from utils import (
     x0_from_epsilon,
 )
 from logging_utils import setup_logging
+
 logger = setup_logging(level=logging.INFO, name="FontDiffuserTrain")
+
 
 def parse_args_training():
     """Parse and validate command line arguments.
@@ -710,7 +712,9 @@ def main():
         logger.info(f"  Num examples: {len(train_dataset)}")
         logger.info(f"  Num batches per epoch: {len(train_dataloader)}")
         logger.info(f"  Total training steps: {args.max_train_steps}")
-        logger.info(f"  Gradient accumulation steps: {args.gradient_accumulation_steps}")
+        logger.info(
+            f"  Gradient accumulation steps: {args.gradient_accumulation_steps}"
+        )
         logger.info(
             f"  Style Transform Module: {getattr(args, 'enable_style_transform', False)}"
         )
