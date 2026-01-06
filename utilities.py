@@ -31,7 +31,7 @@ class TqdmLoggingHandler(logging.Handler):
             self.handleError(record)
 
 
-def setup_logging(output_dir: Path) -> None | logging.Logger:
+def setup_logging() -> None | logging.Logger:
     """
     Configure root logger to write to a file and the console.
 
@@ -40,10 +40,6 @@ def setup_logging(output_dir: Path) -> None | logging.Logger:
     output_dir : Path
         Directory where the log file will be created.
     """
-    if output_dir is not None:
-        log_file = output_dir / "training.log"
-        log_file.parent.mkdir(parents=True, exist_ok=True)
-
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -52,12 +48,6 @@ def setup_logging(output_dir: Path) -> None | logging.Logger:
             TqdmLoggingHandler(),
         ],
     )
-    if output_dir is not None:
-        file_handler = logging.FileHandler(log_file)
-        file_handler.setLevel(logging.INFO)
-        formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-        file_handler.setFormatter(formatter)
-        logging.getLogger().addHandler(file_handler)
     return logging.getLogger()
 
 # --------------------------------------------------------------------------- #
