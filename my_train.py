@@ -80,12 +80,12 @@ def load_phase1_checkpoints(model_components: dict, ckpt_dir: str) -> None:
     Raises:
         FileNotFoundError: If required checkpoint is missing
     """
-    logging.info("Loading Phase 1 checkpoints...")
+    logger.info("Loading Phase 1 checkpoints...")
 
     for name, component in model_components.items():
         ckpt_path = find_checkpoint(ckpt_dir, name)
         component.load_state_dict(load_model_checkpoint(ckpt_path))
-        logging.info(f"Loaded {name} from {ckpt_path}")
+        logger.info(f"Loaded {name} from {ckpt_path}")
 
 
 def create_transforms(args):
@@ -312,7 +312,7 @@ def save_checkpoint(
             save_dir / "scr.safetensors",
         )
 
-    logging.info(f"Saved checkpoint at step {global_step} to {save_dir}")
+    logger.info(f"Saved checkpoint at step {global_step} to {save_dir}")
     # Log checkpoint save event
     if hasattr(accelerator, "log"):
         accelerator.log({"checkpoint_saved": True, "checkpoint_step": global_step})
@@ -512,7 +512,7 @@ def train(
                     accelerator.log(log_dict, step=global_step)
 
                     if global_step % args.log_interval == 0:
-                        logging.info(
+                        logger.info(
                             f"Step {global_step}: loss={train_loss:.4f}, "
                             f"lr={lr_scheduler.get_last_lr()[0]:.6f}"
                         )
@@ -576,7 +576,7 @@ def main():
 
     style_transform_module = None
     if getattr(args, "enable_style_transform", False):
-        logging.info("Building Style Transformation Module...")
+        logger.info("Building Style Transformation Module...")
         style_transform_module = StyleTransformationModule(
             num_scales=getattr(args, "num_scales", 4),
             feature_dim=getattr(args, "feature_dim", 512),
@@ -585,7 +585,7 @@ def main():
             ffn_dim=getattr(args, "ffn_dim", 2048),
             style_image_size=args.style_image_size[0],
         )
-        logging.info("✓ Style Transformation Module built successfully")
+        logger.info("✓ Style Transformation Module built successfully")
 
     # Load Phase 1 checkpoints if provided
     if args.phase_1_ckpt_dir is not None:
@@ -616,9 +616,9 @@ def main():
         if args.scr_ckpt_path:
             try:
                 scr.load_state_dict(load_model_checkpoint(args.scr_ckpt_path))
-                logging.info(f"Loaded SCR from {args.scr_ckpt_path}")
+                logger.info(f"Loaded SCR from {args.scr_ckpt_path}")
             except FileNotFoundError:
-                logging.warning("SCR checkpoint not found, using untrained SCR")
+                logger.warning("SCR checkpoint not found, using untrained SCR")
         scr.requires_grad_(False)
 
     # Create datasets
@@ -705,12 +705,12 @@ def main():
         }
         accelerator.log(config_dict)
     # Train
-    logging.info("Starting training...")
-    logging.info(f"  Num examples: {len(train_dataset)}")
-    logging.info(f"  Num batches per epoch: {len(train_dataloader)}")
-    logging.info(f"  Total training steps: {args.max_train_steps}")
-    logging.info(f"  Gradient accumulation steps: {args.gradient_accumulation_steps}")
-    logging.info(
+    logger.info("Starting training...")
+    logger.info(f"  Num examples: {len(train_dataset)}")
+    logger.info(f"  Num batches per epoch: {len(train_dataloader)}")
+    logger.info(f"  Total training steps: {args.max_train_steps}")
+    logger.info(f"  Gradient accumulation steps: {args.gradient_accumulation_steps}")
+    logger.info(
         f"  Style Transform Module: {getattr(args, 'enable_style_transform', False)}"
     )
 
@@ -726,8 +726,9 @@ def main():
         args=args,
     )
 
+    logger.info("End training with Accelerator...")
     accelerator.end_training()
-    logging.info("Training completed!")
+    logger.info("Training completed!")
 
 
 if __name__ == "__main__":
