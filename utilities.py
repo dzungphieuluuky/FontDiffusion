@@ -15,20 +15,8 @@ from safetensors.torch import save_file
 from tqdm.rich import tqdm_rich as rich_tqdm
 from huggingface_hub.utils import tqdm as hf_tqdm
 from tqdm import tqdm as auto_tqdm
-# --------------------------------------------------------------------------- #
-# Logging
-# --------------------------------------------------------------------------- #
 
-class TqdmLoggingHandler(logging.Handler):
-    """Handler that writes log records to a tqdm progress bar."""
 
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            msg = self.format(record)
-            rich_tqdm.write(msg)
-            self.flush()
-        except Exception:
-            self.handleError(record)
 # --------------------------------------------------------------------------- #
 # Hugging‑Face style progress bar
 # --------------------------------------------------------------------------- #

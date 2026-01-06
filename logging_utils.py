@@ -1,7 +1,18 @@
 import logging
 import os
 import sys
-import colorlog
+
+class TqdmLoggingHandler(logging.Handler):
+    """Handler that writes log records to a tqdm progress bar."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+            logging.info(msg)
+            self.flush()
+        except Exception:
+            self.handleError(record)
+
 def get_rank():
     """Get distributed rank for logging (if available)."""
     try:
@@ -46,14 +57,17 @@ def setup_logging(level=logging.INFO, name="app"):
     logger.setLevel(level)
     
     # Standard StreamHandler for notebook/console output
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(formatter)
-    
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(formatter)
+    tqdm_handler = TqdmLoggingHandler()
+    tqdm_handler.setFormatter(formatter)
+
     # Important: Remove any old handlers from *this* specific logger too
     while logger.hasHandlers():
         logger.removeHandler(logger.handlers[0])
         
-    logger.addHandler(handler)
+    logger.addHandler(stream_handler)
+    logger.addHandler(tqdm_handler)
     logger.propagate = False  # Avoid sending logs to the root logger
 
     return logger
