@@ -109,6 +109,7 @@ def get_hf_bar(
     desc: str = "Processing",
     total: Optional[int] = None,
     unit: str = "it",
+    disable : bool = False,
     **kwargs: Any,
 ) -> HFTqdm:
     """
@@ -126,6 +127,7 @@ def get_hf_bar(
         Unit name for the bar.
     """
     kwargs["unit"] = unit
+    kwargs["disable"] = disable
     return HFTqdm(iterable=iterable, desc=desc, total=total, **kwargs)
 
 
