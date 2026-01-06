@@ -560,7 +560,6 @@ def main():
     # Setup output directory and logging
     if accelerator.is_main_process:
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
-        setup_logging(Path(args.output_dir))
 
     # Set seed for reproducibility
     if args.seed is not None:
