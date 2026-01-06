@@ -46,8 +46,7 @@ from utilities import (
 )
 from logging_utils import setup_logging
 
-logger = setup_logging(level=logging.INFO, name="SampleBatchMultiGPUs")
-
+logger = setup_logging(level=logging.INFO, name="MultiGPUsBatchSampler")
 # Optional dependencies
 try:
     import lpips
@@ -643,7 +642,6 @@ def main():
             accelerator,
         )
 
-        accelerator.wait_for_everyone()
         # Evaluate on main process
         if accelerator.is_main_process:
             if args.evaluate and args.ground_truth_dir:

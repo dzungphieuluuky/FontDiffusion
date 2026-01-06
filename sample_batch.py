@@ -34,7 +34,7 @@ from utilities import (
 
 from logging_utils import setup_logging
 
-logger = setup_logging(level=logging.INFO, name="SampleBatch")
+logger = setup_logging(level=logging.INFO, name="BatchSampler")
 enable_progress_bars()
 # Import evaluation metrics
 try:
