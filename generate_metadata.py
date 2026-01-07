@@ -166,6 +166,27 @@ def save_checkpoint(checkpoint: Dict[str, Any], output_path: str) -> None:
     print(f"\n💾 Saved checkpoint to: {output_path}")
 
 
+def parse_args():
+    """Parse command line arguments"""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Generate results_checkpoint.json from existing ContentImage and TargetImage folders"
+    )
+    parser.add_argument(
+        "--data_root",
+        type=str,
+        default="my_dataset/train_original",
+        help="Path to dataset root containing ContentImage/ and TargetImage/",
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        default="my_dataset/train_original/results_checkpoint.json",
+        help="Path to output results_checkpoint.json file",
+    )
+    return parser.parse_args()
+
 def main():
     """Main entry point"""
 
@@ -173,9 +194,10 @@ def main():
     print("REGENERATING RESULTS_CHECKPOINT.JSON FROM DISK")
     print("=" * 70)
 
+    args = parse_args()
     # Configure paths
-    data_root = "my_dataset/train_original"
-    checkpoint_output = "my_dataset/train_original/results_checkpoint.json"
+    data_root = args.data_root
+    checkpoint_output = args.output
 
     try:
         # Generate checkpoint
