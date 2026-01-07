@@ -84,7 +84,7 @@ class ValidationSplitCreator:
         logger.info(f"✓ Using source directory: {self.source_train_dir}")
 
     def analyze_data(
-        self,
+        self, style_pattern: Optional[str] = "*.png"
     ) -> Tuple[Dict[str, str], Dict[Tuple[str, str], str], Dict[str, List[str]]]:
         """
         ✅ CORRECTED: Analyze by scanning actual files and matching content↔target pairs
@@ -139,7 +139,7 @@ class ValidationSplitCreator:
 
             style_name = style_folder.name
 
-            for img_file in style_folder.glob("*.png"):
+            for img_file in style_folder.glob(style_pattern):
                 parsed = parse_target_filename(img_file.name)
 
                 # Save parse errors file path for diagnosis
@@ -523,14 +523,14 @@ class ValidationSplitCreator:
             f"    ✓ Saved: {len(filtered_generations):,}/{len(original_generations):,} generations"
         )
 
-    def create_splits(self) -> None:
+    def create_splits(self, style_pattern: Optional[str] = "*.png") -> None:
         """Main function to create train/val splits"""
         logger.info("\n" + "=" * 60)
         logger.info("FONTDIFFUSION VALIDATION SPLIT CREATOR")
         logger.info("=" * 60)
 
         # Step 1: Analyze data
-        content_files, target_files, char_to_styles = self.analyze_data()
+        content_files, target_files, char_to_styles = self.analyze_data(style_pattern=style_pattern)
 
         # Step 2: Create split scenarios
         scenarios = self.create_simple_splits(
@@ -591,6 +591,7 @@ def create_validation_split(
     data_root: str,
     val_split_ratio: float = 0.2,
     random_seed: int = 42,
+    style_pattern: Optional[str] = "*.png",
 ) -> None:
     """Create validation splits with proper checkpoint filtering"""
     config = ValidationSplitConfig(
@@ -600,7 +601,7 @@ def create_validation_split(
     )
 
     creator = ValidationSplitCreator(config)
-    creator.create_splits()
+    creator.create_splits(style_pattern=style_pattern)
 
     logger.info("\n" + "=" * 60)
     logger.info("✓ SPLIT CREATION COMPLETE")
