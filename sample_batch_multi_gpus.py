@@ -140,18 +140,20 @@ def generate_content_images_with_accelerator(
 
                 # ✅ Skip if already exists (check before generation)
                 if char_path.exists():
-                    logger.info(
-                        f"  ✓ Content image already exists for '{char}' at {char_path}"
-                    )
+                    if accelerator.is_main_process:
+                        logger.info(
+                            f"  ✓ Content image already exists for '{char}' at {char_path}"
+                        )
                     local_char_paths[char] = char_path
                     continue
 
                 # Generate new content image only if it doesn't exist
                 content_img = ttf2im(font=font, char=char)
                 content_img.save(str(char_path))
-                logger.info(
-                    f"  ✓ Generated new content image for '{char}' at {char_path}"
-                )
+                if accelerator.is_main_process:
+                    logger.info(
+                        f"  ✓ Generated new content image for '{char}' at {char_path}"
+                    )
                 local_char_paths[char] = str(char_path)
 
             except Exception as e:
