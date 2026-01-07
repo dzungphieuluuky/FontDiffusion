@@ -635,6 +635,13 @@ if __name__ == "__main__":
     )
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
+    parser.add_argument(
+        "--style_pattern",
+        type=str,
+        default="*.png",
+        help="Glob pattern for style images (e.g., '*.png')",
+    )
+    
     args = parser.parse_args()
 
     try:
@@ -642,6 +649,7 @@ if __name__ == "__main__":
             data_root=args.data_root,
             val_split_ratio=args.val_ratio,
             random_seed=args.seed,
+            style_pattern=args.style_pattern if hasattr(args, 'style_pattern') else "*.png",
         )
     except Exception as e:
         logger.error(f"❌ Error: {e}")
