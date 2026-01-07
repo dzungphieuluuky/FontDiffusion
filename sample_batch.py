@@ -640,39 +640,93 @@ def load_characters(
 def load_style_images(style_images_arg: str) -> List[Tuple[str, str]]:
     """
     Load style image paths and extract style names
+    
+    Supports:
+    - Directory path: loads all images from directory
+    - Glob pattern: e.g., "styles/*.png" or "styles/**/style_*.jpg"
+    - Comma-separated paths: "style1.png,style2.png,/path/to/style3.png"
+    - Single file path: "style.png"
+    
     Returns: List of (style_path, style_name) tuples
     """
+    import glob
+    
+    image_exts: Set[str] = {".jpg", ".jpeg", ".png", ".bmp"}
+    style_paths: List[str] = []
+    
+    # Case 1: Directory path
     if os.path.isdir(style_images_arg):
-        # Load all images from directory
-        image_exts: Set[str] = {".jpg", ".jpeg", ".png", ".bmp"}
+        logger.info(f"📂 Loading style images from directory: {style_images_arg}")
+        
         style_paths: List[str] = [
             os.path.join(style_images_arg, f)
             for f in os.listdir(style_images_arg)
             if os.path.splitext(f)[1].lower() in image_exts
         ]
         style_paths.sort()
-
-        logger.info(f"📂 Loading {len(style_paths)} style images from directory...")
-        verified_paths = []
-        for path in get_hf_bar(
-            style_paths,
-            desc="✓ Verifying style images",
-            colour="green",
-        ):
-            if os.path.isfile(path):
-                # Extract style name from filename (without extension)
-                style_name = os.path.splitext(os.path.basename(path))[0]
-                verified_paths.append((path, style_name))
-
-        return verified_paths
+        logger.info(f"   Found {len(style_paths)} image files")
+    
+    # Case 2: Glob pattern (contains * or ?)
+    elif "*" in style_images_arg or "?" in style_images_arg:
+        logger.info(f"🔍 Loading style images using glob pattern: {style_images_arg}")
+        
+        style_paths = glob.glob(style_images_arg, recursive=True)
+        
+        # Filter by image extensions
+        style_paths = [
+            p for p in style_paths
+            if os.path.splitext(p)[1].lower() in image_exts and os.path.isfile(p)
+        ]
+        
+        if not style_paths:
+            raise ValueError(f"❌ No image files found matching glob pattern: {style_images_arg}")
+        
+        style_paths.sort()
+        logger.info(f"   Found {len(style_paths)} matching image files")
+    
+    # Case 3: Comma-separated paths (files or mixed)
     else:
-        style_paths: List[str] = [p.strip() for p in style_images_arg.split(",")]
-        result = []
-        for path in style_paths:
+        raw_paths: List[str] = [p.strip() for p in style_images_arg.split(",")]
+        logger.info(f"📋 Loading {len(raw_paths)} specified style image(s)")
+        
+        for path in raw_paths:
+            if not path:
+                continue
+            
+            if os.path.isfile(path):
+                if os.path.splitext(path)[1].lower() in image_exts:
+                    style_paths.append(path)
+                else:
+                    logger.warning(f"   ⚠️  Skipping unsupported file type: {path}")
+            else:
+                raise ValueError(f"❌ File not found: {path}")
+    
+    if not style_paths:
+        raise ValueError("❌ No valid style images found!")
+    
+    # Verify and extract style names
+    logger.info(f"📂 Verifying {len(style_paths)} style images...")
+    verified_paths: List[Tuple[str, str]] = []
+    
+    for path in get_hf_bar(
+        style_paths,
+        desc="✓ Verifying style images",
+        colour="green",
+    ):
+        if os.path.isfile(path):
+            # Extract style name from filename (without extension)
             style_name = os.path.splitext(os.path.basename(path))[0]
-            result.append((path, style_name))
-        return result
-
+            verified_paths.append((path, style_name))
+            logger.info(f"   ✓ {style_name}: {path}")
+        else:
+            logger.warning(f"   ⚠️  File not found: {path}")
+    
+    if not verified_paths:
+        raise ValueError("❌ No valid style images verified!")
+    
+    logger.info(f"✅ Successfully loaded {len(verified_paths)} style images\n")
+    
+    return verified_paths
 
 def create_args_namespace(args: Namespace) -> Namespace:
     """Create args namespace for FontDiffuser pipeline"""
