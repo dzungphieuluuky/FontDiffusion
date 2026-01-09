@@ -42,6 +42,7 @@ class ValidationSplitConfig:
     """Configuration for validation split creation"""
 
     data_root: str
+    original_split: str = "train_original"
     val_split_ratio: float = 0.2
     random_seed: int = 42
 
@@ -58,7 +59,7 @@ class ValidationSplitCreator:
         self.config = config
         self.data_root = Path(config.data_root)
 
-        self.original_train_dir: Path = self.data_root / "train_original"
+        self.original_train_dir: Path = self.data_root / config.original_split
         self.train_dir: Path = self.data_root / "train"
         self.val_dir: Path = self.data_root / "val"
 
@@ -592,12 +593,14 @@ def create_validation_split(
     val_split_ratio: float = 0.2,
     random_seed: int = 42,
     style_pattern: Optional[str] = "*.png",
+    original_split: str = "train_original",
 ) -> None:
     """Create validation splits with proper checkpoint filtering"""
     config = ValidationSplitConfig(
         data_root=data_root,
         val_split_ratio=val_split_ratio,
         random_seed=random_seed,
+        original_split=original_split,
     )
 
     creator = ValidationSplitCreator(config)
@@ -642,6 +645,13 @@ if __name__ == "__main__":
         help="Glob pattern for style images (e.g., '*.png')",
     )
     
+    parser.add_argument(
+        "--original_split",
+        type=str,
+        default="train_original",
+        help="Name of the original training split directory",
+    )
+    
     args = parser.parse_args()
 
     try:
@@ -650,6 +660,7 @@ if __name__ == "__main__":
             val_split_ratio=args.val_ratio,
             random_seed=args.seed,
             style_pattern=args.style_pattern if hasattr(args, 'style_pattern') else "*.png",
+            original_split=args.original_split if hasattr(args, 'original_split') else "train_original",
         )
     except Exception as e:
         logger.error(f"❌ Error: {e}")
