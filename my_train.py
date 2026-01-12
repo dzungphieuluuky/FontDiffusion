@@ -787,7 +787,13 @@ def parse_args_training():
         "--save_full_model",
         action="store_true",
         help="Save full model checkpoint in addition to components"
-    )    
+    )
+    parser.add_argument(
+        "--phase-1",
+        action="store_true",
+        help="Enable Phase 1 training (content and style encoders only)"
+    )
+    
     args = parser.parse_args()
     
     # Handle environment variables
