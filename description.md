@@ -44,7 +44,7 @@ Từ file `font_diffusion.ipynb` bên dưới, chỉ cần khởi chạy các ce
 ```python
 accelerate launch FontDiffusion/sample_batch_multi_gpus.py \
     --characters "NomTuTao/Ds_10k_ChuNom_TuTao.txt" \
-    --style_images "FontDiffusion/styles_images" \
+    --style_images "FontDiffusion/style_images" \
     --ckpt_dir "ckpt/" \
     --ttf_path "FontDiffusion/fonts/NomNaTong-Regular.otf" \
     --output_dir "my_dataset/train_original" \
@@ -151,7 +151,7 @@ python FontDiffusion/export_hf_dataset_to_disk.py \
 
 **Chức năng chính**:
 - Tải danh sách ký tự từ file hoặc list [a, b, c, d].
-- Tải hình ảnh style từ thư mục hoặc file: ảnh png, jpg hoặc thư mục chứa styles ví dụ như styles_images/.
+- Tải hình ảnh style từ thư mục hoặc file: ảnh png, jpg hoặc thư mục chứa styles ví dụ như style_images/.
 - Tạo hình ảnh content (ký tự) và target (font với style).
 - Đánh giá với LPIPS, SSIM, FID nếu có ground truth.
 - Lưu checkpoint đã generate vào `results_checkpoint.json`.
