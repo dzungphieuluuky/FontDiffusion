@@ -720,7 +720,7 @@ class FontDiffuserTrainer:
                         
                         # Add individual losses
                         for loss_name, loss_val in loss_dict.items():
-                            log_dict[f"loss/{loss_name}"] = loss_val
+                            log_dict[f"train/{loss_name}"] = loss_val
                         
                         # Log to tracker
                         self.accelerator.log(log_dict, step=self.global_step)
