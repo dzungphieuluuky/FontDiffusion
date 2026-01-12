@@ -361,11 +361,11 @@ class FontDiffuserTrainer:
     
     def apply_classifier_free_guidance(
         self,
-        content_images: torch.Tensor,
-        style_images: torch.Tensor,
+        content_images: torch.tensor,
+        style_images: torch.tensor,
         drop_prob: float,
-        samples: Optional[Dict[str, torch.Tensor]] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        samples: Optional[Dict[str, torch.tensor]] = None,
+    ) -> Tuple[torch.tensor, torch.tensor]:
         """Apply classifier-free guidance by masking some samples.
         
         Returns clones of inputs to avoid in-place modifications affecting gradients.
@@ -395,13 +395,13 @@ class FontDiffuserTrainer:
     
     def compute_losses(
         self,
-        noise_pred: torch.Tensor,
-        noise: torch.Tensor,
-        offset_out_sum: torch.Tensor,
-        noisy_target_images: torch.Tensor,
-        nonorm_target_images: torch.Tensor,
-        timesteps: torch.Tensor,
-    ) -> Tuple[torch.Tensor, Dict[str, float], torch.Tensor]:
+        noise_pred: torch.tensor,
+        noise: torch.tensor,
+        offset_out_sum: torch.tensor,
+        noisy_target_images: torch.tensor,
+        nonorm_target_images: torch.tensor,
+        timesteps: torch.tensor,
+    ) -> Tuple[torch.tensor, Dict[str, float], torch.tensor]:
         """Compute all losses for the training step."""
         # Diffusion loss
         diff_loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")
@@ -444,15 +444,15 @@ class FontDiffuserTrainer:
     
     def compute_phase2_loss(
         self,
-        pred_original_sample_norm: torch.Tensor,
-        target_images: torch.Tensor,
-        neg_images: torch.Tensor,
-    ) -> torch.Tensor:
+        pred_original_sample_norm: torch.tensor,
+        target_images: torch.tensor,
+        neg_images: torch.tensor,
+    ) -> torch.tensor:
         """Compute SCR loss for phase 2 training."""
         # Ensure neg_images is properly formatted
         if isinstance(neg_images, list):
             # Validate all elements are tensors
-            if not all(isinstance(img, torch.Tensor) for img in neg_images):
+            if not all(isinstance(img, torch.tensor) for img in neg_images):
                 raise TypeError("All elements in neg_images list must be tensors")
             neg_images = torch.stack(neg_images)
         
@@ -473,8 +473,8 @@ class FontDiffuserTrainer:
     
     def train_step(
         self,
-        samples: Dict[str, torch.Tensor],
-    ) -> Tuple[torch.Tensor, Dict[str, float]]:
+        samples: Dict[str, torch.tensor],
+    ) -> Tuple[torch.tensor, Dict[str, float]]:
         """Perform a single training step."""
         self.model.train()
         
