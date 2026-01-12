@@ -1,8 +1,8 @@
 """
 Optimized sampling for FontDiffuser with SAFE optimizations
-✅ Uses hash-based file naming with unicode characters
-✅ Multi-character batch processing
-✅ Multi-font support
+Uses hash-based file naming with unicode characters
+Multi-character batch processing
+Multi-font support
 """
 
 import os
@@ -390,7 +390,7 @@ def sampling_batch(
 ) -> Tuple[Optional[List[Image.Image]], Optional[List[str]], float]:
     """
     Batch sampling for multiple characters with single font and style
-    ✅ Uses hash-based file naming
+    Uses hash-based file naming
     """
     # Process images in batch
     content_batch, style_batch, content_pils, valid_chars = image_process_batch(
