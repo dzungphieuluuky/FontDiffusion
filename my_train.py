@@ -787,14 +787,7 @@ def parse_args_training():
         "--save_full_model",
         action="store_true",
         help="Save full model checkpoint in addition to components"
-    )
-    parser.add_argument(
-        "--drop_prob",
-        type=float,
-        default=0.1,
-        help="Probability for classifier-free guidance dropout"
-    )
-    
+    )    
     args = parser.parse_args()
     
     # Handle environment variables
