@@ -437,6 +437,7 @@ class FontDiffuserTrainer:
             "diff_loss": diff_loss.item(),
             "percep_loss": percep_loss.item(),
             "offset_loss": offset_loss.item(),
+            "train_loss": total_loss.item(),
         }
         
         return total_loss, loss_dict, pred_original_sample_norm
@@ -793,7 +794,7 @@ def parse_args_training():
         action="store_true",
         help="Enable Phase 1 training (content and style encoders only)"
     )
-    
+
     args = parser.parse_args()
     
     # Handle environment variables
