@@ -286,7 +286,6 @@ class FontDiffuserTrainer:
             phase="train",
             transforms=[content_transforms, style_transforms, target_transforms],
             scr=self.config.phase_2,
-            include_source_style=self.config.enable_style_transform,
         )
         
         self.train_dataloader = torch.utils.data.DataLoader(
