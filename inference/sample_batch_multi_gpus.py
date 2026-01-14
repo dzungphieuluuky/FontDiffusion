@@ -40,8 +40,8 @@ from sample_batch import (
     log_to_wandb,
 )
 from src.dpm_solver.pipeline_dpm_solver import FontDiffuserDPMPipeline
-from utils import is_char_in_font, load_ttf, ttf2im
-from utils.utilities import (
+from ..utils import is_char_in_font, load_ttf, ttf2im
+from ..utils import (
     get_hf_bar,
 )
 
