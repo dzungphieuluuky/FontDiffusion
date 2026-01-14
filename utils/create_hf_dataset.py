@@ -14,9 +14,9 @@ from typing import Any, Optional
 from datasets import Dataset, Features, Image as HFImage, Value
 from PIL import Image
 from tqdm.auto import tqdm
-from .utilities import get_hf_bar
+from utils.utilities import get_hf_bar
 
-from .filename_utils import compute_file_hash
+from utils.filename_utils import compute_file_hash
 
 logger = logging.getLogger("DatasetCreator")
 
