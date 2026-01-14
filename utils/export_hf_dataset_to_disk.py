@@ -15,7 +15,7 @@ from datasets import Dataset, load_dataset
 from PIL import Image
 from utilities import get_hf_bar
 
-from utilities import compute_file_hash, get_content_filename, get_target_filename
+from filename_utils import compute_file_hash, get_content_filename, get_target_filename
 
 logger = logging.getLogger("DatasetExporter")
 
