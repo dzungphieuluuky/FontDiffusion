@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 from typing import Dict, List, Any, Set
 import hashlib
-from .filename_utils import (
+from filename_utils import (
     get_content_filename,
     get_target_filename,
     parse_content_filename,
