@@ -22,7 +22,7 @@ from accelerate.utils import gather_object
 from PIL import Image
 from tqdm.auto import tqdm
 
-from filename_utils import compute_file_hash, get_content_filename, get_target_filename
+from utils import compute_file_hash, get_content_filename, get_target_filename
 from sample_optimized import (
     get_content_transform,
     get_style_transform,
@@ -41,12 +41,11 @@ from sample_batch import (
 )
 from src.dpm_solver.pipeline_dpm_solver import FontDiffuserDPMPipeline
 from utils import is_char_in_font, load_ttf, ttf2im
-from utilities import (
+from utils.utilities import (
     get_hf_bar,
 )
-from logging_utils import setup_logging
 
-logger = setup_logging(level=logging.INFO, name="MultiGPUsBatchSampler")
+logger = logging.getLogger("MultiGPUsBatchSampler")
 # Optional dependencies
 try:
     import lpips

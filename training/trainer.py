@@ -1,8 +1,3 @@
-"""
-FontDiffuser training script with multi-phase support.
-Improved version with memory safety, error handling, and better organization.
-"""
-
 import logging
 import math
 import os
@@ -11,6 +6,7 @@ from pathlib import Path
 from typing import Optional, Dict, List, Tuple, Any
 import traceback
 
+from tifffile import logger
 import torch
 import torch.nn.functional as F
 from accelerate import Accelerator
@@ -19,9 +15,9 @@ from diffusers.optimization import get_scheduler
 from torchvision import transforms
 from tqdm.auto import tqdm
 
+
 from configs.fontdiffuser import get_parser
-from dataset.collate_fn import CollateFN
-from dataset.font_dataset import FontDataset
+from dataset import FontDataset, CollateFN
 from src import (
     ContentPerceptualLoss,
     FontDiffuserModel,
@@ -32,7 +28,7 @@ from src import (
     build_style_encoder,
     build_unet,
 )
-from utilities import (
+from utils.utilities import (
     find_checkpoint,
     load_model_checkpoint,
     save_model_checkpoint,
@@ -44,54 +40,10 @@ from utils import (
     save_args_to_yaml,
     x0_from_epsilon,
 )
-from logging_utils import setup_logging
 
-logger = setup_logging(level=logging.INFO, name="FontDiffuserTrain")
+from training.config import TrainingConfig
 
-
-@dataclass
-class TrainingConfig:
-    """Configuration for training with validation."""
-    learning_rate: float
-    train_batch_size: int
-    max_train_steps: int
-    gradient_accumulation_steps: int = 1
-    mixed_precision: str = "fp16"
-    lr_scheduler: str = "constant"
-    lr_warmup_steps: int = 500
-    adam_beta1: float = 0.9
-    adam_beta2: float = 0.999
-    adam_weight_decay: float = 1e-2
-    adam_epsilon: float = 1e-8
-    max_grad_norm: float = 1.0
-    
-    # Loss coefficients
-    perceptual_coefficient: float = 1.0
-    offset_coefficient: float = 0.1
-    sc_coefficient: float = 1.0
-    style_transform_coefficient: float = 0.1
-    
-    # Training phases
-    phase_1: bool = False
-    phase_2: bool = False
-    
-    # Classifier-free guidance
-    drop_prob: float = 0.1
-    
-    # Style transformation
-    enable_style_transform: bool = False
-    
-    def validate(self):
-        """Validate configuration values."""
-        assert self.learning_rate > 0, "Learning rate must be positive"
-        assert self.train_batch_size > 0, "Batch size must be positive"
-        assert self.max_train_steps > 0, "Max train steps must be positive"
-        assert 0 <= self.drop_prob <= 1, "Drop probability must be between 0 and 1"
-        
-        if self.phase_1 and self.phase_2:
-            logger.warning("Both phase_1 and phase_2 are enabled")
-
-
+logger = logging.getLogger("FontDiffuserTrainer")
 class FontDiffuserTrainer:
     """Main trainer class for FontDiffuser."""
     
@@ -771,61 +723,3 @@ class FontDiffuserTrainer:
             self.save_checkpoint(is_final=True)
         
         self.accelerator.end_training()
-
-
-def parse_args_training():
-    """Parse command line arguments with additional options."""
-    parser = get_parser()
-    
-    # Add new arguments for improved functionality
-    parser.add_argument(
-        "--resume_from_checkpoint",
-        type=str,
-        default=None,
-        help="Path to checkpoint to resume training from"
-    )
-    parser.add_argument(
-        "--num_workers",
-        type=int,
-        default=4,
-        help="Number of workers for data loading"
-    )
-    parser.add_argument(
-        "--save_full_model",
-        action="store_true",
-        help="Save full model checkpoint in addition to components"
-    )
-    parser.add_argument(
-        "--phase-1",
-        action="store_true",
-        help="Enable Phase 1 training (content and style encoders only)"
-    )
-
-    args = parser.parse_args()
-    
-    # Handle environment variables
-    env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
-    if env_local_rank != -1:
-        args.local_rank = env_local_rank
-    
-    # Process image sizes
-    args.style_image_size = (args.style_image_size, args.style_image_size)
-    args.content_image_size = (args.content_image_size, args.content_image_size)
-    
-    return args
-
-
-def main():
-    """Main entry point."""
-    args = parse_args_training()
-    
-    # Create and run trainer
-    trainer = FontDiffuserTrainer(args)
-    trainer.setup()
-    trainer.train()
-    
-    logger.info("Training completed successfully")
-
-
-if __name__ == "__main__":
-    main()

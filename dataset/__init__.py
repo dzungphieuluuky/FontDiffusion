@@ -1,1 +1,3 @@
-from .font_dataset import FontDataset
+from .font_dataset import *
+from .collate_fn import *
+

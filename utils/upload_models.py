@@ -12,10 +12,9 @@ import logging
 from safetensors.torch import save_file
 from huggingface_hub import HfApi, create_repo, login
 
-from logging_utils import setup_logging
-from utilities import load_model_checkpoint, save_model_checkpoint, find_checkpoint
+from utils.utilities import load_model_checkpoint, save_model_checkpoint, find_checkpoint
 
-logger = setup_logging(level=logging.INFO, name="ModelsUploader")
+logger = logging.getLogger("ModelsUploader")
 
 
 def parse_arguments() -> argparse.Namespace:

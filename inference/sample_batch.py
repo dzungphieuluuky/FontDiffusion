@@ -1,11 +1,3 @@
-"""
-Batch sampling and evaluation for FontDiffuser
-✅ Uses hash-based file naming with unicode characters
-✅ Uses results_checkpoint.json as single source of truth
-✅ Checks existing generations to skip already processed (char, style, font) combinations
-✅ Supports resuming from any start_line/end_line pair
-"""
-
 import os
 import sys
 import time
@@ -26,15 +18,12 @@ from argparse import Namespace, ArgumentParser
 
 from src.dpm_solver.pipeline_dpm_solver import FontDiffuserDPMPipeline
 from src.model import StyleTransformationModule
-from utilities import (
+from utils.utilities import (
     save_model_checkpoint,
     load_model_checkpoint,
     get_hf_bar,
 )
-
-from logging_utils import setup_logging
-
-logger = setup_logging(level=logging.INFO, name="BatchSampler")
+logger = logging.getLogger("BatchSampler")
 enable_progress_bars()
 # Import evaluation metrics
 try:
@@ -85,7 +74,7 @@ from utils import (
     is_char_in_font,
 )
 
-from filename_utils import (
+from utils import (
     get_content_filename,
     get_target_filename,
     compute_file_hash,

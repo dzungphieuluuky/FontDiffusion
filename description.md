@@ -70,7 +70,7 @@ python FontDiffusion/create_validation_split.py \
 - Training:
 ```python
 MAX_TRAIN_STEPS = 1500
-accelerate launch FontDiffusion/my_train.py \
+accelerate launch FontDiffusion/finetune.py \
     --seed=123 \
     --experience_name="FontDiffuser_training_phase_1" \
     --data_root="my_dataset" \
@@ -186,7 +186,7 @@ python FontDiffusion/export_hf_dataset_to_disk.py \
 
 **Khi git clone**: Sử dụng để publish dataset lên HF sau khi tạo xong.
 
-### 5. `my_train.py`
+### 5. `finetune.py`
 **Mục đích**: Script train FontDiffuser gồm 2 phase, có cố gắng tích hợp Style Transformation Module từ paper FSTDiff nhưng còn lỗi tensor dimension.
 
 **Chức năng chính**:

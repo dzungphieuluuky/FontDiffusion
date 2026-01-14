@@ -1,11 +1,3 @@
-"""
-Create validation/test splits from training data
-✅ CORRECTED: Properly handles train/val splits with checkpoint filtering
-✅ Parses filenames as codepoint_char_hash.png and codepoint_char_style_hash.png
-✅ Ensures checkpoint.json contains only relevant generations
-✅ Validates content↔target pairs exist before including in split
-"""
-
 import os
 import shutil
 import json
@@ -27,9 +19,8 @@ from filename_utils import (
     compute_file_hash,
 )
 from utilities import get_hf_bar
-from logging_utils import setup_logging
 
-logger = setup_logging(level=logging.INFO, name="ValidationSplitCreator")
+logger = logging.getLogger("ValidationSplitCreator")
 
 
 # ============================================================================
