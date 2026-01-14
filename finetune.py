@@ -44,8 +44,8 @@ from utils import (
     save_args_to_yaml,
     x0_from_epsilon,
 )
-from training import FontDiffuserTrainer, TrainingConfig
 
+from training import FontDiffuserTrainer, TrainingConfig
 logger = logging.getLogger("FontDiffuserTrainer")
 
 def parse_args_training():
