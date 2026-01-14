@@ -2,7 +2,7 @@ import math
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple, list, Dict
 from diffusers import ModelMixin
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 
@@ -120,14 +120,14 @@ class StyleTransformationModule(nn.Module):
 
     def extract_style_features(
         self, style_feature: torch.Tensor
-    ) -> List[Tuple[torch.Tensor, torch.Tensor]]:
+    ) -> list[Tuple[torch.Tensor, torch.Tensor]]:
         """Extract multi-scale style features from style encoder output.
 
         Args:
             style_feature: Input style feature (B, C, H, W) from style encoder
 
         Returns:
-            List of (key, value) tuples for each scale
+            list of (key, value) tuples for each scale
         """
         # Flatten spatial dimensions: (B, C, H, W) -> (B, C*H*W)
         batch_size = style_feature.shape[0]
@@ -147,14 +147,14 @@ class StyleTransformationModule(nn.Module):
 
     def compute_style_difference(
         self,
-        source_features: List[Tuple[torch.Tensor, torch.Tensor]],
-        target_features: List[Tuple[torch.Tensor, torch.Tensor]],
+        source_features: list[Tuple[torch.Tensor, torch.Tensor]],
+        target_features: list[Tuple[torch.Tensor, torch.Tensor]],
     ) -> torch.Tensor:
         """Compute style difference between source and target.
 
         Args:
-            source_features: List of (key, value) from source
-            target_features: List of (key, value) from target
+            source_features: list of (key, value) from source
+            target_features: list of (key, value) from target
 
         Returns:
             Aggregated style difference tensor
@@ -230,7 +230,7 @@ class StyleTransformationModule(nn.Module):
 
     def fuse_style_differences(
         self,
-        style_differences: List[torch.Tensor],
+        style_differences: list[torch.Tensor],
     ) -> torch.Tensor:
         """
         Fuse style differences across scales using self-attention (Equation 8).
@@ -433,9 +433,9 @@ class FontDiffuserModelDPM(ModelMixin, ConfigMixin):
         # ✅ FIXED: Only 4 elements - style_diff NOT included
         input_hidden_states = [
             style_img_feature,  # Index 0: (B, C, H, W)
-            content_residual_features,  # Index 1: List of tensors
+            content_residual_features,  # Index 1: list of tensors
             style_hidden_states,  # Index 2: (B, H*W, C)
-            style_content_res_features,  # Index 3: List of tensors
+            style_content_res_features,  # Index 3: list of tensors
         ]
 
         out = self.config.unet(

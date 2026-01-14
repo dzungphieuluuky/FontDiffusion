@@ -14,7 +14,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, list, Optional, Set, Tuple, Union
 
 import numpy as np
 import torch
@@ -87,7 +87,7 @@ except ImportError:
 
 
 def generate_content_images_with_accelerator(
-    characters: List[str],
+    characters: list[str],
     font_manager: FontManager,
     output_dir: str,
     accelerator: Accelerator,
@@ -95,7 +95,7 @@ def generate_content_images_with_accelerator(
     """Generate content images distributed across GPUs.
 
     Args:
-        characters: List of characters to generate
+        characters: list of characters to generate
         font_manager: Font manager instance
         output_dir: Output directory
         accelerator: Accelerator instance
@@ -182,17 +182,17 @@ def generate_content_images_with_accelerator(
 def sampling_batch_with_accelerator(
     args: argparse.Namespace,
     pipe: FontDiffuserDPMPipeline,
-    characters: List[str],
+    characters: list[str],
     style_image_path: Union[str, Image.Image],
     font_manager: FontManager,
     font_name: str,
-) -> Tuple[Optional[List[Image.Image]], Optional[List[str]], Optional[float]]:
+) -> Tuple[Optional[list[Image.Image]], Optional[list[str]], Optional[float]]:
     """Batch sampling for multiple characters.
 
     Args:
         args: Arguments
         pipe: Pipeline
-        characters: List of characters
+        characters: list of characters
         style_image_path: Style image path or PIL image
         font_manager: Font manager
         font_name: Font name to use
@@ -276,8 +276,8 @@ def sampling_batch_with_accelerator(
 
 def batch_generate_images_with_accelerator(
     pipe: FontDiffuserDPMPipeline,
-    characters: List[str],
-    style_paths_with_names: List[Tuple[str, str]],
+    characters: list[str],
+    style_paths_with_names: list[Tuple[str, str]],
     output_dir: str,
     args: argparse.Namespace,
     evaluator: QualityEvaluator,

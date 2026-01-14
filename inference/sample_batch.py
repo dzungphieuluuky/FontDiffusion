@@ -5,7 +5,7 @@ import json
 import hashlib
 import argparse
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional, Any, Set, Union
+from typing import list, Dict, Tuple, Optional, Any, Set, Union
 from huggingface_hub.utils import tqdm, enable_progress_bars
 import logging
 
@@ -92,7 +92,7 @@ class FontManager:
             ttf_path: Path to a single font file or directory containing fonts
         """
         self.fonts: Dict[str, Dict[str, Any]] = {}
-        self.font_paths: List[str] = []
+        self.font_paths: list[str] = []
         self._load_fonts(ttf_path)
 
     def _load_fonts(self, ttf_path: str) -> None:
@@ -101,7 +101,7 @@ class FontManager:
             # Handle wildcard path
             import glob
 
-            font_files: List[str] = glob.glob(ttf_path)
+            font_files: list[str] = glob.glob(ttf_path)
             if not font_files:
                 raise ValueError(f"No font files found for pattern: {ttf_path}")
 
@@ -140,7 +140,7 @@ class FontManager:
         elif os.path.isdir(ttf_path):
             # Directory with multiple fonts
             font_extensions: Set[str] = {".ttf", ".otf", ".TTF", ".OTF"}
-            font_files: List[str] = [
+            font_files: list[str] = [
                 os.path.join(ttf_path, f)
                 for f in os.listdir(ttf_path)
                 if os.path.splitext(f)[1] in font_extensions
@@ -172,7 +172,7 @@ class FontManager:
         else:
             raise ValueError(f"Invalid ttf_path: {ttf_path}")
 
-    def get_font_names(self) -> List[str]:
+    def get_font_names(self) -> list[str]:
         """Get list of loaded font names"""
         return list(self.fonts.keys())
 
@@ -194,8 +194,8 @@ class FontManager:
         return is_char_in_font(font_path, char)
 
     def get_available_chars_for_font(
-        self, font_name: str, characters: List[str]
-    ) -> List[str]:
+        self, font_name: str, characters: list[str]
+    ) -> list[str]:
         """Get list of characters available in specific font"""
         return [char for char in characters if self.is_char_in_font(font_name, char)]
 
@@ -214,7 +214,7 @@ class GenerationTracker:
             checkpoint_path: Path to results_checkpoint.json file
         """
         self.generated_hashes: Set[str] = set()
-        self.generations: List[Dict[str, Any]] = []
+        self.generations: list[Dict[str, Any]] = []
 
         if checkpoint_path and os.path.exists(checkpoint_path):
             self._load_from_checkpoint(checkpoint_path)
@@ -229,7 +229,7 @@ class GenerationTracker:
 
             # ✅ Track duplicates
             seen_hashes: Set[str] = set()
-            unique_generations: List[Dict[str, Any]] = []
+            unique_generations: list[Dict[str, Any]] = []
             duplicate_count: int = 0
 
             # Build hash set for fast lookup and deduplicate
@@ -557,12 +557,12 @@ def parse_args() -> Namespace:
 
 def load_characters(
     characters_arg: str, start_line: int = 1, end_line: Optional[int] = None
-) -> List[str]:
+) -> list[str]:
     """Load characters from file or comma-separated string with line range support"""
-    chars: List[str] = []
+    chars: list[str] = []
     if os.path.isfile(characters_arg):
         with open(characters_arg, "r", encoding="utf-8") as f:
-            all_lines: List[str] = f.readlines()
+            all_lines: list[str] = f.readlines()
 
         # Adjust for 1-indexed input
         start_idx: int = max(0, start_line - 1)
@@ -626,7 +626,7 @@ def load_characters(
     return chars
 
 
-def load_style_images(style_images_arg: str) -> List[Tuple[str, str]]:
+def load_style_images(style_images_arg: str) -> list[Tuple[str, str]]:
     """
     Load style image paths and extract style names
     
@@ -636,18 +636,18 @@ def load_style_images(style_images_arg: str) -> List[Tuple[str, str]]:
     - Comma-separated paths: "style1.png,style2.png,/path/to/style3.png"
     - Single file path: "style.png"
     
-    Returns: List of (style_path, style_name) tuples
+    Returns: list of (style_path, style_name) tuples
     """
     import glob
     
     image_exts: Set[str] = {".jpg", ".jpeg", ".png", ".bmp"}
-    style_paths: List[str] = []
+    style_paths: list[str] = []
     
     # Case 1: Directory path
     if os.path.isdir(style_images_arg):
         logger.info(f"📂 Loading style images from directory: {style_images_arg}")
         
-        style_paths: List[str] = [
+        style_paths: list[str] = [
             os.path.join(style_images_arg, f)
             for f in os.listdir(style_images_arg)
             if os.path.splitext(f)[1].lower() in image_exts
@@ -675,7 +675,7 @@ def load_style_images(style_images_arg: str) -> List[Tuple[str, str]]:
     
     # Case 3: Comma-separated paths (files or mixed)
     else:
-        raw_paths: List[str] = [p.strip() for p in style_images_arg.split(",")]
+        raw_paths: list[str] = [p.strip() for p in style_images_arg.split(",")]
         logger.info(f"📋 Loading {len(raw_paths)} specified style image(s)")
         
         for path in raw_paths:
@@ -695,7 +695,7 @@ def load_style_images(style_images_arg: str) -> List[Tuple[str, str]]:
     
     # Verify and extract style names
     logger.info(f"📂 Verifying {len(style_paths)} style images...")
-    verified_paths: List[Tuple[str, str]] = []
+    verified_paths: list[Tuple[str, str]] = []
     
     for path in get_hf_bar(
         style_paths,
@@ -799,7 +799,7 @@ def save_checkpoint(results: Dict[str, Any], output_dir: str) -> None:
 
 
 def generate_content_images(
-    characters: List[str],
+    characters: list[str],
     font_manager: FontManager,
     output_dir: str,
     generation_tracker: GenerationTracker,
@@ -812,7 +812,7 @@ def generate_content_images(
     content_dir: str = os.path.join(output_dir, "ContentImage")
     os.makedirs(content_dir, exist_ok=True)
 
-    font_names: List[str] = font_manager.get_font_names()
+    font_names: list[str] = font_manager.get_font_names()
     if not font_names:
         raise ValueError("No fonts loaded")
 
@@ -823,8 +823,8 @@ def generate_content_images(
     logger.info("=" * 60)
 
     char_paths: Dict[str, str] = {}
-    chars_without_fonts: List[str] = []
-    chars_already_exist: List[str] = []
+    chars_without_fonts: list[str] = []
+    chars_already_exist: list[str] = []
     generated_new: int = 0
 
     for char in get_hf_bar(
@@ -883,8 +883,8 @@ def generate_content_images(
 
 def batch_generate_images(
     pipe: FontDiffuserDPMPipeline,
-    characters: List[str],
-    style_paths_with_names: List[Tuple[str, str]],
+    characters: list[str],
+    style_paths_with_names: list[Tuple[str, str]],
     output_dir: str,
     args: Namespace,
     evaluator: QualityEvaluator,
@@ -1132,16 +1132,16 @@ def batch_generate_images(
 def sampling_batch_optimized(
     args: Namespace,
     pipe: FontDiffuserDPMPipeline,
-    characters: List[str],
+    characters: list[str],
     style_image_path: Union[str, Image.Image],
     font_manager: FontManager,
     font_name: str,
     enable_style_transform: bool = False,  # ✅ ADD THIS PARAMETER
-) -> Tuple[Optional[List[Image.Image]], Optional[List[str]], Optional[float]]:
+) -> Tuple[Optional[list[Image.Image]], Optional[list[str]], Optional[float]]:
     """Batch sampling for multiple characters with specific font"""
 
     # Get available characters for this font
-    available_chars: List[str] = font_manager.get_available_chars_for_font(
+    available_chars: list[str] = font_manager.get_available_chars_for_font(
         font_name, characters
     )
 
@@ -1162,8 +1162,8 @@ def sampling_batch_optimized(
         )
 
         # Generate content images
-        content_images: List[torch.Tensor] = []
-        content_images_pil: List[Image.Image] = []
+        content_images: list[torch.Tensor] = []
+        content_images_pil: list[Image.Image] = []
 
         for char in get_hf_bar(
             available_chars,
@@ -1195,7 +1195,7 @@ def sampling_batch_optimized(
             start: float = time.perf_counter()
 
             # Process in batches
-            all_images: List[Image.Image] = []
+            all_images: list[Image.Image] = []
             batch_size: int = args.batch_size
 
             num_batches = (len(content_batch) + batch_size - 1) // batch_size
@@ -1209,7 +1209,7 @@ def sampling_batch_optimized(
                 batch_style: torch.Tensor = style_batch[i : i + batch_size]
 
                 # ✅ PASS STYLE TRANSFORM FLAG TO PIPELINE
-                images: List[Image.Image] = pipe.generate(
+                images: list[Image.Image] = pipe.generate(
                     content_images=batch_content,
                     style_images=batch_style,
                     batch_size=len(batch_content),
@@ -1310,8 +1310,8 @@ def evaluate_results(
     logger.info(f"{'EVALUATING GENERATED IMAGES':^60}")
     logger.info("=" * 60)
 
-    lpips_scores: List[float] = []
-    ssim_scores: List[float] = []
+    lpips_scores: list[float] = []
+    ssim_scores: list[float] = []
     evaluated_pairs: int = 0
     missing_gt: int = 0
 
@@ -1608,12 +1608,12 @@ def main() -> None:
 
     try:
         # Load characters
-        characters: List[str] = load_characters(
+        characters: list[str] = load_characters(
             args.characters, args.start_line, args.end_line
         )
 
         # Load style images with names
-        style_paths_with_names: List[Tuple[str, str]] = load_style_images(
+        style_paths_with_names: list[Tuple[str, str]] = load_style_images(
             args.style_images
         )
 

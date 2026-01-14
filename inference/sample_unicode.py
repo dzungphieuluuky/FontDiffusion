@@ -4,7 +4,7 @@ import time
 import random
 import numpy as np
 from PIL import Image
-from typing import List, Optional
+from typing import list, Optional
 
 import torch
 import torchvision.transforms as transforms
@@ -266,7 +266,7 @@ class FontDiffuserSampler:
         return images[0]
 
     def sample_multiple_characters(
-        self, characters: List[str], save_dir: Optional[str] = None
+        self, characters: list[str], save_dir: Optional[str] = None
     ):
         """Generate multiple characters consecutively"""
         results = {}

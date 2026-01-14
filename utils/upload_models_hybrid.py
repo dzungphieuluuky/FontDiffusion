@@ -10,7 +10,7 @@ import argparse
 import concurrent.futures
 import time
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, list
 import logging
 
 from safetensors.torch import save_file
@@ -200,7 +200,7 @@ def get_token(token_arg: Optional[str]) -> Optional[str]:
     return None
 
 
-def collect_files_recursive(weights_dir: Path, file_patterns: List[str], recursive: bool) -> List[Path]:
+def collect_files_recursive(weights_dir: Path, file_patterns: list[str], recursive: bool) -> list[Path]:
     """Collect files recursively or from top-level directory."""
     all_files = []
     
@@ -336,7 +336,7 @@ def convert_single_file(pth_path: Path, verbose: bool = False) -> Optional[Dict[
         return {'filename': pth_path.name, 'success': False, 'error': str(e)}
 
 
-def convert_files_parallel(pth_files: List[Path], num_workers: int, verbose: bool) -> Dict[str, Any]:
+def convert_files_parallel(pth_files: list[Path], num_workers: int, verbose: bool) -> Dict[str, Any]:
     """Convert files in parallel."""
     results = {
         'converted': 0,
@@ -389,7 +389,7 @@ def convert_files_parallel(pth_files: List[Path], num_workers: int, verbose: boo
     return results
 
 
-def convert_files_sequential(pth_files: List[Path], verbose: bool) -> Dict[str, Any]:
+def convert_files_sequential(pth_files: list[Path], verbose: bool) -> Dict[str, Any]:
     """Convert files sequentially."""
     results = {
         'converted': 0,
@@ -424,7 +424,7 @@ def convert_files_sequential(pth_files: List[Path], verbose: bool) -> Dict[str, 
     return results
 
 
-def upload_files(all_files: List[Path], args: argparse.Namespace, file_info: Dict[str, Any]) -> bool:
+def upload_files(all_files: list[Path], args: argparse.Namespace, file_info: Dict[str, Any]) -> bool:
     """Upload files to Hugging Face Hub."""
     if args.no_upload:
         print("⊘ Skipping upload (--no-upload)")

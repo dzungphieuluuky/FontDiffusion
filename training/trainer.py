@@ -3,7 +3,7 @@ import math
 import os
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Optional, Dict, List, Tuple, Any
+from typing import Optional, Dict, list, Tuple, Any
 import traceback
 
 from tifffile import logger

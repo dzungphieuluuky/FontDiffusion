@@ -10,7 +10,7 @@ import time
 import hashlib
 from PIL import Image
 from pathlib import Path
-from typing import List, Optional, Tuple, Dict, Any, Union
+from typing import list, Optional, Tuple, Dict, Any, Union
 from functools import lru_cache
 from argparse import Namespace, ArgumentParser
 
@@ -125,7 +125,7 @@ class FontManager:
 
     def __init__(self, ttf_path: str) -> None:
         self.fonts: Dict[str, Dict[str, Any]] = {}
-        self.font_paths: List[str] = []
+        self.font_paths: list[str] = []
         self._load_fonts(ttf_path)
 
     def _load_fonts(self, ttf_path: str) -> None:
@@ -144,7 +144,7 @@ class FontManager:
         elif os.path.isdir(ttf_path):
             # Directory with multiple fonts
             font_extensions: set = {".ttf", ".otf", ".TTF", ".OTF"}
-            font_files: List[str] = [
+            font_files: list[str] = [
                 os.path.join(ttf_path, f)
                 for f in os.listdir(ttf_path)
                 if os.path.splitext(f)[1] in font_extensions
@@ -173,7 +173,7 @@ class FontManager:
         else:
             raise ValueError(f"Invalid ttf_path: {ttf_path}")
 
-    def get_font_names(self) -> List[str]:
+    def get_font_names(self) -> list[str]:
         """Get list of loaded font names"""
         return list(self.fonts.keys())
 
@@ -202,15 +202,15 @@ class FontManager:
         return is_char_in_font(font_path=font_path, char=char)
 
     def get_available_chars_for_font(
-        self, font_name: str, characters: List[str]
-    ) -> List[str]:
+        self, font_name: str, characters: list[str]
+    ) -> list[str]:
         """Get list of characters available in specific font"""
         return [char for char in characters if self.is_char_in_font(font_name, char)]
 
 
 def parse_characters(
     content_character: Optional[str] = None, characters_file: Optional[str] = None
-) -> List[str]:
+) -> list[str]:
     """
     Parse character input from multiple sources
 
@@ -219,9 +219,9 @@ def parse_characters(
         characters_file: Path to text file with one character per line
 
     Returns:
-        List of individual characters
+        list of individual characters
     """
-    chars: List[str] = []
+    chars: list[str] = []
 
     # Priority 1: characters_file argument
     if characters_file and os.path.isfile(characters_file):
@@ -381,13 +381,13 @@ def load_fontdiffuser_pipeline(args: Namespace) -> FontDiffuserDPMPipeline:
 def sampling_batch(
     args: Namespace,
     pipe: FontDiffuserDPMPipeline,
-    characters: List[str],
+    characters: list[str],
     font_manager: FontManager,
     font_name: str,
     style_image_path: str,
     style_name: str = "style0",
     save_content_images: bool = True,
-) -> Tuple[Optional[List[Image.Image]], Optional[List[str]], float]:
+) -> Tuple[Optional[list[Image.Image]], Optional[list[str]], float]:
     """
     Batch sampling for multiple characters with single font and style
     Uses hash-based file naming
@@ -433,14 +433,14 @@ def sampling_batch(
         start: float = time.time()
 
         # Process in batches
-        all_images: List[Image.Image] = []
+        all_images: list[Image.Image] = []
         batch_size: int = getattr(args, "batch_size", 1)
 
         for i in range(0, len(content_batch), batch_size):
             batch_content: torch.Tensor = content_batch[i : i + batch_size]
             batch_style: torch.Tensor = style_batch[i : i + batch_size]
 
-            images: List[Image.Image] = pipe.generate(
+            images: list[Image.Image] = pipe.generate(
                 content_images=batch_content,
                 style_images=batch_style,
                 batch_size=len(batch_content),
@@ -484,15 +484,15 @@ def sampling_batch(
 
 def image_process_batch(
     args: Namespace,
-    characters: List[str],
+    characters: list[str],
     font_manager: FontManager,
     font_name: str,
     style_image_path: str,
 ) -> Tuple[
     Optional[torch.Tensor],
     Optional[torch.Tensor],
-    Optional[List[Image.Image]],
-    Optional[List[str]],
+    Optional[list[Image.Image]],
+    Optional[list[str]],
 ]:
     """Process multiple characters in batch"""
     # Load style image
@@ -506,7 +506,7 @@ def image_process_batch(
     )
 
     # Get available characters
-    available_chars: List[str] = font_manager.get_available_chars_for_font(
+    available_chars: list[str] = font_manager.get_available_chars_for_font(
         font_name, characters
     )
 
@@ -515,8 +515,8 @@ def image_process_batch(
         return None, None, None, None
 
     # Generate content images
-    content_images: List[torch.Tensor] = []
-    content_images_pil: List[Image.Image] = []
+    content_images: list[torch.Tensor] = []
+    content_images_pil: list[Image.Image] = []
 
     for char in available_chars:
         try:
@@ -560,7 +560,7 @@ def main() -> None:
     pipe: FontDiffuserDPMPipeline = load_fontdiffuser_pipeline(args=args)
 
     # Parse characters
-    characters: List[str] = parse_characters(
+    characters: list[str] = parse_characters(
         getattr(args, "content_character", None), getattr(args, "characters_file", None)
     )
 
@@ -577,7 +577,7 @@ def main() -> None:
 
             # Load font manager
             font_manager: FontManager = FontManager(args.ttf_path)
-            font_names: List[str] = font_manager.get_font_names()
+            font_names: list[str] = font_manager.get_font_names()
 
             if not getattr(args, "demo", False):
                 os.makedirs(args.save_image_dir, exist_ok=True)
@@ -598,7 +598,7 @@ def main() -> None:
                 print("=" * 60)
 
                 # Get available characters
-                available: List[str] = font_manager.get_available_chars_for_font(
+                available: list[str] = font_manager.get_available_chars_for_font(
                     font_name, characters
                 )
                 print(f"  Available characters: {len(available)}/{len(characters)}")

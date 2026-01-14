@@ -3,7 +3,7 @@ import shutil
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Tuple, Set, Optional
+from typing import Dict, list, Tuple, Set, Optional
 from dataclasses import dataclass
 from collections import defaultdict
 import random
@@ -74,7 +74,7 @@ class ValidationSplitCreator:
 
     def analyze_data(
         self, style_pattern: Optional[str] = "*.png"
-    ) -> Tuple[Dict[str, str], Dict[Tuple[str, str], str], Dict[str, List[str]]]:
+    ) -> Tuple[Dict[str, str], Dict[Tuple[str, str], str], Dict[str, list[str]]]:
         """
         ✅ CORRECTED: Analyze by scanning actual files and matching content↔target pairs
         ✅ With detailed diagnostics to find missing images
@@ -93,7 +93,7 @@ class ValidationSplitCreator:
 
         content_files: Dict[str, str] = {}  # char -> file_path
         target_files: Dict[Tuple[str, str], str] = {}  # (char, style) -> file_path
-        char_to_styles: Dict[str, List[str]] = defaultdict(set)
+        char_to_styles: Dict[str, list[str]] = defaultdict(set)
 
         # Scan content images
         logger.info("\n🔍 Scanning content images...")
@@ -277,7 +277,7 @@ class ValidationSplitCreator:
         self,
         content_files: Dict[str, str],
         target_files: Dict[Tuple[str, str], str],
-        char_to_styles: Dict[str, List[str]],
+        char_to_styles: Dict[str, list[str]],
     ) -> Dict[str, Dict]:
         """
         Create train/val splits
