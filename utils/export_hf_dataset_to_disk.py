@@ -13,7 +13,7 @@ from typing import Any, Optional
 
 from datasets import Dataset, load_dataset
 from PIL import Image
-from utils import get_hf_bar
+from utilities import get_hf_bar
 
 from utils import compute_file_hash, get_content_filename, get_target_filename
 
