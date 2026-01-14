@@ -3,12 +3,10 @@ debug: true
 distributed_type: FSDP
 downcast_bf16: 'no'
 dynamo_config:
-  dynamo_backend: INDUCTOR
-  dynamo_mode: max-autotune
+  dynamo_backend: inductor
+  dynamo_mode: default              # safer than max-autotune
   dynamo_use_dynamic: true
-  dynamo_use_fullgraph: true
-  dynamo_use_regional_compilation: true
-enable_cpu_affinity: false
+  dynamo_use_fullgraph: false       # very important - fullgraph often fails
 fsdp_config:
   fsdp_activation_checkpointing: true
   fsdp_auto_wrap_policy: TRANSFORMER_BASED_WRAP
