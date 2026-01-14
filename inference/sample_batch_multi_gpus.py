@@ -22,7 +22,7 @@ from accelerate.utils import gather_object
 from PIL import Image
 from tqdm.auto import tqdm
 
-from utils import compute_file_hash, get_content_filename, get_target_filename
+from ..utils import compute_file_hash, get_content_filename, get_target_filename
 from sample_optimized import (
     get_content_transform,
     get_style_transform,
