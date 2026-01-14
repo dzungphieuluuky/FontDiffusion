@@ -191,7 +191,7 @@ class FontDiffuserSampler:
         if save_dir is None:
             save_dir = self.args.save_image_dir
 
-        # Set seed if specified
+        # set seed if specified
         if self.args.seed:
             set_seed(seed=self.args.seed)
 

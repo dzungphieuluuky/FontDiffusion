@@ -10,7 +10,7 @@ import argparse
 import concurrent.futures
 import time
 from pathlib import Path
-from typing import Optional, Dict, Any, list
+from typing import Optional, dict, Any, list
 import logging
 
 from safetensors.torch import save_file
@@ -228,7 +228,7 @@ def collect_files_recursive(weights_dir: Path, file_patterns: list[str], recursi
     return unique_files
 
 
-def validate_inputs(args: argparse.Namespace) -> Dict[str, Any]:
+def validate_inputs(args: argparse.Namespace) -> dict[str, Any]:
     """Validate inputs and collect file information."""
     weights_dir = Path(args.weights_dir)
     
@@ -294,7 +294,7 @@ def validate_inputs(args: argparse.Namespace) -> Dict[str, Any]:
     }
 
 
-def convert_single_file(pth_path: Path, verbose: bool = False) -> Optional[Dict[str, Any]]:
+def convert_single_file(pth_path: Path, verbose: bool = False) -> Optional[dict[str, Any]]:
     """Convert a single .pth file to .safetensors."""
     try:
         safe_path = pth_path.with_suffix('.safetensors')
@@ -336,7 +336,7 @@ def convert_single_file(pth_path: Path, verbose: bool = False) -> Optional[Dict[
         return {'filename': pth_path.name, 'success': False, 'error': str(e)}
 
 
-def convert_files_parallel(pth_files: list[Path], num_workers: int, verbose: bool) -> Dict[str, Any]:
+def convert_files_parallel(pth_files: list[Path], num_workers: int, verbose: bool) -> dict[str, Any]:
     """Convert files in parallel."""
     results = {
         'converted': 0,
@@ -389,7 +389,7 @@ def convert_files_parallel(pth_files: list[Path], num_workers: int, verbose: boo
     return results
 
 
-def convert_files_sequential(pth_files: list[Path], verbose: bool) -> Dict[str, Any]:
+def convert_files_sequential(pth_files: list[Path], verbose: bool) -> dict[str, Any]:
     """Convert files sequentially."""
     results = {
         'converted': 0,
@@ -424,7 +424,7 @@ def convert_files_sequential(pth_files: list[Path], verbose: bool) -> Dict[str, 
     return results
 
 
-def upload_files(all_files: list[Path], args: argparse.Namespace, file_info: Dict[str, Any]) -> bool:
+def upload_files(all_files: list[Path], args: argparse.Namespace, file_info: dict[str, Any]) -> bool:
     """Upload files to Hugging Face Hub."""
     if args.no_upload:
         print("⊘ Skipping upload (--no-upload)")

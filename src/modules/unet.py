@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional, Tuple, Union
+from typing import Optional, tuple, Union
 
 import torch
 import torch.nn as nn
@@ -38,9 +38,9 @@ class UNet(ModelMixin, ConfigMixin):
         out_channels: int = 4,
         flip_sin_to_cos: bool = True,
         freq_shift: int = 0,
-        down_block_types: Tuple[str] = None,
-        up_block_types: Tuple[str] = None,
-        block_out_channels: Tuple[int] = (320, 640, 1280, 1280),
+        down_block_types: tuple[str] = None,
+        up_block_types: tuple[str] = None,
+        block_out_channels: tuple[int] = (320, 640, 1280, 1280),
         layers_per_block: int = 1,
         downsample_padding: int = 1,
         mid_block_scale_factor: float = 1,
@@ -210,7 +210,7 @@ class UNet(ModelMixin, ConfigMixin):
         encoder_hidden_states: torch.Tensor,
         content_encoder_downsample_size: int = 4,
         return_dict: bool = False,
-    ) -> Union[UNetOutput, Tuple]:
+    ) -> Union[UNetOutput, tuple]:
         # By default samples have to be AT least a multiple of the overall upsampling factor.
         # The overall upsampling factor is equal to 2 ** (# num of upsampling layears).
         # However, the upsampling interpolation output size can be forced to fit any upsampling size

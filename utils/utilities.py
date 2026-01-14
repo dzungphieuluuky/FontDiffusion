@@ -7,7 +7,7 @@ import shutil
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Tuple
+from typing import Any, dict, Iterable, Optional, tuple
 import os
 
 import torch
@@ -76,7 +76,7 @@ class HFTqdm(auto_tqdm):
 
     def set_postfix(
         self,
-        ordered_dict: Optional[Dict[str, Any]] = None,
+        ordered_dict: Optional[dict[str, Any]] = None,
         refresh: bool = True,
         **kwargs: Any,
     ) -> None:
@@ -141,7 +141,7 @@ def _ensure_path(path: Path | str) -> Path:
     return path if isinstance(path, Path) else Path(path)
 
 
-def load_model_checkpoint(checkpoint_path: Path | str) -> Dict[str, Any]:
+def load_model_checkpoint(checkpoint_path: Path | str) -> dict[str, Any]:
     """
     Load a model checkpoint from disk.
 
@@ -154,7 +154,7 @@ def load_model_checkpoint(checkpoint_path: Path | str) -> Dict[str, Any]:
 
     Returns
     -------
-    Dict[str, Any]
+    dict[str, Any]
         The state dictionary.
     """
     checkpoint_path = _ensure_path(checkpoint_path)
@@ -170,14 +170,14 @@ def load_model_checkpoint(checkpoint_path: Path | str) -> Dict[str, Any]:
 
 
 def save_model_checkpoint(
-    model_state_dict: Dict[str, Any], checkpoint_path: Path | str
+    model_state_dict: dict[str, Any], checkpoint_path: Path | str
 ) -> None:
     """
     Save a model state dictionary to disk.
 
     Parameters
     ----------
-    model_state_dict : Dict[str, Any]
+    model_state_dict : dict[str, Any]
         The state dictionary to save.
     checkpoint_path : Path | str
         Destination path.

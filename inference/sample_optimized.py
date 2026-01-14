@@ -10,7 +10,7 @@ import time
 import hashlib
 from PIL import Image
 from pathlib import Path
-from typing import list, Optional, Tuple, Dict, Any, Union
+from typing import list, Optional, tuple, dict, Any, Union
 from functools import lru_cache
 from argparse import Namespace, ArgumentParser
 
@@ -124,7 +124,7 @@ class FontManager:
     """Manages single or multiple font files"""
 
     def __init__(self, ttf_path: str) -> None:
-        self.fonts: Dict[str, Dict[str, Any]] = {}
+        self.fonts: dict[str, dict[str, Any]] = {}
         self.font_paths: list[str] = []
         self._load_fonts(ttf_path)
 
@@ -264,7 +264,7 @@ def parse_characters(
     return chars
 
 
-def get_content_transform(content_image_size: Tuple[int, int]) -> transforms.Compose:
+def get_content_transform(content_image_size: tuple[int, int]) -> transforms.Compose:
     """Cached content transform"""
     return transforms.Compose(
         [
@@ -277,7 +277,7 @@ def get_content_transform(content_image_size: Tuple[int, int]) -> transforms.Com
     )
 
 
-def get_style_transform(style_image_size: Tuple[int, int]) -> transforms.Compose:
+def get_style_transform(style_image_size: tuple[int, int]) -> transforms.Compose:
     """Cached style transform"""
     return transforms.Compose(
         [
@@ -387,7 +387,7 @@ def sampling_batch(
     style_image_path: str,
     style_name: str = "style0",
     save_content_images: bool = True,
-) -> Tuple[Optional[list[Image.Image]], Optional[list[str]], float]:
+) -> tuple[Optional[list[Image.Image]], Optional[list[str]], float]:
     """
     Batch sampling for multiple characters with single font and style
     Uses hash-based file naming
@@ -405,7 +405,7 @@ def sampling_batch(
     ):
         return None, None, 0.0
 
-    # Set seed for reproducibility
+    # set seed for reproducibility
     if hasattr(args, "seed") and args.seed:
         set_seed(seed=args.seed)
 
@@ -488,7 +488,7 @@ def image_process_batch(
     font_manager: FontManager,
     font_name: str,
     style_image_path: str,
-) -> Tuple[
+) -> tuple[
     Optional[torch.Tensor],
     Optional[torch.Tensor],
     Optional[list[Image.Image]],

@@ -8,7 +8,7 @@ import math
 import os
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Optional, Dict, list, Tuple, Any
+from typing import Optional, dict, list, tuple, Any
 import traceback
 
 import torch

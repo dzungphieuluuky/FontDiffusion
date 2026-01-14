@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 import hashlib
-from typing import Optional, Tuple
+from typing import Optional, tuple
 
 
 def compute_file_hash(char: str, style: str, font: str = "") -> str:
@@ -53,7 +53,7 @@ def parse_content_filename(filename: str) -> Optional[str]:
     return None
 
 
-def parse_target_filename(filename: str) -> Optional[Tuple[str, str]]:
+def parse_target_filename(filename: str) -> Optional[tuple[str, str]]:
     """
     Parse target filename to extract character and style
     Format: {style}+{char}.png

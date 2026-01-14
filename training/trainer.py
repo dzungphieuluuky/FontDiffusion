@@ -3,7 +3,7 @@ import math
 import os
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Optional, Dict, list, Tuple, Any
+from typing import Optional, dict, list, tuple, Any
 import traceback
 
 from tifffile import logger
@@ -315,8 +315,8 @@ class FontDiffuserTrainer:
         content_images: torch.tensor,
         style_images: torch.tensor,
         drop_prob: float,
-        samples: Optional[Dict[str, torch.tensor]] = None,
-    ) -> Tuple[torch.tensor, torch.tensor]:
+        samples: Optional[dict[str, torch.tensor]] = None,
+    ) -> tuple[torch.tensor, torch.tensor]:
         """Apply classifier-free guidance by masking some samples.
         
         Returns clones of inputs to avoid in-place modifications affecting gradients.
@@ -352,7 +352,7 @@ class FontDiffuserTrainer:
         noisy_target_images: torch.tensor,
         nonorm_target_images: torch.tensor,
         timesteps: torch.tensor,
-    ) -> Tuple[torch.tensor, Dict[str, float], torch.tensor]:
+    ) -> tuple[torch.tensor, dict[str, float], torch.tensor]:
         """Compute all losses for the training step."""
         # Diffusion loss
         diff_loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")
@@ -442,8 +442,8 @@ class FontDiffuserTrainer:
     
     def train_step(
         self,
-        samples: Dict[str, torch.tensor],
-    ) -> Tuple[torch.tensor, Dict[str, float]]:
+        samples: dict[str, torch.tensor],
+    ) -> tuple[torch.tensor, dict[str, float]]:
         """Perform a single training step."""
         self.model.train()
         

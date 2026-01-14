@@ -14,7 +14,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict, list, Optional, Set, Tuple, Union
+from typing import Any, dict, list, Optional, set, tuple, Union
 
 import numpy as np
 import torch
@@ -91,7 +91,7 @@ def generate_content_images_with_accelerator(
     font_manager: FontManager,
     output_dir: str,
     accelerator: Accelerator,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Generate content images distributed across GPUs.
 
     Args:
@@ -186,7 +186,7 @@ def sampling_batch_with_accelerator(
     style_image_path: Union[str, Image.Image],
     font_manager: FontManager,
     font_name: str,
-) -> Tuple[Optional[list[Image.Image]], Optional[list[str]], Optional[float]]:
+) -> tuple[Optional[list[Image.Image]], Optional[list[str]], Optional[float]]:
     """Batch sampling for multiple characters.
 
     Args:
@@ -198,7 +198,7 @@ def sampling_batch_with_accelerator(
         font_name: Font name to use
 
     Returns:
-        Tuple of (images, valid_chars, batch_time)
+        tuple of (images, valid_chars, batch_time)
     """
     # Get available characters for this font
     available_chars = font_manager.get_available_chars_for_font(font_name, characters)
@@ -277,14 +277,14 @@ def sampling_batch_with_accelerator(
 def batch_generate_images_with_accelerator(
     pipe: FontDiffuserDPMPipeline,
     characters: list[str],
-    style_paths_with_names: list[Tuple[str, str]],
+    style_paths_with_names: list[tuple[str, str]],
     output_dir: str,
     args: argparse.Namespace,
     evaluator: QualityEvaluator,
     font_manager: FontManager,
     generation_tracker: GenerationTracker,
     accelerator: Accelerator,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Main batch generation with multi-GPU support."""
 
     # Generate content images
@@ -471,13 +471,13 @@ def batch_generate_images_with_accelerator(
 
 
 def evaluate_results_with_accelerator(
-    results: Dict[str, Any],
+    results: dict[str, Any],
     evaluator: QualityEvaluator,
     output_dir: str,
     ground_truth_dir: Optional[str] = None,
     compute_fid: bool = False,
     accelerator: Optional[Accelerator] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Evaluate generated images on main process."""
 
     if not accelerator or not accelerator.is_main_process:

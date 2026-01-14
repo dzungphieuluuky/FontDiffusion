@@ -5,7 +5,7 @@ import json
 import hashlib
 import argparse
 from pathlib import Path
-from typing import list, Dict, Tuple, Optional, Any, Set, Union
+from typing import list, dict, tuple, Optional, Any, set, Union
 from huggingface_hub.utils import tqdm, enable_progress_bars
 import logging
 
@@ -91,7 +91,7 @@ class FontManager:
         Args:
             ttf_path: Path to a single font file or directory containing fonts
         """
-        self.fonts: Dict[str, Dict[str, Any]] = {}
+        self.fonts: dict[str, dict[str, Any]] = {}
         self.font_paths: list[str] = []
         self._load_fonts(ttf_path)
 
@@ -139,7 +139,7 @@ class FontManager:
 
         elif os.path.isdir(ttf_path):
             # Directory with multiple fonts
-            font_extensions: Set[str] = {".ttf", ".otf", ".TTF", ".OTF"}
+            font_extensions: set[str] = {".ttf", ".otf", ".TTF", ".OTF"}
             font_files: list[str] = [
                 os.path.join(ttf_path, f)
                 for f in os.listdir(ttf_path)
@@ -213,8 +213,8 @@ class GenerationTracker:
         Args:
             checkpoint_path: Path to results_checkpoint.json file
         """
-        self.generated_hashes: Set[str] = set()
-        self.generations: list[Dict[str, Any]] = []
+        self.generated_hashes: set[str] = set()
+        self.generations: list[dict[str, Any]] = []
 
         if checkpoint_path and os.path.exists(checkpoint_path):
             self._load_from_checkpoint(checkpoint_path)
@@ -228,8 +228,8 @@ class GenerationTracker:
             raw_generations = results.get("generations", [])
 
             # ✅ Track duplicates
-            seen_hashes: Set[str] = set()
-            unique_generations: list[Dict[str, Any]] = []
+            seen_hashes: set[str] = set()
+            unique_generations: list[dict[str, Any]] = []
             duplicate_count: int = 0
 
             # Build hash set for fast lookup and deduplicate
@@ -284,7 +284,7 @@ class GenerationTracker:
         target_hash = compute_file_hash(char, style, font)
         self.generated_hashes.add(target_hash)
 
-    def add_generation(self, generation: Dict[str, Any]) -> None:
+    def add_generation(self, generation: dict[str, Any]) -> None:
         """Add a generation record"""
         self.generations.append(generation)
 
@@ -626,7 +626,7 @@ def load_characters(
     return chars
 
 
-def load_style_images(style_images_arg: str) -> list[Tuple[str, str]]:
+def load_style_images(style_images_arg: str) -> list[tuple[str, str]]:
     """
     Load style image paths and extract style names
     
@@ -640,7 +640,7 @@ def load_style_images(style_images_arg: str) -> list[Tuple[str, str]]:
     """
     import glob
     
-    image_exts: Set[str] = {".jpg", ".jpeg", ".png", ".bmp"}
+    image_exts: set[str] = {".jpg", ".jpeg", ".png", ".bmp"}
     style_paths: list[str] = []
     
     # Case 1: Directory path
@@ -695,7 +695,7 @@ def load_style_images(style_images_arg: str) -> list[Tuple[str, str]]:
     
     # Verify and extract style names
     logger.info(f"📂 Verifying {len(style_paths)} style images...")
-    verified_paths: list[Tuple[str, str]] = []
+    verified_paths: list[tuple[str, str]] = []
     
     for path in get_hf_bar(
         style_paths,
@@ -749,7 +749,7 @@ def create_args_namespace(args: Namespace) -> Namespace:
             default_args.content_image_size,
         )
 
-    # Set required attributes
+    # set required attributes
     default_args.demo = False
     default_args.character_input = True
     default_args.save_image = True
@@ -776,7 +776,7 @@ def create_args_namespace(args: Namespace) -> Namespace:
     return default_args
 
 
-def save_checkpoint(results: Dict[str, Any], output_dir: str) -> None:
+def save_checkpoint(results: dict[str, Any], output_dir: str) -> None:
     """
     ✅ Save results_checkpoint.json (single source of truth)
     """
@@ -803,7 +803,7 @@ def generate_content_images(
     font_manager: FontManager,
     output_dir: str,
     generation_tracker: GenerationTracker,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """
     Generate and save content character images
     ✅ CORRECTED: Only generates if content image doesn't already exist
@@ -822,7 +822,7 @@ def generate_content_images(
     logger.info(f"Characters: {len(characters)}")
     logger.info("=" * 60)
 
-    char_paths: Dict[str, str] = {}
+    char_paths: dict[str, str] = {}
     chars_without_fonts: list[str] = []
     chars_already_exist: list[str] = []
     generated_new: int = 0
@@ -884,13 +884,13 @@ def generate_content_images(
 def batch_generate_images(
     pipe: FontDiffuserDPMPipeline,
     characters: list[str],
-    style_paths_with_names: list[Tuple[str, str]],
+    style_paths_with_names: list[tuple[str, str]],
     output_dir: str,
     args: Namespace,
     evaluator: QualityEvaluator,
     font_manager: FontManager,
     generation_tracker: GenerationTracker,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     ✅ Main batch generation with hash-based file naming
     """
@@ -908,8 +908,8 @@ def batch_generate_images(
         raise ValueError("No content images generated!")
 
     # Extract ALL unique characters and styles from checkpoint
-    all_chars_in_checkpoint: Set[str] = set()
-    all_styles_in_checkpoint: Set[str] = set()
+    all_chars_in_checkpoint: set[str] = set()
+    all_styles_in_checkpoint: set[str] = set()
 
     for gen in generation_tracker.generations:
         all_chars_in_checkpoint.add(gen.get("character", ""))
@@ -1137,7 +1137,7 @@ def sampling_batch_optimized(
     font_manager: FontManager,
     font_name: str,
     enable_style_transform: bool = False,  # ✅ ADD THIS PARAMETER
-) -> Tuple[Optional[list[Image.Image]], Optional[list[str]], Optional[float]]:
+) -> tuple[Optional[list[Image.Image]], Optional[list[str]], Optional[float]]:
     """Batch sampling for multiple characters with specific font"""
 
     # Get available characters for this font
@@ -1293,11 +1293,11 @@ def _print_generation_summary(
 
 
 def evaluate_results(
-    results: Dict[str, Any],
+    results: dict[str, Any],
     evaluator: QualityEvaluator,
     ground_truth_dir: Optional[str] = None,
     compute_fid: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Evaluate generated images against ground truth"""
 
     if not ground_truth_dir or not os.path.exists(ground_truth_dir):
@@ -1435,7 +1435,7 @@ def evaluate_results(
     return results
 
 
-def log_to_wandb(results: Dict[str, Any], args: Namespace) -> None:
+def log_to_wandb(results: dict[str, Any], args: Namespace) -> None:
     """Log results to Weights & Biases"""
 
     if not WANDB_AVAILABLE:
@@ -1600,7 +1600,7 @@ def log_to_wandb(results: Dict[str, Any], args: Namespace) -> None:
 def main() -> None:
     """Main function"""
     args: Namespace = parse_args()
-    results: Dict[str, Any] = {}
+    results: dict[str, Any] = {}
 
     logger.info("=" * 60)
     logger.info("FONTDIFFUSER SYNTHESIS DATA GENERATION MAGIC")
@@ -1613,7 +1613,7 @@ def main() -> None:
         )
 
         # Load style images with names
-        style_paths_with_names: list[Tuple[str, str]] = load_style_images(
+        style_paths_with_names: list[tuple[str, str]] = load_style_images(
             args.style_images
         )
 
@@ -1672,7 +1672,7 @@ def main() -> None:
         evaluator: QualityEvaluator = QualityEvaluator(device=args.device)
 
         # Generate images
-        results: Dict[str, Any] = batch_generate_images(
+        results: dict[str, Any] = batch_generate_images(
             pipe,
             characters,
             style_paths_with_names,

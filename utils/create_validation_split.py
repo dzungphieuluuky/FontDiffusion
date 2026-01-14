@@ -3,7 +3,7 @@ import shutil
 import json
 import logging
 from pathlib import Path
-from typing import Dict, list, Tuple, Set, Optional
+from typing import dict, list, tuple, set, Optional
 from dataclasses import dataclass
 from collections import defaultdict
 import random
@@ -74,7 +74,7 @@ class ValidationSplitCreator:
 
     def analyze_data(
         self, style_pattern: Optional[str] = "*.png"
-    ) -> Tuple[Dict[str, str], Dict[Tuple[str, str], str], Dict[str, list[str]]]:
+    ) -> tuple[dict[str, str], dict[tuple[str, str], str], dict[str, list[str]]]:
         """
         ✅ CORRECTED: Analyze by scanning actual files and matching content↔target pairs
         ✅ With detailed diagnostics to find missing images
@@ -91,9 +91,9 @@ class ValidationSplitCreator:
         content_dir: Path = self.source_train_dir / "ContentImage"
         target_dir: Path = self.source_train_dir / "TargetImage"
 
-        content_files: Dict[str, str] = {}  # char -> file_path
-        target_files: Dict[Tuple[str, str], str] = {}  # (char, style) -> file_path
-        char_to_styles: Dict[str, list[str]] = defaultdict(set)
+        content_files: dict[str, str] = {}  # char -> file_path
+        target_files: dict[tuple[str, str], str] = {}  # (char, style) -> file_path
+        char_to_styles: dict[str, list[str]] = defaultdict(set)
 
         # Scan content images
         logger.info("\n🔍 Scanning content images...")
@@ -208,7 +208,7 @@ class ValidationSplitCreator:
 
         # Validate content↔target pairing
         logger.info("\n🔍 Validating content ↔ target pairs...")
-        valid_pairs: Dict[Tuple[str, str], bool] = {}
+        valid_pairs: dict[tuple[str, str], bool] = {}
         missing_content_count = 0
 
         for char, style in get_hf_bar(
@@ -275,10 +275,10 @@ class ValidationSplitCreator:
 
     def create_simple_splits(
         self,
-        content_files: Dict[str, str],
-        target_files: Dict[Tuple[str, str], str],
-        char_to_styles: Dict[str, list[str]],
-    ) -> Dict[str, Dict]:
+        content_files: dict[str, str],
+        target_files: dict[tuple[str, str], str],
+        char_to_styles: dict[str, list[str]],
+    ) -> dict[str, dict]:
         """
         Create train/val splits
         - Randomly split both characters and styles
@@ -342,10 +342,10 @@ class ValidationSplitCreator:
         self,
         split_name: str,
         split_dir: Path,
-        scenarios: Dict[str, Dict],
-        content_files: Dict[str, str],
-        target_files: Dict[Tuple[str, str], str],
-    ) -> Tuple[int, int, int]:
+        scenarios: dict[str, dict],
+        content_files: dict[str, str],
+        target_files: dict[tuple[str, str], str],
+    ) -> tuple[int, int, int]:
         """Copy images for a specific split using ACTUAL file paths"""
         split_config = scenarios[split_name]
         allowed_chars = set(split_config["characters"])
@@ -439,9 +439,9 @@ class ValidationSplitCreator:
         self,
         split_name: str,
         split_dir: Path,
-        allowed_chars: Set[str],
-        allowed_styles: Set[str],
-        target_files: Dict[Tuple[str, str], str],
+        allowed_chars: set[str],
+        allowed_styles: set[str],
+        target_files: dict[tuple[str, str], str],
     ) -> None:
         """
         Filter results_checkpoint.json to only include generations
@@ -561,7 +561,7 @@ class ValidationSplitCreator:
         # Step 5: Save metadata
         self._save_metadata(scenarios)
 
-    def _save_metadata(self, scenarios: Dict[str, Dict]) -> None:
+    def _save_metadata(self, scenarios: dict[str, dict]) -> None:
         """Save split information to JSON"""
         metadata_path = self.data_root / "split_info.json"
 

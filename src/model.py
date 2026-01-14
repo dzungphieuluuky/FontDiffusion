@@ -2,7 +2,7 @@ import math
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from typing import Optional, Tuple, list, Dict
+from typing import Optional, tuple, list, dict
 from diffusers import ModelMixin
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 
@@ -120,7 +120,7 @@ class StyleTransformationModule(nn.Module):
 
     def extract_style_features(
         self, style_feature: torch.Tensor
-    ) -> list[Tuple[torch.Tensor, torch.Tensor]]:
+    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
         """Extract multi-scale style features from style encoder output.
 
         Args:
@@ -147,8 +147,8 @@ class StyleTransformationModule(nn.Module):
 
     def compute_style_difference(
         self,
-        source_features: list[Tuple[torch.Tensor, torch.Tensor]],
-        target_features: list[Tuple[torch.Tensor, torch.Tensor]],
+        source_features: list[tuple[torch.Tensor, torch.Tensor]],
+        target_features: list[tuple[torch.Tensor, torch.Tensor]],
     ) -> torch.Tensor:
         """Compute style difference between source and target.
 
@@ -182,7 +182,7 @@ class StyleTransformationModule(nn.Module):
         self,
         source_style_features: torch.Tensor,
         target_style_features: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Forward pass for style transformation."""
         # Extract multi-scale features
         source_features = self.extract_style_features(source_style_features)
@@ -388,7 +388,7 @@ class FontDiffuserModelDPM(ModelMixin, ConfigMixin):
         cond,
         content_encoder_downsample_size,
         version,
-        source_cond: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        source_cond: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
     ):
         content_images = cond[0]
         style_images = cond[1]
