@@ -443,22 +443,37 @@ class FontDiffuserTrainer:
     
     def compute_phase2_loss(
         self,
-        pred_original_sample_norm: torch.tensor,
-        target_images: torch.tensor,
-        neg_images: torch.tensor,
-    ) -> torch.tensor:
-        """Compute SCR loss for phase 2 training."""
-        # Ensure neg_images is properly formatted
-        if isinstance(neg_images, list):
-            # Validate all elements are tensors
-            if not all(isinstance(img, torch.tensor) for img in neg_images):
-                raise TypeError("All elements in neg_images list must be tensors")
-            neg_images = torch.stack(neg_images)
+        pred_original_sample_norm: torch.Tensor,
+        target_images: torch.Tensor,
+        neg_images: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute SCR loss for phase 2 training.
+        
+        Args:
+            pred_original_sample_norm: [B, 3, resolution, resolution]
+            target_images: [B, 3, resolution, resolution]
+            neg_images: [B, num_neg, 3, resolution, resolution]
+        
+        Returns:
+            sc_loss: scalar tensor
+        """
+        # Validate input shapes
+        assert pred_original_sample_norm.dim() == 4, \
+            f"Expected pred shape [B, C, H, W], got {pred_original_sample_norm.shape}"
+        assert target_images.dim() == 4, \
+            f"Expected target shape [B, C, H, W], got {target_images.shape}"
+        assert neg_images.dim() == 5, \
+            f"Expected neg_images shape [B, num_neg, C, H, W], got {neg_images.shape}"
+        
+        B, num_neg, C, H, W = neg_images.shape
+        
+        # Reshape neg_images to [B*num_neg, C, H, W] for SCR processing
+        neg_images_flat = neg_images.reshape(B * num_neg, C, H, W)
         
         sample_emb, pos_emb, neg_emb = self.scr(
-            pred_original_sample_norm,
-            target_images,
-            neg_images,
+            pred_original_sample_norm,                    # [B, 3, resolution, resolution]
+            target_images,                                # [B, 3, resolution, resolution]
+            neg_images_flat,                              # [B*num_neg, 3, resolution, resolution]
             nce_layers=getattr(self.args, 'nce_layers', [0, 1, 2, 3]),
         )
         
@@ -468,8 +483,7 @@ class FontDiffuserTrainer:
             neg_s=neg_emb,
         )
         
-        return sc_loss
-    
+        return sc_loss    
     def train_step(
         self,
         samples: Dict[str, torch.tensor],
