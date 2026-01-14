@@ -452,7 +452,7 @@ class FontDiffuserTrainer:
         Args:
             pred_original_sample_norm: [B, 3, resolution, resolution]
             target_images: [B, 3, resolution, resolution]
-            neg_images: [B, num_neg, 3, resolution, resolution]
+            neg_images: [B, num_neg, 3, resolution, resolution] ← 5D, DO NOT RESHAPE
         
         Returns:
             sc_loss: scalar tensor
@@ -465,16 +465,12 @@ class FontDiffuserTrainer:
         assert neg_images.dim() == 5, \
             f"Expected neg_images shape [B, num_neg, C, H, W], got {neg_images.shape}"
         
-        B, num_neg, C, H, W = neg_images.shape
-        
-        # Reshape neg_images to [B*num_neg, C, H, W] for SCR processing
-        neg_images_flat = neg_images.reshape(B * num_neg, C, H, W)
-        
+        # ✅ PASS 5D TENSOR DIRECTLY - DO NOT FLATTEN
         sample_emb, pos_emb, neg_emb = self.scr(
             pred_original_sample_norm,                    # [B, 3, resolution, resolution]
             target_images,                                # [B, 3, resolution, resolution]
-            neg_images_flat,                              # [B*num_neg, 3, resolution, resolution]
-            nce_layers=getattr(self.args, 'nce_layers', [0, 1, 2, 3]),
+            neg_images,                                   # [B, num_neg, 3, resolution, resolution]
+            nce_layers=self._parse_nce_layers(),
         )
         
         sc_loss = self.scr.calculate_nce_loss(
@@ -483,7 +479,15 @@ class FontDiffuserTrainer:
             neg_s=neg_emb,
         )
         
-        return sc_loss    
+        return sc_loss
+
+    def _parse_nce_layers(self) -> list:
+        """Parse NCE layers from args (handle both string and list)."""
+        nce_layers = getattr(self.args, 'nce_layers', '0,1,2,3')
+        if isinstance(nce_layers, str):
+            return [int(x) for x in nce_layers.split(',')]
+        return nce_layers
+    
     def train_step(
         self,
         samples: Dict[str, torch.tensor],
@@ -523,13 +527,12 @@ class FontDiffuserTrainer:
         if self.config.enable_style_transform and "source_style_image" in samples:
             source_style_images = samples["source_style_image"]
         
-        noise_pred, offset_out_sum, style_transform_feature = self.model(
+        noise_pred, offset_out_sum = self.model(
             x_t=noisy_target_images,
             timesteps=timesteps,
             style_images=style_images,
             content_images=content_images,
             content_encoder_downsample_size=self.args.content_encoder_downsample_size,
-            source_style_images=source_style_images,
         )
         
         # Compute losses
@@ -541,17 +544,7 @@ class FontDiffuserTrainer:
             nonorm_target_images=nonorm_target_images,
             timesteps=timesteps,
         )
-        
-        # Style transformation loss (if enabled)
-        if self.config.enable_style_transform and style_transform_feature is not None:
-            style_transform_loss = F.mse_loss(
-                style_transform_feature,
-                torch.zeros_like(style_transform_feature),
-                reduction="mean",
-            )
-            total_loss += self.config.style_transform_coefficient * style_transform_loss
-            loss_dict["style_transform_loss"] = style_transform_loss.item()
-        
+                
         # SCR loss for phase 2
         if self.config.phase_2 and self.scr is not None:
             neg_images = samples.get("neg_images")
