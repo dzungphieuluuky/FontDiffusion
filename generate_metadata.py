@@ -66,7 +66,7 @@ def generate_checkpoint_from_disk(data_root: str) -> Dict[str, Any]:
         if char:
             content_chars[char] = str(content_file.relative_to(data_root))
             characters_set.add(char)
-            print(f"   ✓ {content_file.name} -> char: {repr(char)}")
+            # print(f"   ✓ {content_file.name} -> char: {repr(char)}")
         else:
             print(f"   ✗ Could not parse: {content_file.name}")
 
@@ -105,7 +105,7 @@ def generate_checkpoint_from_disk(data_root: str) -> Dict[str, Any]:
 
             valid_pairs.add((char, style_name))
             print(
-                f"      ✓ {target_file.name} -> char: {repr(char)}, style: {style_name}"
+                # f"      ✓ {target_file.name} -> char: {repr(char)}, style: {style_name}"
             )
 
     # ========== PHASE 3: Build generation records ==========
@@ -120,8 +120,8 @@ def generate_checkpoint_from_disk(data_root: str) -> Dict[str, Any]:
         print(f"\n   Processing: char={repr(char)}, style={style}, font={fonts_set[0]}")
         content_hash = compute_file_hash(char, "", fonts_set[0])
         target_hash = compute_file_hash(char, style, fonts_set[0])
-        print(f"      content_hash: {content_hash}")
-        print(f"      target_hash: {target_hash}")
+        # print(f"      content_hash: {content_hash}")
+        # print(f"      target_hash: {target_hash}")
 
         generation = {
             "character": char,
