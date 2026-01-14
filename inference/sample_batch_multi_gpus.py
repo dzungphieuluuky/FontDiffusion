@@ -21,8 +21,9 @@ from accelerate import Accelerator
 from accelerate.utils import gather_object
 from PIL import Image
 from tqdm.auto import tqdm
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from utils import (
+from utils.filename_utils import (
     compute_file_hash, 
     get_content_filename, 
     get_target_filename
@@ -45,8 +46,10 @@ from sample_batch import (
     log_to_wandb,
 )
 from src.dpm_solver.pipeline_dpm_solver import FontDiffuserDPMPipeline
-from utils import (
+from utils.utilities import (
     get_hf_bar,
+)
+from utils.utils import (
     ttf2im,
 )
 
