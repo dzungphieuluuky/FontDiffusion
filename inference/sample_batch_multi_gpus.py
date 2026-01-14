@@ -4,12 +4,14 @@ Multi-GPU batch sampling and evaluation for FontDiffuser using Accelerate.
 Uses hash-based file naming, results_checkpoint.json as single source of truth,
 and supports resumable generation with proper multi-GPU distribution.
 """
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import argparse
 import json
 import logging
 import os
-import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
@@ -23,10 +25,12 @@ from PIL import Image
 from tqdm.auto import tqdm
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from utils.filename_utils import (
+from utils import (
     compute_file_hash, 
     get_content_filename, 
-    get_target_filename
+    get_target_filename,
+    get_hf_bar,
+    ttf2im,
 )
 
 from sample_optimized import (
@@ -46,12 +50,6 @@ from sample_batch import (
     log_to_wandb,
 )
 from src.dpm_solver.pipeline_dpm_solver import FontDiffuserDPMPipeline
-from utils.utilities import (
-    get_hf_bar,
-)
-from utils.utils import (
-    ttf2im,
-)
 
 logger = logging.getLogger("MultiGPUsBatchSampler")
 # Optional dependencies
