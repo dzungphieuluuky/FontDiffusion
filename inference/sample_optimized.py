@@ -33,7 +33,7 @@ from utils import (
     save_args_to_yaml,
 )
 
-from filename_utils import get_content_filename, get_target_filename, compute_file_hash
+from utils.filename_utils import get_content_filename, get_target_filename, compute_file_hash
 
 
 def arg_parse() -> Namespace:

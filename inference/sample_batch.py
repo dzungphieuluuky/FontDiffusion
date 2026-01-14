@@ -63,18 +63,18 @@ except ImportError:
     WANDB_AVAILABLE: bool = False
 
 # Import FontDiffuser modules
-from sample_optimized import (
+from .sample_optimized import (
     load_fontdiffuser_pipeline,
     get_content_transform,
     get_style_transform,
 )
-from utils import (
+from utils.utils import (
     load_ttf,
     ttf2im,
     is_char_in_font,
 )
 
-from utils import (
+from utils.filename_utils import (
     get_content_filename,
     get_target_filename,
     compute_file_hash,
