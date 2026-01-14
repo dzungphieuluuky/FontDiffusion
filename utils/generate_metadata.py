@@ -5,10 +5,8 @@ Generate results_checkpoint.json from existing ContentImage and TargetImage fold
 """
 
 import json
-import os
 from pathlib import Path
-from typing import Dict, List, Any, Set
-import hashlib
+from typing import Any
 from filename_utils import (
     get_content_filename,
     get_target_filename,
@@ -18,7 +16,7 @@ from filename_utils import (
 )
 
 
-def generate_checkpoint_from_disk(data_root: str) -> Dict[str, Any]:
+def generate_checkpoint_from_disk(data_root: str) -> dict[str, Any]:
     """
     Generate complete checkpoint from disk structure
 
@@ -46,14 +44,14 @@ def generate_checkpoint_from_disk(data_root: str) -> Dict[str, Any]:
         )
 
     # Collections
-    generations: List[Dict[str, Any]] = []
-    characters_set: Set[str] = set()
-    styles_set: Set[str] = set()
-    fonts_set: List[str] = ["NomNaTong-Regular"]
+    generations: list[dict[str, Any]] = []
+    characters_set: set[str] = set()
+    styles_set: set[str] = set()
+    fonts_set: list[str] = ["NomNaTong-Regular"]
 
     # Track which content/target pairs exist
-    content_chars: Dict[str, str] = {}  # char -> filepath
-    valid_pairs: Set[tuple] = set()  # (char, style) pairs
+    content_chars: dict[str, str] = {}  # char -> filepath
+    valid_pairs: set[tuple[str, str]] = set()  # (char, style) pairs
 
     # ========== PHASE 1: Scan ContentImage directory ==========
     print(f"\n📝 Phase 1: Scanning ContentImage/...")
@@ -155,7 +153,7 @@ def generate_checkpoint_from_disk(data_root: str) -> Dict[str, Any]:
     return checkpoint
 
 
-def save_checkpoint(checkpoint: Dict[str, Any], output_path: str) -> None:
+def save_checkpoint(checkpoint: dict[str, Any], output_path: str) -> None:
     """Save checkpoint to JSON file"""
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)

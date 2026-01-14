@@ -1,10 +1,3 @@
-"""
-✅ UNIFIED FILENAME UTILITIES
-Centralized functions for the new simplified naming convention:
-  - ContentImage: {char}.png
-  - TargetImage: {style}+{char}.png
-"""
-
 import os
 from pathlib import Path
 import hashlib
