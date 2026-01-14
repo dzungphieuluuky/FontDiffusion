@@ -22,7 +22,12 @@ from accelerate.utils import gather_object
 from PIL import Image
 from tqdm.auto import tqdm
 
-from ..utils import compute_file_hash, get_content_filename, get_target_filename
+from utils import (
+    compute_file_hash, 
+    get_content_filename, 
+    get_target_filename
+)
+
 from sample_optimized import (
     get_content_transform,
     get_style_transform,
@@ -40,9 +45,9 @@ from sample_batch import (
     log_to_wandb,
 )
 from src.dpm_solver.pipeline_dpm_solver import FontDiffuserDPMPipeline
-from ..utils import is_char_in_font, load_ttf, ttf2im
-from ..utils import (
+from utils import (
     get_hf_bar,
+    ttf2im,
 )
 
 logger = logging.getLogger("MultiGPUsBatchSampler")
