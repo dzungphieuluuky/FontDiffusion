@@ -20,7 +20,8 @@ from tqdm.auto import tqdm
 
 
 from configs.fontdiffuser import get_parser
-from training import FontDiffuserTrainer, TrainingConfig
+from training.config import TrainingConfig
+from training.trainer import FontDiffuserTrainer
 
 logger = logging.getLogger("FontDiffuserTrainer")
 
