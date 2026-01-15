@@ -4,7 +4,7 @@ import time
 import random
 import numpy as np
 from PIL import Image
-from typing import list, Optional
+from typing import Optional
 
 import torch
 import torchvision.transforms as transforms

@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 import hashlib
-from typing import Optional, tuple
+from typing import Optional
 
 
 def compute_file_hash(char: str, style: str, font: str = "") -> str:

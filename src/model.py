@@ -2,7 +2,7 @@ import math
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from typing import Optional, tuple, list, dict
+from typing import Optional
 from diffusers import ModelMixin
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 
