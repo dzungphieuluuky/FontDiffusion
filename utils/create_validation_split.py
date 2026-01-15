@@ -11,12 +11,11 @@ import random
 from huggingface_hub.utils import tqdm
 import hashlib
 
-from filename_utils import (
+from utils import (
     parse_content_filename,
     parse_target_filename,
+    get_hf_bar,
 )
-from utilities import get_hf_bar
-
 logger = logging.getLogger("ValidationSplitCreator")
 
 
