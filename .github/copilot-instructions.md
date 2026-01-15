@@ -52,7 +52,7 @@ FontDiffuser is a neural network toolkit for font style transfer and generation 
 - For batch processing, see the batch example in README.md and sample_optimized.py.
 - For interactive testing, use gradio_app.py.
 - Remember to declare modern type hints with lowercase types (list, tuple, set, dict,...) for functions and classes definitions.
-- Use torch.tensor instead of Tensor when declaring types for PyTorch tensors.
+- Use torch.tensor instead of torch.Tensor when declaring types for PyTorch tensors.
 - When converting from numpy arrays to PyTorch tensors, use memory efficient methods like torch.from_numpy() instead of torch.tensor().
 ---
 For further details, consult the README or open an issue for project-specific questions.
