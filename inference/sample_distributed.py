@@ -24,7 +24,7 @@ from PIL import Image
 from ..tools.filename_utils import (
     get_content_filename,
     get_target_filename,
-    compute_file_hash
+    compute_file_hash,
 )
 from ..tools.utilities import get_hf_bar
 from ..tools.utils import ttf2im

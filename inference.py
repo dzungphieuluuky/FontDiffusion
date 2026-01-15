@@ -40,17 +40,17 @@ def run_sample_optimized(argv: list[str]) -> int:
     """Run single-image optimized inference."""
     try:
         from inference.sample_optimized import main as sample_optimized_main
-        
+
         # Update sys.argv temporarily
         old_argv = sys.argv
         sys.argv = [sys.argv[0]] + argv
-        
+
         try:
             sample_optimized_main()
             return 0
         finally:
             sys.argv = old_argv
-            
+
     except ImportError as e:
         logger.error(f"Import error: {e}")
         return 1
@@ -66,16 +66,16 @@ def run_sample_batch(argv: list[str]) -> int:
     """Run batch inference."""
     try:
         from inference.sample_batch import main as sample_batch_main
-        
+
         old_argv = sys.argv
         sys.argv = [sys.argv[0]] + argv
-        
+
         try:
             sample_batch_main()
             return 0
         finally:
             sys.argv = old_argv
-            
+
     except ImportError as e:
         logger.error(f"Import error: {e}")
         return 1
@@ -91,16 +91,16 @@ def run_sample_distributed(argv: list[str]) -> int:
     """Run distributed multi-GPU inference."""
     try:
         from inference.sample_distributed import main as sample_distributed_main
-        
+
         old_argv = sys.argv
         sys.argv = [sys.argv[0]] + argv
-        
+
         try:
             sample_distributed_main()
             return 0
         finally:
             sys.argv = old_argv
-            
+
     except ImportError as e:
         logger.error(f"Import error: {e}")
         return 1
