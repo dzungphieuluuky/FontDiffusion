@@ -6,7 +6,7 @@ import os
 import sys
 import argparse
 from pathlib import Path
-from typing import Optional, dict, Any
+from typing import Optional, Any
 import logging
 
 from safetensors.torch import save_file

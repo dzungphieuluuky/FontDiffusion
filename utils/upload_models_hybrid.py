@@ -10,7 +10,7 @@ import argparse
 import concurrent.futures
 import time
 from pathlib import Path
-from typing import Optional, dict, Any, list
+from typing import Optional, Any
 import logging
 
 from safetensors.torch import save_file

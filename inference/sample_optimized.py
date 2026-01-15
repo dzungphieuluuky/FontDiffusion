@@ -10,7 +10,7 @@ import time
 import hashlib
 from PIL import Image
 from pathlib import Path
-from typing import list, Optional, tuple, dict, Any, Union
+from typing import Optional, Any, Union
 from functools import lru_cache
 from argparse import Namespace, ArgumentParser
 
