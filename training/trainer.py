@@ -19,18 +19,20 @@ from dataset import FontDataset, CollateFN
 from src import (
     ContentPerceptualLoss,
     FontDiffuserModel,
-    StyleTransformationModule,
     build_content_encoder,
     build_ddpm_scheduler,
     build_scr,
     build_style_encoder,
     build_unet,
 )
-from tools import (
+from tools.utils import (
     normalize_mean_std,
     reNormalize_img,
     save_args_to_yaml,
     x0_from_epsilon,
+)
+
+from tools.utilities import (
     find_checkpoint,
     load_model_checkpoint,
     save_model_checkpoint,
@@ -121,19 +123,6 @@ class FontDiffuserTrainer:
         style_encoder = build_style_encoder(args=self.args)
         content_encoder = build_content_encoder(args=self.args)
         self.noise_scheduler = build_ddpm_scheduler(self.args)
-
-        # Style transformation module (optional)
-        style_transform_module = None
-        if self.config.enable_style_transform:
-            style_transform_module = StyleTransformationModule(
-                num_scales=getattr(self.args, "num_scales", 4),
-                feature_dim=getattr(self.args, "feature_dim", 512),
-                hidden_dim=getattr(self.args, "hidden_dim", 256),
-                num_heads=getattr(self.args, "num_heads", 8),
-                ffn_dim=getattr(self.args, "ffn_dim", 2048),
-                style_image_size=self.args.style_image_size[0],
-            )
-
         # Load phase 1 checkpoints if specified
         if self.args.phase_1_ckpt_dir is not None:
             self._load_phase1_checkpoints(
@@ -148,7 +137,6 @@ class FontDiffuserTrainer:
             unet=unet,
             style_encoder=style_encoder,
             content_encoder=content_encoder,
-            style_transform_module=style_transform_module,
         )
 
         # Perceptual loss (always used)

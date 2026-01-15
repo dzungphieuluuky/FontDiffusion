@@ -16,7 +16,6 @@ import torchvision.transforms as transforms
 from argparse import Namespace, ArgumentParser
 
 from src.dpm_solver.pipeline_dpm_solver import FontDiffuserDPMPipeline
-from src.model import StyleTransformationModule
 from tools.utilities import (
     save_model_checkpoint,
     load_model_checkpoint,
