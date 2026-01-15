@@ -3,7 +3,7 @@ from .model import (
     FontDiffuserModelDPM,
     FontDiffuserWithFST,
     FontDiffuserWithFSTWrapper,
-    FontStyleTransformationModule
+    FontStyleTransformationModule,
 )
 from .criterion import ContentPerceptualLoss
 from .dpm_solver.pipeline_dpm_solver import FontDiffuserDPMPipeline

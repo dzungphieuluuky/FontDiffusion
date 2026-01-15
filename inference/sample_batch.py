@@ -17,8 +17,6 @@ from argparse import Namespace, ArgumentParser
 
 from src.dpm_solver.pipeline_dpm_solver import FontDiffuserDPMPipeline
 from tools.utilities import (
-    save_model_checkpoint,
-    load_model_checkpoint,
     get_hf_bar,
 )
 

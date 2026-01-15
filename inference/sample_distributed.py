@@ -7,9 +7,6 @@ and supports resumable generation with proper multi-GPU distribution.
 
 import sys
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 import argparse
 import json
 import logging
@@ -24,8 +21,6 @@ from accelerate import Accelerator
 from accelerate.utils import gather_object
 from PIL import Image
 from tqdm.auto import tqdm
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tools.filename_utils import (
     compute_file_hash,

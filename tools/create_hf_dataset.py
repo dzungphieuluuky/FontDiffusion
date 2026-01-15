@@ -18,9 +18,7 @@ from tqdm.auto import tqdm
 from tools.utilities import (
     get_hf_bar,
 )
-from tools.filename_utils import (
-    compute_file_hash
-)
+from tools.filename_utils import compute_file_hash
 
 logger = logging.getLogger("DatasetCreator")
 
