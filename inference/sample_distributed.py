@@ -669,30 +669,26 @@ def main():
             logger.info("✅ NomGenie dataset generation complete!")
             logger.info("=" * 60)
 
-        if accelerator.is_main_process:
-            logger.info("Cleaning up resources...")
-
-        accelerator.free_memory()
-        if torch.distributed.is_available() and torch.distributed.is_initialized():
-            torch.distributed.destroy_process_group()
-            logger.info("Process group destroyed successfully")
+    except KeyboardInterrupt:
+        logger.warning("Generation interrupted by user")
+        sys.exit(130)
 
     except Exception as e:
-        logger.error(f"Fatal error: {e}")
-        import traceback
-
-        traceback.print_exc()
+        logger.error(f"Fatal error: {e}", exc_info=True)
         sys.exit(1)
 
     finally:
-        # FIX: Properly cleanup multi-GPU resources
+        # ✅ PROPER CLEANUP: Let Accelerator handle process group cleanup
+        if accelerator.is_main_process:
+            logger.info("Cleaning up resources...")
+        
         try:
-            accelerator.free_memory()
-            if torch.distributed.is_available() and torch.distributed.is_initialized():
-                torch.distributed.destroy_process_group()
-                logger.info("Process group destroyed successfully")
+            # Accelerator's end_training() properly handles all cleanup
+            accelerator.end_training()
+            if accelerator.is_main_process:
+                logger.info("✓ Accelerator cleanup complete")
         except Exception as e:
-            logger.warning(f"Error during cleanup: {e}")
+            logger.warning(f"Error during Accelerator cleanup: {e}")
 
 
 if __name__ == "__main__":
