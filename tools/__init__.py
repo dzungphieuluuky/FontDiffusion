@@ -4,7 +4,6 @@ FontDiffusion tools package.
 Utilities for dataset creation, file management, model uploading, and metadata generation.
 """
 
-# Core utilities (most commonly used)
 from .filename_utils import (
     compute_file_hash,
     get_content_filename,
