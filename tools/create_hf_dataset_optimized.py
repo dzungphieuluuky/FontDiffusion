@@ -1,6 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
 """
 High‑performance Hugging Face dataset builder for FontDiffusion images.
 Optimized with parallel processing, caching, and efficient memory management.
