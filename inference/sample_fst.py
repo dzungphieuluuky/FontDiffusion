@@ -47,10 +47,10 @@ def arg_parse():
     parser.add_argument("--content_image_path", type=str, default=None)
     parser.add_argument("--style_image_path", type=str, default=None)
     parser.add_argument(
-        "--style_source_image_path", 
-        type=str, 
+        "--style_source_image_path",
+        type=str,
         default=None,
-        help="Optional: different source font for style transformation"
+        help="Optional: different source font for style transformation",
     )
     parser.add_argument("--save_image", action="store_true")
     parser.add_argument(
@@ -58,20 +58,18 @@ def arg_parse():
     )
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument("--ttf_path", type=str, default="fonts/KaiXinSongA.ttf")
-    
+
     # FST-specific arguments
     parser.add_argument(
-        "--use_fst",
-        action="store_true",
-        help="Use FST-enhanced model for sampling"
+        "--use_fst", action="store_true", help="Use FST-enhanced model for sampling"
     )
     parser.add_argument(
         "--fst_ckpt_dir",
         type=str,
         default=None,
-        help="Directory containing FST module checkpoints"
+        help="Directory containing FST module checkpoints",
     )
-    
+
     args = parser.parse_args()
     style_image_size = args.style_image_size
     content_image_size = args.content_image_size
@@ -99,9 +97,9 @@ def image_process(args, content_image=None, style_image=None, style_source_image
         else:
             content_image = Image.open(args.content_image_path).convert("RGB")
             content_image_pil = None
-        
+
         style_image = Image.open(args.style_image_path).convert("RGB")
-        
+
         # Load optional style source image for FST
         if args.use_fst and args.style_source_image_path is not None:
             style_source_image = Image.open(args.style_source_image_path).convert("RGB")
@@ -122,7 +120,7 @@ def image_process(args, content_image=None, style_image=None, style_source_image
         else:
             assert content_image is not None, "The content image should not be None."
         content_image_pil = None
-        
+
         if style_source_image is None:
             style_source_image = style_image
 
@@ -147,7 +145,7 @@ def image_process(args, content_image=None, style_image=None, style_source_image
             transforms.Normalize([0.5], [0.5]),
         ]
     )
-    
+
     content_image = content_inference_transforms(content_image)[None, :]
     style_image = style_inference_transforms(style_image)[None, :]
     style_source_image = style_inference_transforms(style_source_image)[None, :]
@@ -160,44 +158,38 @@ def load_fontdiffuser_fst_pipeline(args):
     # Load base components
     unet = build_unet(args=args)
     unet.load_state_dict(torch.load(f"{args.ckpt_dir}/unet.pth"))
-    
+
     style_encoder = build_style_encoder(args=args)
     style_encoder.load_state_dict(torch.load(f"{args.ckpt_dir}/style_encoder.pth"))
-    
+
     content_encoder = build_content_encoder(args=args)
     content_encoder.load_state_dict(torch.load(f"{args.ckpt_dir}/content_encoder.pth"))
-    
+
     # Create base model
     base_model = FontDiffuserModelDPM(
-        unet=unet, 
-        style_encoder=style_encoder, 
-        content_encoder=content_encoder
+        unet=unet, style_encoder=style_encoder, content_encoder=content_encoder
     )
-    
+
     # Wrap with FST enhancement
     model = FontDiffuserWithFST(base_model)
-    
+
     # Load FST-specific weights
     fst_ckpt_dir = args.fst_ckpt_dir or args.ckpt_dir
-    
+
     if os.path.exists(f"{fst_ckpt_dir}/mss_encoder.pth"):
-        model.mss_encoder.load_state_dict(
-            torch.load(f"{fst_ckpt_dir}/mss_encoder.pth")
-        )
+        model.mss_encoder.load_state_dict(torch.load(f"{fst_ckpt_dir}/mss_encoder.pth"))
         print("Loaded MSSE encoder state_dict")
-    
+
     if os.path.exists(f"{fst_ckpt_dir}/fst_module.pth"):
-        model.fst_module.load_state_dict(
-            torch.load(f"{fst_ckpt_dir}/fst_module.pth")
-        )
+        model.fst_module.load_state_dict(torch.load(f"{fst_ckpt_dir}/fst_module.pth"))
         print("Loaded FST module state_dict")
-    
+
     if os.path.exists(f"{fst_ckpt_dir}/fst_projection.pth"):
         model.fst_projection.load_state_dict(
             torch.load(f"{fst_ckpt_dir}/fst_projection.pth")
         )
         print("Loaded FST projection state_dict")
-    
+
     model.to(args.device)
     print("Loaded the FST-enhanced model state_dict successfully!")
 
@@ -252,7 +244,7 @@ def load_fontdiffuser_pipeline(args):
 
 class FontDiffuserFSTPipeline(FontDiffuserDPMPipeline):
     """Custom pipeline for FST-enhanced model."""
-    
+
     def generate(
         self,
         content_images,
@@ -272,27 +264,27 @@ class FontDiffuserFSTPipeline(FontDiffuserDPMPipeline):
     ):
         """Generate samples using FST-enhanced model."""
         from src.dpm_solver import NoiseScheduleVP, DPM_Solver
-        
+
         # Use same style image for source if not provided
         if style_source_images is None:
             style_source_images = style_images
-        
+
         # Classifier-free guidance setup
         if self.guidance_type == "classifier-free":
             content_images_uncond = torch.ones_like(content_images)
             style_images_uncond = torch.ones_like(style_images)
             style_source_images_uncond = torch.ones_like(style_source_images)
-            
+
             content_images = torch.cat([content_images, content_images_uncond], dim=0)
             style_images = torch.cat([style_images, style_images_uncond], dim=0)
             style_source_images = torch.cat(
                 [style_source_images, style_source_images_uncond], dim=0
             )
-        
+
         # Define model function for DPM-Solver
         def model_fn(x, t_continuous):
             t = t_continuous * self.ddpm_train_scheduler.num_train_timesteps
-            
+
             # FST model forward
             with torch.inference_mode():
                 outputs = self.model(
@@ -304,26 +296,25 @@ class FontDiffuserFSTPipeline(FontDiffuserDPMPipeline):
                     content_encoder_downsample_size=content_encoder_downsample_size,
                     return_dict=True,
                 )
-                noise_pred = outputs['noise_pred']
-            
+                noise_pred = outputs["noise_pred"]
+
             # Classifier-free guidance
             if self.guidance_type == "classifier-free":
                 noise_pred_cond, noise_pred_uncond = noise_pred.chunk(2)
                 noise_pred = noise_pred_uncond + self.guidance_scale * (
                     noise_pred_cond - noise_pred_uncond
                 )
-            
+
             return noise_pred
-        
+
         # Initialize noise schedule
         noise_schedule = NoiseScheduleVP(schedule="discrete", betas=self.betas)
-        
+
         # Initialize latent
         x_T = torch.randn(
-            (batch_size, 1, dm_size[0], dm_size[1]),
-            device=content_images.device
+            (batch_size, 1, dm_size[0], dm_size[1]), device=content_images.device
         )
-        
+
         # Create DPM-Solver
         dpm_solver = DPM_Solver(
             model_fn=model_fn,
@@ -331,7 +322,7 @@ class FontDiffuserFSTPipeline(FontDiffuserDPMPipeline):
             algorithm_type=algorithm_type,
             correcting_x0_fn=correcting_x0_fn,
         )
-        
+
         # Generate samples
         x_sample = dpm_solver.sample(
             x=x_T,
@@ -342,17 +333,11 @@ class FontDiffuserFSTPipeline(FontDiffuserDPMPipeline):
             skip_type=skip_type,
             method=method,
         )
-        
+
         return x_sample
 
 
-def sampling(
-    args, 
-    pipe, 
-    content_image=None, 
-    style_image=None, 
-    style_source_image=None
-):
+def sampling(args, pipe, content_image=None, style_image=None, style_source_image=None):
     """Main sampling function."""
     if not args.demo:
         os.makedirs(args.save_image_dir, exist_ok=True)
@@ -366,29 +351,29 @@ def sampling(
 
     # Process images
     result = image_process(
-        args=args, 
-        content_image=content_image, 
+        args=args,
+        content_image=content_image,
         style_image=style_image,
-        style_source_image=style_source_image
+        style_source_image=style_source_image,
     )
-    
+
     if result[0] is None:
         print(
             f"The content_character you provided is not in the ttf. "
             f"Please change the content_character or you can change the ttf."
         )
         return None
-    
+
     content_image, style_image, style_source_image, content_image_pil = result
 
     with torch.inference_mode():
         content_image = content_image.to(args.device)
         style_image = style_image.to(args.device)
         style_source_image = style_source_image.to(args.device)
-        
+
         print(f"Sampling by DPM-Solver++ ......")
         start = time.time()
-        
+
         if args.use_fst:
             # Use FST pipeline
             images = pipe.generate(
@@ -424,7 +409,7 @@ def sampling(
                 method=args.method,
                 correcting_x0_fn=args.correcting_x0_fn,
             )
-        
+
         end = time.time()
 
         if args.save_image:
@@ -449,7 +434,7 @@ def sampling(
                     resolution=args.resolution,
                 )
             print(f"Finish the sampling process, costing time {end - start}s")
-        
+
         return images[0]
 
 
@@ -461,7 +446,7 @@ if __name__ == "__main__":
         pipe = load_fontdiffuser_fst_pipeline(args=args)
     else:
         pipe = load_fontdiffuser_pipeline(args=args)
-    
+
     out_image = sampling(args=args, pipe=pipe)
 
 

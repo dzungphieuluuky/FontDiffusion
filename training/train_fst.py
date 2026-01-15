@@ -45,49 +45,49 @@ logger = get_logger(__name__)
 
 def get_args():
     parser = get_parser()
-    
+
     # Add FSTDiff-specific arguments
     parser.add_argument(
         "--use_fst",
         action="store_true",
-        help="Use FSTDiff enhancement with MSSE and FST modules"
+        help="Use FSTDiff enhancement with MSSE and FST modules",
     )
     parser.add_argument(
         "--fst_feature_channels",
         type=str,
         default="64,128,256,512,1024",
-        help="Feature channels for FST module (comma-separated)"
+        help="Feature channels for FST module (comma-separated)",
     )
     parser.add_argument(
         "--fst_num_queries",
         type=int,
         default=220,
-        help="Number of learnable queries in FST (default 220 for 256 total)"
+        help="Number of learnable queries in FST (default 220 for 256 total)",
     )
     parser.add_argument(
         "--fst_query_dim",
         type=int,
         default=128,
-        help="Dimension of query vectors in FST"
+        help="Dimension of query vectors in FST",
     )
     parser.add_argument(
         "--fst_num_scales",
         type=int,
         default=5,
-        help="Number of multi-scale features in MSSE"
+        help="Number of multi-scale features in MSSE",
     )
     parser.add_argument(
         "--style_source_same_prob",
         type=float,
         default=0.5,
-        help="Probability that source and target style use same font style"
+        help="Probability that source and target style use same font style",
     )
     parser.add_argument(
         "--freeze_original_encoders",
         action="store_true",
-        help="Freeze original style and content encoders during training"
+        help="Freeze original style and content encoders during training",
     )
-    
+
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
     if env_local_rank != -1 and env_local_rank != args.local_rank:
@@ -106,7 +106,7 @@ def build_fontdiffuser_with_fst(args):
     unet = build_unet(args=args)
     style_encoder = build_style_encoder(args=args)
     content_encoder = build_content_encoder(args=args)
-    
+
     # Load pretrained weights if specified
     if args.phase_2:
         unet.load_state_dict(torch.load(f"{args.phase_1_ckpt_dir}/unet.pth"))
@@ -116,17 +116,15 @@ def build_fontdiffuser_with_fst(args):
         content_encoder.load_state_dict(
             torch.load(f"{args.phase_1_ckpt_dir}/content_encoder.pth")
         )
-    
+
     # Create original FontDiffuser model
     original_model = FontDiffuserModel(
-        unet=unet, 
-        style_encoder=style_encoder, 
-        content_encoder=content_encoder
+        unet=unet, style_encoder=style_encoder, content_encoder=content_encoder
     )
-    
+
     # Wrap with FSTDiff enhancement
     model = FontDiffuserWithFST(original_model)
-    
+
     # Optionally freeze original encoders
     if args.freeze_original_encoders:
         logger.info("Freezing original style and content encoders")
@@ -134,7 +132,7 @@ def build_fontdiffuser_with_fst(args):
             param.requires_grad = False
         for param in model.content_encoder.parameters():
             param.requires_grad = False
-    
+
     return model
 
 
@@ -183,7 +181,7 @@ def main():
         model = FontDiffuserModel(
             unet=unet, style_encoder=style_encoder, content_encoder=content_encoder
         )
-    
+
     noise_scheduler = build_ddpm_scheduler(args)
 
     # Build content perceptual Loss
@@ -226,7 +224,7 @@ def main():
             transforms.Normalize([0.5], [0.5]),
         ]
     )
-    
+
     # Create dataset with FST support
     train_font_dataset = FontDatasetFST(
         args=args,
@@ -234,9 +232,9 @@ def main():
         transforms=[content_transforms, style_transforms, target_transforms],
         scr=args.phase_2,
         use_fst=args.use_fst,
-        style_source_same_prob=args.style_source_same_prob
+        style_source_same_prob=args.style_source_same_prob,
     )
-    
+
     train_dataloader = torch.utils.data.DataLoader(
         train_font_dataset,
         shuffle=True,
@@ -252,21 +250,21 @@ def main():
             * args.train_batch_size
             * accelerator.num_processes
         )
-    
+
     # Configure optimizer parameters
     if args.use_fst and args.freeze_original_encoders:
         # Only optimize new FST components
-        trainable_params = [
-            p for p in model.parameters() if p.requires_grad
-        ]
+        trainable_params = [p for p in model.parameters() if p.requires_grad]
         num_trainable = sum(p.numel() for p in trainable_params)
-        logger.info(f"Training {len(trainable_params)} parameter groups "
-                   f"({num_trainable:,} parameters, FST only)")
+        logger.info(
+            f"Training {len(trainable_params)} parameter groups "
+            f"({num_trainable:,} parameters, FST only)"
+        )
     else:
         trainable_params = model.parameters()
         num_trainable = sum(p.numel() for p in trainable_params if p.requires_grad)
         logger.info(f"Training all parameters ({num_trainable:,} total)")
-    
+
     optimizer = torch.optim.AdamW(
         trainable_params,
         lr=args.learning_rate,
@@ -285,7 +283,7 @@ def main():
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         model, optimizer, train_dataloader, lr_scheduler
     )
-    
+
     # Move scr module to the target devices
     if args.phase_2:
         scr = scr.to(accelerator.device)
@@ -324,7 +322,7 @@ def main():
                 # Sample noise that we'll add to the samples
                 noise = torch.randn_like(target_images)
                 bsz = target_images.shape[0]
-                
+
                 # Sample a random timestep for each image
                 timesteps = torch.randint(
                     0,
@@ -351,8 +349,10 @@ def main():
                 # Forward pass - different for FST model
                 if args.use_fst:
                     # Get style source images from the batch
-                    style_source_images = samples.get("style_source_image", style_images)
-                    
+                    style_source_images = samples.get(
+                        "style_source_image", style_images
+                    )
+
                     outputs = model(
                         noisy_latents=noisy_target_images,
                         timestep=timesteps,
@@ -362,8 +362,8 @@ def main():
                         content_encoder_downsample_size=args.content_encoder_downsample_size,
                         return_dict=True,
                     )
-                    noise_pred = outputs['noise_pred']
-                    offset_out_sum = outputs['offset_out_sum']
+                    noise_pred = outputs["noise_pred"]
+                    offset_out_sum = outputs["offset_out_sum"]
                 else:
                     # Original model forward
                     noise_pred, offset_out_sum = model(
@@ -445,15 +445,15 @@ def main():
                     if global_step % args.ckpt_interval == 0:
                         save_dir = f"{args.output_dir}/global_step_{global_step}"
                         os.makedirs(save_dir, exist_ok=True)
-                        
+
                         if args.use_fst:
                             # Save FST-enhanced model components
                             # Unwrap model if using accelerator
                             unwrapped_model = accelerator.unwrap_model(model)
-                            
+
                             torch.save(
-                                unwrapped_model.diffusion_unet.state_dict(), 
-                                f"{save_dir}/unet.pth"
+                                unwrapped_model.diffusion_unet.state_dict(),
+                                f"{save_dir}/unet.pth",
                             )
                             torch.save(
                                 unwrapped_model.style_encoder.state_dict(),
@@ -476,11 +476,16 @@ def main():
                                 unwrapped_model.fst_projection.state_dict(),
                                 f"{save_dir}/fst_projection.pth",
                             )
-                            torch.save(unwrapped_model, f"{save_dir}/total_model_fst.pth")
+                            torch.save(
+                                unwrapped_model, f"{save_dir}/total_model_fst.pth"
+                            )
                         else:
                             # Save original model
                             unwrapped_model = accelerator.unwrap_model(model)
-                            torch.save(unwrapped_model.unet.state_dict(), f"{save_dir}/unet.pth")
+                            torch.save(
+                                unwrapped_model.unet.state_dict(),
+                                f"{save_dir}/unet.pth",
+                            )
                             torch.save(
                                 unwrapped_model.style_encoder.state_dict(),
                                 f"{save_dir}/style_encoder.pth",
@@ -490,7 +495,7 @@ def main():
                                 f"{save_dir}/content_encoder.pth",
                             )
                             torch.save(unwrapped_model, f"{save_dir}/total_model.pth")
-                        
+
                         logging.info(
                             f"[{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}] "
                             f"Save the checkpoint on global step {global_step}"

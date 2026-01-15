@@ -30,13 +30,13 @@ def get_nonorm_transform(resolution):
 class FontDataset(Dataset):
     """
     Enhanced dataset for font generation supporting both original and FST modes.
-    
+
     For FST mode, provides:
     - content_image: The character to generate
     - style_image: Target style reference (same character, different font)
     - style_source_image: Source style reference (optional, for style transformation)
     - target_image: Ground truth
-    
+
     Args:
         args: Arguments containing data_root, resolution, etc.
         phase: 'train' or 'test'
@@ -47,13 +47,13 @@ class FontDataset(Dataset):
     """
 
     def __init__(
-        self, 
-        args, 
-        phase: str, 
-        transforms: Optional[List] = None, 
+        self,
+        args,
+        phase: str,
+        transforms: Optional[List] = None,
         scr: bool = False,
         use_fst: bool = False,
-        style_source_same_prob: float = 0.5
+        style_source_same_prob: float = 0.5,
     ):
         super().__init__()
         self.root = args.data_root
@@ -61,7 +61,7 @@ class FontDataset(Dataset):
         self.scr = scr
         self.use_fst = use_fst
         self.style_source_same_prob = style_source_same_prob
-        
+
         if self.scr:
             self.num_neg = args.num_neg
 
@@ -69,9 +69,11 @@ class FontDataset(Dataset):
         self.get_path()
         self.transforms = transforms
         self.nonorm_transforms = get_nonorm_transform(args.resolution)
-        
-        print(f"Dataset initialized: phase={phase}, use_fst={use_fst}, "
-              f"scr={scr}, total_samples={len(self.target_images)}")
+
+        print(
+            f"Dataset initialized: phase={phase}, use_fst={use_fst}, "
+            f"scr={scr}, total_samples={len(self.target_images)}"
+        )
 
     def get_path(self):
         """Build dataset paths and style mappings."""
@@ -80,23 +82,23 @@ class FontDataset(Dataset):
         self.style_to_images = {}
         # Content to images mapping (for FST cross-style sampling)
         self.content_to_images = {}
-        
+
         target_image_dir = f"{self.root}/{self.phase}/TargetImage"
-        
+
         for style in os.listdir(target_image_dir):
             style_dir = f"{target_image_dir}/{style}"
             if not os.path.isdir(style_dir):
                 continue
-                
+
             images_related_style = []
             for img in os.listdir(style_dir):
-                if not img.endswith(('.jpg', '.png', '.jpeg')):
+                if not img.endswith((".jpg", ".png", ".jpeg")):
                     continue
-                    
+
                 img_path = f"{style_dir}/{img}"
                 self.target_images.append(img_path)
                 images_related_style.append(img_path)
-                
+
                 # Extract content for FST
                 # Assuming filename format: style+content.jpg
                 try:
@@ -107,30 +109,31 @@ class FontDataset(Dataset):
                             self.content_to_images[content_name] = {}
                         if style_name not in self.content_to_images[content_name]:
                             self.content_to_images[content_name][style_name] = []
-                        self.content_to_images[content_name][style_name].append(img_path)
+                        self.content_to_images[content_name][style_name].append(
+                            img_path
+                        )
                 except Exception as e:
                     print(f"Warning: Could not parse filename {img}: {e}")
-                    
+
             self.style_to_images[style] = images_related_style
-        
-        print(f"Found {len(self.target_images)} target images across "
-              f"{len(self.style_to_images)} styles")
+
+        print(
+            f"Found {len(self.target_images)} target images across "
+            f"{len(self.style_to_images)} styles"
+        )
 
     def get_style_source_image(
-        self, 
-        target_style: str, 
-        content: str, 
-        target_image_path: str
+        self, target_style: str, content: str, target_image_path: str
     ) -> Image.Image:
         """
         Get source style image for FST.
-        
+
         Strategy:
         1. With probability style_source_same_prob: use same style (different character)
         2. Otherwise: use different style (same or different character)
         """
         use_same_style = random.random() < self.style_source_same_prob
-        
+
         if use_same_style:
             # Same style, different character (standard case)
             images_in_style = self.style_to_images[target_style].copy()
@@ -147,7 +150,7 @@ class FontDataset(Dataset):
                 available_styles = list(self.content_to_images[content].keys())
                 if target_style in available_styles:
                     available_styles.remove(target_style)
-                
+
                 if available_styles:
                     # Same content, different style
                     source_style = random.choice(available_styles)
@@ -155,28 +158,36 @@ class FontDataset(Dataset):
                     source_image_path = random.choice(source_candidates)
                 else:
                     # Fallback: random style image
-                    other_styles = [s for s in self.style_to_images.keys() if s != target_style]
+                    other_styles = [
+                        s for s in self.style_to_images.keys() if s != target_style
+                    ]
                     if other_styles:
                         random_style = random.choice(other_styles)
-                        source_image_path = random.choice(self.style_to_images[random_style])
+                        source_image_path = random.choice(
+                            self.style_to_images[random_style]
+                        )
                     else:
                         source_image_path = target_image_path
             else:
                 # Fallback: random different style
-                other_styles = [s for s in self.style_to_images.keys() if s != target_style]
+                other_styles = [
+                    s for s in self.style_to_images.keys() if s != target_style
+                ]
                 if other_styles:
                     random_style = random.choice(other_styles)
-                    source_image_path = random.choice(self.style_to_images[random_style])
+                    source_image_path = random.choice(
+                        self.style_to_images[random_style]
+                    )
                 else:
                     source_image_path = target_image_path
-        
+
         source_image = Image.open(source_image_path).convert("RGB")
         return source_image
 
     def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
         """
         Get a sample from the dataset.
-        
+
         Returns:
             Dictionary containing:
             - content_image: Character to generate
@@ -188,7 +199,7 @@ class FontDataset(Dataset):
         """
         target_image_path = self.target_images[index]
         target_image_name = target_image_path.split("/")[-1]
-        
+
         # Parse style and content from filename
         try:
             style, content = target_image_name.split(".")[0].split("+")
@@ -202,24 +213,24 @@ class FontDataset(Dataset):
         content_image_path = f"{self.root}/{self.phase}/ContentImage/{content}.jpg"
         if not os.path.exists(content_image_path):
             # Try alternative extensions
-            for ext in ['.png', '.jpeg', '.JPG', '.PNG']:
+            for ext in [".png", ".jpeg", ".JPG", ".PNG"]:
                 alt_path = f"{self.root}/{self.phase}/ContentImage/{content}{ext}"
                 if os.path.exists(alt_path):
                     content_image_path = alt_path
                     break
-        
+
         content_image = Image.open(content_image_path).convert("RGB")
 
         # Sample style image (target style, different character)
         images_related_style = self.style_to_images[style].copy()
         images_related_style.remove(target_image_path)
-        
+
         if images_related_style:
             style_image_path = random.choice(images_related_style)
         else:
             # Fallback: use target image itself if no other samples
             style_image_path = target_image_path
-            
+
         style_image = Image.open(style_image_path).convert("RGB")
 
         # Read target image
@@ -244,14 +255,12 @@ class FontDataset(Dataset):
         # Add source style image for FST
         if self.use_fst:
             style_source_image = self.get_style_source_image(
-                target_style=style,
-                content=content,
-                target_image_path=target_image_path
+                target_style=style, content=content, target_image_path=target_image_path
             )
-            
+
             if self.transforms is not None:
                 style_source_image = self.transforms[1](style_source_image)
-            
+
             sample["style_source_image"] = style_source_image
 
         # Add negative samples for SCR loss
@@ -259,26 +268,31 @@ class FontDataset(Dataset):
             style_list = list(self.style_to_images.keys())
             style_index = style_list.index(style)
             style_list.pop(style_index)
-            
+
             choose_neg_names = []
             for i in range(self.num_neg):
                 if not style_list:
                     # Not enough styles for negatives
                     break
-                    
+
                 choose_style = random.choice(style_list)
                 choose_index = style_list.index(choose_style)
                 style_list.pop(choose_index)
-                
+
                 neg_path = f"{self.root}/train/TargetImage/{choose_style}/{choose_style}+{content}.jpg"
-                
+
                 # Check if negative sample exists
                 if os.path.exists(neg_path):
                     choose_neg_names.append(neg_path)
                 else:
                     # Try to find any image from this style with same content
-                    if content in self.content_to_images and choose_style in self.content_to_images[content]:
-                        alt_neg = random.choice(self.content_to_images[content][choose_style])
+                    if (
+                        content in self.content_to_images
+                        and choose_style in self.content_to_images[content]
+                    ):
+                        alt_neg = random.choice(
+                            self.content_to_images[content][choose_style]
+                        )
                         choose_neg_names.append(alt_neg)
 
             # Load neg_images
@@ -291,13 +305,13 @@ class FontDataset(Dataset):
                     neg_images_list.append(neg_image.unsqueeze(0))
                 except Exception as e:
                     print(f"Warning: Could not load negative sample {neg_name}: {e}")
-            
+
             if neg_images_list:
                 neg_images = torch.cat(neg_images_list, dim=0)
             else:
                 # Fallback: use target image as negative
                 neg_images = target_image.unsqueeze(0)
-            
+
             sample["neg_images"] = neg_images
 
         return sample
@@ -308,65 +322,67 @@ class FontDataset(Dataset):
 
 class FontDatasetDebug:
     """Debug utility to verify dataset structure and samples."""
-    
+
     def __init__(self, dataset: FontDataset):
         self.dataset = dataset
-    
+
     def check_structure(self) -> Dict[str, any]:
         """Check dataset structure and return statistics."""
         stats = {
-            'total_samples': len(self.dataset),
-            'num_styles': len(self.dataset.style_to_images),
-            'num_contents': len(self.dataset.content_to_images),
-            'samples_per_style': {},
-            'contents_per_style': {},
+            "total_samples": len(self.dataset),
+            "num_styles": len(self.dataset.style_to_images),
+            "num_contents": len(self.dataset.content_to_images),
+            "samples_per_style": {},
+            "contents_per_style": {},
         }
-        
+
         # Count samples per style
         for style, images in self.dataset.style_to_images.items():
-            stats['samples_per_style'][style] = len(images)
-        
+            stats["samples_per_style"][style] = len(images)
+
         # Count contents per style
         for content, styles_dict in self.dataset.content_to_images.items():
             for style in styles_dict:
-                if style not in stats['contents_per_style']:
-                    stats['contents_per_style'][style] = 0
-                stats['contents_per_style'][style] += 1
-        
+                if style not in stats["contents_per_style"]:
+                    stats["contents_per_style"][style] = 0
+                stats["contents_per_style"][style] += 1
+
         return stats
-    
+
     def print_sample(self, index: int = 0):
         """Print detailed information about a sample."""
         sample = self.dataset[index]
-        
-        print(f"\n{'='*80}")
+
+        print(f"\n{'=' * 80}")
         print(f"Sample {index} Information")
-        print(f"{'='*80}")
-        
+        print(f"{'=' * 80}")
+
         for key, value in sample.items():
             if isinstance(value, torch.Tensor):
-                print(f"{key:25s}: shape={tuple(value.shape)}, "
-                      f"dtype={value.dtype}, "
-                      f"range=[{value.min():.3f}, {value.max():.3f}]")
+                print(
+                    f"{key:25s}: shape={tuple(value.shape)}, "
+                    f"dtype={value.dtype}, "
+                    f"range=[{value.min():.3f}, {value.max():.3f}]"
+                )
             else:
                 print(f"{key:25s}: {value}")
-        
-        print(f"{'='*80}\n")
-    
+
+        print(f"{'=' * 80}\n")
+
     def verify_fst_diversity(self, num_samples: int = 100):
         """Verify FST source/target diversity."""
         if not self.dataset.use_fst:
             print("Dataset not in FST mode")
             return
-        
+
         same_style_count = 0
         diff_style_count = 0
-        
+
         for i in range(min(num_samples, len(self.dataset))):
             sample = self.dataset[i]
             # This is a simplified check - in practice you'd need to track actual paths
             same_style_count += 1  # Placeholder
-        
+
         print(f"\nFST Diversity Check ({num_samples} samples):")
         print(f"  Same style pairs: {same_style_count}")
         print(f"  Different style pairs: {diff_style_count}")
@@ -380,35 +396,26 @@ if __name__ == "__main__":
         data_root = "path/to/your/dataset"
         resolution = 128
         num_neg = 3
-    
+
     args = Args()
-    
+
     # Test original mode
     print("Testing original dataset mode...")
-    dataset_original = FontDataset(
-        args=args,
-        phase="train",
-        scr=False,
-        use_fst=False
-    )
-    
+    dataset_original = FontDataset(args=args, phase="train", scr=False, use_fst=False)
+
     debug_original = FontDatasetDebug(dataset_original)
     stats = debug_original.check_structure()
     print(f"\nDataset Statistics:")
     print(f"  Total samples: {stats['total_samples']}")
     print(f"  Number of styles: {stats['num_styles']}")
-    
+
     # Test FST mode
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("Testing FST dataset mode...")
     dataset_fst = FontDataset(
-        args=args,
-        phase="train",
-        scr=False,
-        use_fst=True,
-        style_source_same_prob=0.5
+        args=args, phase="train", scr=False, use_fst=True, style_source_same_prob=0.5
     )
-    
+
     debug_fst = FontDatasetDebug(dataset_fst)
     if len(dataset_fst) > 0:
         debug_fst.print_sample(0)
