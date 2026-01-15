@@ -18,6 +18,7 @@ import numpy as np
 import torch
 import torchvision.transforms as transforms
 from accelerate import Accelerator
+from accelerate.state import AcceleratorState
 from accelerate.utils import gather_object
 from PIL import Image
 
@@ -685,6 +686,9 @@ def main():
         try:
             # Accelerator's end_training() properly handles all cleanup
             accelerator.end_training()
+            accelerator.free_memory()
+            state = AcceleratorState()
+            state.destroy_process_group()
             if accelerator.is_main_process:
                 logger.info("✓ Accelerator cleanup complete")
         except Exception as e:
