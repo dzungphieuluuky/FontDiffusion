@@ -12,14 +12,7 @@ import os
 
 import torch
 from safetensors.torch import save_file
-from tqdm.rich import tqdm_rich as rich_tqdm
 from huggingface_hub.utils import tqdm as hf_tqdm
-from tqdm import tqdm as auto_tqdm
-
-
-# --------------------------------------------------------------------------- #
-# Hugging‑Face style progress bar
-# --------------------------------------------------------------------------- #
 
 HF_BLUE = "#1055C9"
 HF_GREEN = "#41A67E"
@@ -34,18 +27,6 @@ HF_BAR_FORMAT = (
 
 
 class HFTqdm(hf_tqdm):
-    """
-    Enhanced tqdm progress bar that mimics the Hugging‑Face download UI.
-    Optimized for Kaggle notebooks (eliminates duplicate bars).
-
-    Features
-    -------
-    * Smooth animation (100 ms updates)
-    * Dynamic colour changes (blue → green on completion)
-    * Emoji‑friendly description updates
-    * Single progress bar display on Kaggle
-    """
-
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         # Default values matching the Hugging‑Face style

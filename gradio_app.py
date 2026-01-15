@@ -1,6 +1,6 @@
 import random
 import gradio as gr
-from sample import arg_parse, sampling, load_fontdiffuer_pipeline
+from inference.sample import arg_parse, sampling, load_fontdiffuer_pipeline
 
 
 def run_fontdiffuer(
