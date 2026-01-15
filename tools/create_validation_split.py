@@ -11,11 +11,11 @@ import random
 from huggingface_hub.utils import tqdm
 import hashlib
 
-from .filename_utils import (
+from filename_utils import (
     parse_content_filename,
     parse_target_filename,
 )
-from .utilities import (
+from utilities import (
     get_hf_bar,
 )
 

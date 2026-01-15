@@ -7,7 +7,7 @@ Generate results_checkpoint.json from existing ContentImage and TargetImage fold
 import json
 from pathlib import Path
 from typing import Any
-from .filename_utils import (
+from filename_utils import (
     get_content_filename,
     get_target_filename,
     parse_content_filename,
