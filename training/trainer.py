@@ -35,7 +35,6 @@ from tools import (
     load_model_checkpoint,
     save_model_checkpoint,
     get_hf_bar,
-
 )
 
 from training.config import TrainingConfig
@@ -87,9 +86,9 @@ class FontDiffuserTrainer:
             max_grad_norm=args.max_grad_norm,
             perceptual_coefficient=args.perceptual_coefficient,
             offset_coefficient=args.offset_coefficient,
-            sc_coefficient=args.sc_coefficient
-            if hasattr(args, "sc_coefficient")
-            else 1.0,
+            sc_coefficient=(
+                args.sc_coefficient if hasattr(args, "sc_coefficient") else 1.0
+            ),
             style_transform_coefficient=getattr(
                 args, "style_transform_coefficient", 0.1
             ),
@@ -358,6 +357,43 @@ class FontDiffuserTrainer:
             samples["source_style_image"] = source_style_images
 
         return content_images, style_images
+
+    def compute_fstdiff_losses(
+        model_output: torch.Tensor,
+        true_noise: torch.Tensor,
+        transformation_features_1: torch.Tensor,  # L_{x→y}^{r1} from reference char r1
+        transformation_features_2: torch.Tensor,  # L_{x→y}^{r2} from reference char r2
+        lambda_percept: float = 0.01,
+        lambda_offset: float = 0.01,
+        lambda_consistency: float = 0.01,
+    ) -> tuple[torch.Tensor, dict]:
+        """
+        Compute the combined losses for FSTDiff training (Eq. 20).
+        """
+        # 1. Standard diffusion MSE loss (L_diff in Eq. 17)
+        diffusion_loss = F.mse_loss(model_output, true_noise, reduction='mean')
+        
+        # 2. Perceptual loss (L_percept in Eq. 17) - requires a pretrained VGG
+        # perceptual_loss = compute_perceptual_loss(...)
+        
+        # 3. Offset loss (L_offset in Eq. 18) - if using deformable convolution
+        # offset_loss = model.get_offset_norm()
+        
+        # 4. Consistency loss - KEY NOVELTY of FSTDiff (Eq. 19)
+        consistency_loss = F.mse_loss(transformation_features_1, transformation_features_2)
+        
+        # Total loss (simplified, add other terms as needed)
+        total_loss = diffusion_loss + lambda_consistency * consistency_loss
+        
+        return total_loss, {
+            'diffusion_loss': diffusion_loss.item(),
+            'consistency_loss': consistency_loss.item(),
+        }
+
+    # Usage in training loop:
+    # 1. Encode styles for TWO different reference characters (r1, r2)
+    # 2. Compute transformation features for both: L_{x→y}^{r1}, L_{x→y}^{r2}
+    # 3. Use L_{x→y}^{r1} as condition for diffusion, compute loss with L_{x→y}^{r2} for consistency
 
     def compute_losses(
         self,
@@ -696,9 +732,11 @@ class FontDiffuserTrainer:
                             "learning_rate": self.lr_scheduler.get_last_lr()[0],
                             "epoch": epoch + step / len(self.train_dataloader),
                             "global_step": self.global_step,
-                            "grad_norm": grad_norm.item()
-                            if self.accelerator.sync_gradients
-                            else 0.0,
+                            "grad_norm": (
+                                grad_norm.item()
+                                if self.accelerator.sync_gradients
+                                else 0.0
+                            ),
                         }
 
                         # Add individual losses

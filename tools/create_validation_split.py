@@ -16,6 +16,7 @@ from tools import (
     parse_target_filename,
     get_hf_bar,
 )
+
 logger = logging.getLogger("ValidationSplitCreator")
 
 
@@ -648,12 +649,14 @@ if __name__ == "__main__":
             data_root=args.data_root,
             val_split_ratio=args.val_ratio,
             random_seed=args.seed,
-            style_pattern=args.style_pattern
-            if hasattr(args, "style_pattern")
-            else "*.png",
-            original_split=args.original_split
-            if hasattr(args, "original_split")
-            else "train_original",
+            style_pattern=(
+                args.style_pattern if hasattr(args, "style_pattern") else "*.png"
+            ),
+            original_split=(
+                args.original_split
+                if hasattr(args, "original_split")
+                else "train_original"
+            ),
         )
     except Exception as e:
         logger.error(f"❌ Error: {e}")

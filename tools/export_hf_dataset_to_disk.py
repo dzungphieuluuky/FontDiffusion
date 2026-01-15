@@ -13,7 +13,12 @@ from typing import Any, Optional
 
 from datasets import Dataset, load_dataset
 from PIL import Image
-from tools import get_hf_bar, compute_file_hash, get_content_filename, get_target_filename
+from tools import (
+    get_hf_bar,
+    compute_file_hash,
+    get_content_filename,
+    get_target_filename,
+)
 
 logger = logging.getLogger("DatasetExporter")
 

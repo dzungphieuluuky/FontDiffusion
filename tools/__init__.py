@@ -4,12 +4,7 @@
 from .utilities import *  # get_hf_bar, etc.
 from .utils import *  # is_char_in_font, load_ttf, ttf2im, etc.
 from .filename_utils import *  # compute_file_hash, get_content_filename, get_target_filename
-from .create_hf_dataset import (
-    DatasetConfig,
-    DatasetBuilder,
-    create_dataset,
-    main
-)
+from .create_hf_dataset import DatasetConfig, DatasetBuilder, create_dataset, main
 from .create_validation_split import *
 from .export_hf_dataset_to_disk import *
 from .generate_metadata import *

@@ -13,8 +13,8 @@ from safetensors.torch import save_file
 from huggingface_hub import HfApi, create_repo, login
 
 from tools import (
-    load_model_checkpoint, 
-    save_model_checkpoint, 
+    load_model_checkpoint,
+    save_model_checkpoint,
 )
 
 logger = logging.getLogger("ModelsUploader")
