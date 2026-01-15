@@ -22,7 +22,7 @@ from .sample_batch import (
     save_checkpoint,
     log_to_wandb,
 )
-
+from .sample_distributed import main as sample_distributed
 __all__ = [
     # sample_optimized
     "load_fontdiffuser_pipeline",
