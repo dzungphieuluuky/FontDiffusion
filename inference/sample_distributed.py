@@ -21,25 +21,20 @@ from accelerate import Accelerator
 from accelerate.utils import gather_object
 from PIL import Image
 
-sys.path.append(str(Path(__file__).resolve().parents[1]))
-from tools.filename_utils import (
+from ..tools.filename_utils import (
     get_content_filename,
     get_target_filename,
     compute_file_hash
 )
-from tools.utilities import (
-    get_hf_bar
-)
-from tools.utils import (
-    ttf2im
-)
+from ..tools.utilities import get_hf_bar
+from ..tools.utils import ttf2im
 
-from inference.sample_optimized import (
+from .sample_optimized import (
     get_content_transform,
     get_style_transform,
     load_fontdiffuser_pipeline,
 )
-from inference.sample_batch import (
+from .sample_batch import (
     FontManager,
     QualityEvaluator,
     GenerationTracker,
@@ -50,7 +45,7 @@ from inference.sample_batch import (
     save_checkpoint,
     log_to_wandb,
 )
-from src.dpm_solver.pipeline_dpm_solver import FontDiffuserDPMPipeline
+from ..src.dpm_solver.pipeline_dpm_solver import FontDiffuserDPMPipeline
 
 logger = logging.getLogger("MultiGPUsBatchSampler")
 # Optional dependencies
