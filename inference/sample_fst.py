@@ -20,7 +20,7 @@ from src import (
     build_style_encoder,
 )
 from src.model import FontDiffuserWithFST
-from tools import (
+from tools.utils import (
     ttf2im,
     load_ttf,
     is_char_in_font,

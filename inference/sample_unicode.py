@@ -18,7 +18,7 @@ from src import (
     build_content_encoder,
     build_style_encoder,
 )
-from tools import (
+from tools.utils import (
     ttf2im,
     load_ttf,
     is_char_in_font,

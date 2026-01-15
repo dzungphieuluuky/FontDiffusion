@@ -15,9 +15,11 @@ from datasets import Dataset, Features, Image as HFImage, Value
 from PIL import Image
 from tqdm.auto import tqdm
 
-from tools import (
+from tools.utilities import (
     get_hf_bar,
-    compute_file_hash,
+)
+from tools.filename_utils import (
+    compute_file_hash
 )
 
 logger = logging.getLogger("DatasetCreator")
