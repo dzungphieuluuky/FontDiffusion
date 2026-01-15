@@ -4,14 +4,11 @@ Supports both original and FST-enhanced models.
 """
 
 import os
-import cv2
 import time
-import random
-import numpy as np
-from PIL import Image
 
 import torch
 import torchvision.transforms as transforms
+from PIL import Image
 from accelerate.utils import set_seed
 
 from src import (
@@ -60,7 +57,7 @@ def arg_parse():
         "--save_image_dir", type=str, default=None, help="The saving directory."
     )
     parser.add_argument("--device", type=str, default="cuda:0")
-    parser.add_argument("--ttf_path", type=str, default="ttf/KaiXinSongA.ttf")
+    parser.add_argument("--ttf_path", type=str, default="fonts/KaiXinSongA.ttf")
     
     # FST-specific arguments
     parser.add_argument(
@@ -236,11 +233,11 @@ def load_fontdiffuser_pipeline(args):
     model.to(args.device)
     print("Loaded the model state_dict successfully!")
 
-    # Load the training ddpm_scheduler.
+    # Load the training ddpm_scheduler
     train_scheduler = build_ddpm_scheduler(args=args)
     print("Loaded training DDPM scheduler successfully!")
 
-    # Load the DPM_Solver to generate the sample.
+    # Load the DPM_Solver to generate the sample
     pipe = FontDiffuserDPMPipeline(
         model=model,
         ddpm_train_scheduler=train_scheduler,
@@ -297,7 +294,7 @@ class FontDiffuserFSTPipeline(FontDiffuserDPMPipeline):
             t = t_continuous * self.ddpm_train_scheduler.num_train_timesteps
             
             # FST model forward
-            with torch.no_grad():
+            with torch.inference_mode():
                 outputs = self.model(
                     noisy_latents=x,
                     timestep=t,
@@ -323,7 +320,7 @@ class FontDiffuserFSTPipeline(FontDiffuserDPMPipeline):
         
         # Initialize latent
         x_T = torch.randn(
-            (batch_size, 4, dm_size[0], dm_size[1]),
+            (batch_size, 1, dm_size[0], dm_size[1]),
             device=content_images.device
         )
         
@@ -384,7 +381,7 @@ def sampling(
     
     content_image, style_image, style_source_image, content_image_pil = result
 
-    with torch.no_grad():
+    with torch.inference_mode():
         content_image = content_image.to(args.device)
         style_image = style_image.to(args.device)
         style_source_image = style_source_image.to(args.device)
