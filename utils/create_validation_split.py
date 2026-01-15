@@ -256,19 +256,19 @@ class ValidationSplitCreator:
             logger.info(f"⚠️  IMAGE LOSS BREAKDOWN:")
             logger.info(f"  Total scanned:          {expected_total:,}")
             logger.info(
-                f"  Lost to parse errors:   {lost_to_parse_error:,} ({lost_to_parse_error*100/expected_total:.2f}%)"
+                f"  Lost to parse errors:   {lost_to_parse_error:,} ({lost_to_parse_error * 100 / expected_total:.2f}%)"
             )
             logger.info(
-                f"  Lost to style mismatch: {lost_to_style_mismatch:,} ({lost_to_style_mismatch*100/expected_total:.2f}%)"
+                f"  Lost to style mismatch: {lost_to_style_mismatch:,} ({lost_to_style_mismatch * 100 / expected_total:.2f}%)"
             )
             logger.info(
-                f"  Lost to missing content:{lost_to_missing_content:,} ({lost_to_missing_content*100/expected_total:.2f}%)"
+                f"  Lost to missing content:{lost_to_missing_content:,} ({lost_to_missing_content * 100 / expected_total:.2f}%)"
             )
             logger.info(
-                f"  Total lost:             {total_lost:,} ({total_lost*100/expected_total:.2f}%)"
+                f"  Total lost:             {total_lost:,} ({total_lost * 100 / expected_total:.2f}%)"
             )
             logger.info(
-                f"  Usable for split:       {len(valid_target_files):,} ({len(valid_target_files)*100/expected_total:.2f}%)"
+                f"  Usable for split:       {len(valid_target_files):,} ({len(valid_target_files) * 100 / expected_total:.2f}%)"
             )
 
         return content_files, valid_target_files, dict(char_to_styles)
@@ -519,7 +519,9 @@ class ValidationSplitCreator:
         logger.info("=" * 60)
 
         # Step 1: Analyze data
-        content_files, target_files, char_to_styles = self.analyze_data(style_pattern=style_pattern)
+        content_files, target_files, char_to_styles = self.analyze_data(
+            style_pattern=style_pattern
+        )
 
         # Step 2: Create split scenarios
         scenarios = self.create_simple_splits(
@@ -632,14 +634,14 @@ if __name__ == "__main__":
         default="*.png",
         help="Glob pattern for style images (e.g., '*.png')",
     )
-    
+
     parser.add_argument(
         "--original_split",
         type=str,
         default="train_original",
         help="Name of the original training split directory",
     )
-    
+
     args = parser.parse_args()
 
     try:
@@ -647,8 +649,12 @@ if __name__ == "__main__":
             data_root=args.data_root,
             val_split_ratio=args.val_ratio,
             random_seed=args.seed,
-            style_pattern=args.style_pattern if hasattr(args, 'style_pattern') else "*.png",
-            original_split=args.original_split if hasattr(args, 'original_split') else "train_original",
+            style_pattern=args.style_pattern
+            if hasattr(args, "style_pattern")
+            else "*.png",
+            original_split=args.original_split
+            if hasattr(args, "original_split")
+            else "train_original",
         )
     except Exception as e:
         logger.error(f"❌ Error: {e}")

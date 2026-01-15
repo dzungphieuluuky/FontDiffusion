@@ -86,7 +86,7 @@ class HFTqdm(auto_tqdm):
         if self.total and self.n >= self.total:
             self.colour = HF_GREEN
             elapsed = time.time() - self._start_time
-            time_str = f"{elapsed:.1f}s" if elapsed < 60 else f"{elapsed/60:.1f}min"
+            time_str = f"{elapsed:.1f}s" if elapsed < 60 else f"{elapsed / 60:.1f}min"
             self.set_description(f"✓ {self._base_desc}", refresh=False)
         else:
             self.colour = HF_ORANGE
@@ -109,7 +109,7 @@ def get_hf_bar(
     desc: str = "Processing",
     total: Optional[int] = None,
     unit: str = "it",
-    disable : bool = False,
+    disable: bool = False,
     **kwargs: Any,
 ) -> HFTqdm:
     """

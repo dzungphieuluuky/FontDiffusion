@@ -4,8 +4,10 @@ Multi-GPU batch sampling and evaluation for FontDiffuser using Accelerate.
 Uses hash-based file naming, results_checkpoint.json as single source of truth,
 and supports resumable generation with proper multi-GPU distribution.
 """
+
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import argparse
@@ -22,11 +24,12 @@ from accelerate import Accelerator
 from accelerate.utils import gather_object
 from PIL import Image
 from tqdm.auto import tqdm
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from utils import (
-    compute_file_hash, 
-    get_content_filename, 
+    compute_file_hash,
+    get_content_filename,
     get_target_filename,
     get_hf_bar,
     ttf2im,

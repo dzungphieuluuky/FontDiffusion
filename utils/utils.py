@@ -20,18 +20,18 @@ def save_args_to_yaml(args: Namespace, output_file: str) -> None:
         yaml.dump(args_dict, yaml_file, default_flow_style=False)
 
 
-def save_single_image(save_dir : str, image: Image.Image) -> None:
+def save_single_image(save_dir: str, image: Image.Image) -> None:
     save_path = f"{save_dir}/out_single.png"
     image.save(save_path)
 
 
 def save_image_with_content_style(
-    save_dir: str, 
-    image: Image.Image, 
-    content_image_pil: Image.Image, 
-    content_image_path: str, 
-    style_image_path: str, 
-    resolution: int
+    save_dir: str,
+    image: Image.Image,
+    content_image_pil: Image.Image,
+    content_image_path: str,
+    style_image_path: str,
+    resolution: int,
 ) -> None:
     new_image = Image.new("RGB", (resolution * 3, resolution))
     if content_image_pil is not None:

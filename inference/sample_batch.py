@@ -22,6 +22,7 @@ from utils.utilities import (
     load_model_checkpoint,
     get_hf_bar,
 )
+
 logger = logging.getLogger("BatchSampler")
 enable_progress_bars()
 # Import evaluation metrics
@@ -628,24 +629,24 @@ def load_characters(
 def load_style_images(style_images_arg: str) -> list[tuple[str, str]]:
     """
     Load style image paths and extract style names
-    
+
     Supports:
     - Directory path: loads all images from directory
     - Glob pattern: e.g., "styles/*.png" or "styles/**/style_*.jpg"
     - Comma-separated paths: "style1.png,style2.png,/path/to/style3.png"
     - Single file path: "style.png"
-    
+
     Returns: list of (style_path, style_name) tuples
     """
     import glob
-    
+
     image_exts: set[str] = {".jpg", ".jpeg", ".png", ".bmp"}
     style_paths: list[str] = []
-    
+
     # Case 1: Directory path
     if os.path.isdir(style_images_arg):
         logger.info(f"📂 Loading style images from directory: {style_images_arg}")
-        
+
         style_paths: list[str] = [
             os.path.join(style_images_arg, f)
             for f in os.listdir(style_images_arg)
@@ -653,34 +654,37 @@ def load_style_images(style_images_arg: str) -> list[tuple[str, str]]:
         ]
         style_paths.sort()
         logger.info(f"   Found {len(style_paths)} image files")
-    
+
     # Case 2: Glob pattern (contains * or ?)
     elif "*" in style_images_arg or "?" in style_images_arg:
         logger.info(f"🔍 Loading style images using glob pattern: {style_images_arg}")
-        
+
         style_paths = glob.glob(style_images_arg, recursive=True)
-        
+
         # Filter by image extensions
         style_paths = [
-            p for p in style_paths
+            p
+            for p in style_paths
             if os.path.splitext(p)[1].lower() in image_exts and os.path.isfile(p)
         ]
-        
+
         if not style_paths:
-            raise ValueError(f"❌ No image files found matching glob pattern: {style_images_arg}")
-        
+            raise ValueError(
+                f"❌ No image files found matching glob pattern: {style_images_arg}"
+            )
+
         style_paths.sort()
         logger.info(f"   Found {len(style_paths)} matching image files")
-    
+
     # Case 3: Comma-separated paths (files or mixed)
     else:
         raw_paths: list[str] = [p.strip() for p in style_images_arg.split(",")]
         logger.info(f"📋 Loading {len(raw_paths)} specified style image(s)")
-        
+
         for path in raw_paths:
             if not path:
                 continue
-            
+
             if os.path.isfile(path):
                 if os.path.splitext(path)[1].lower() in image_exts:
                     style_paths.append(path)
@@ -688,14 +692,14 @@ def load_style_images(style_images_arg: str) -> list[tuple[str, str]]:
                     logger.warning(f"   ⚠️  Skipping unsupported file type: {path}")
             else:
                 raise ValueError(f"❌ File not found: {path}")
-    
+
     if not style_paths:
         raise ValueError("❌ No valid style images found!")
-    
+
     # Verify and extract style names
     logger.info(f"📂 Verifying {len(style_paths)} style images...")
     verified_paths: list[tuple[str, str]] = []
-    
+
     for path in get_hf_bar(
         style_paths,
         desc="✓ Verifying style images",
@@ -708,13 +712,14 @@ def load_style_images(style_images_arg: str) -> list[tuple[str, str]]:
             logger.info(f"   ✓ {style_name}: {path}")
         else:
             logger.warning(f"   ⚠️  File not found: {path}")
-    
+
     if not verified_paths:
         raise ValueError("❌ No valid style images verified!")
-    
+
     logger.info(f"✅ Successfully loaded {len(verified_paths)} style images\n")
-    
+
     return verified_paths
+
 
 def create_args_namespace(args: Namespace) -> Namespace:
     """Create args namespace for FontDiffuser pipeline"""
