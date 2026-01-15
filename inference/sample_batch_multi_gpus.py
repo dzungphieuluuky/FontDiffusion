@@ -27,7 +27,7 @@ from tqdm.auto import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from utils import (
+from tools import (
     compute_file_hash,
     get_content_filename,
     get_target_filename,
@@ -626,6 +626,12 @@ def main():
             logger.info("=" * 60)
 
         pipe = load_fontdiffuser_pipeline(pipeline_args)
+        try:
+            from xformers import enable_xformers_memory_efficient_attention
+            pipe.unet.enable_xformers_memory_efficient_attention()
+        except ImportError:
+            if accelerator.is_main_process:
+                logger.info("xformers not installed, skipping memory efficient attention")
 
         if accelerator.is_main_process:
             logger.info("✓ Pipeline loaded successfully.")

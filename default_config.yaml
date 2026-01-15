@@ -4,9 +4,9 @@ distributed_type: FSDP
 downcast_bf16: 'no'
 dynamo_config:
   dynamo_backend: inductor
-  dynamo_mode: default              # safer than max-autotune
+  dynamo_mode: default            
   dynamo_use_dynamic: true
-  dynamo_use_fullgraph: false       # very important - fullgraph often fails
+  dynamo_use_fullgraph: false      
 fsdp_config:
   fsdp_activation_checkpointing: true
   fsdp_auto_wrap_policy: TRANSFORMER_BASED_WRAP

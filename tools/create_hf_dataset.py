@@ -14,7 +14,7 @@ from typing import Any, Optional
 from datasets import Dataset, Features, Image as HFImage, Value
 from PIL import Image
 from tqdm.auto import tqdm
-from utils import (
+from tools import (
     get_hf_bar,
     compute_file_hash,
 )

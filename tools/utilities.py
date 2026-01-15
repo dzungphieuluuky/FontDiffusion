@@ -33,7 +33,7 @@ HF_BAR_FORMAT = (
 )
 
 
-class HFTqdm(auto_tqdm):
+class HFTqdm(rich_tqdm):
     """
     Enhanced tqdm progress bar that mimics the Hugging‑Face download UI.
     Optimized for Kaggle notebooks (eliminates duplicate bars).
