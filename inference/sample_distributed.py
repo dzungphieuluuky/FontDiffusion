@@ -29,12 +29,12 @@ from tools.filename_utils import (
 from tools.utilities import get_hf_bar
 from tools.utils import ttf2im
 
-from .sample_optimized import (
+from sample_optimized import (
     get_content_transform,
     get_style_transform,
     load_fontdiffuser_pipeline,
 )
-from .sample_batch import (
+from sample_batch import (
     FontManager,
     QualityEvaluator,
     GenerationTracker,
