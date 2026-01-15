@@ -26,14 +26,14 @@ from src import (
     build_content_encoder,
     build_style_encoder,
 )
-from utils import (
+from tools import (
     ttf2im,
     load_ttf,
     is_char_in_font,
     save_args_to_yaml,
 )
 
-from utils.filename_utils import (
+from tools.filename_utils import (
     get_content_filename,
     get_target_filename,
     compute_file_hash,

@@ -17,7 +17,7 @@ from argparse import Namespace, ArgumentParser
 
 from src.dpm_solver.pipeline_dpm_solver import FontDiffuserDPMPipeline
 from src.model import StyleTransformationModule
-from utils.utilities import (
+from tools.utilities import (
     save_model_checkpoint,
     load_model_checkpoint,
     get_hf_bar,
@@ -68,13 +68,13 @@ from sample_optimized import (
     get_content_transform,
     get_style_transform,
 )
-from utils.utils import (
+from tools.utils import (
     load_ttf,
     ttf2im,
     is_char_in_font,
 )
 
-from utils.filename_utils import (
+from tools.filename_utils import (
     get_content_filename,
     get_target_filename,
     compute_file_hash,
