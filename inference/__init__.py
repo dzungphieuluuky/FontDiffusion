@@ -7,7 +7,6 @@ Includes single-image, batch, and multi-GPU inference support.
 
 from .sample_optimized import (
     load_fontdiffuser_pipeline,
-    sampling,
     get_content_transform,
     get_style_transform,
 )
@@ -22,7 +21,7 @@ from .sample_batch import (
     save_checkpoint,
     log_to_wandb,
 )
-from .sample_distributed import main as sample_distributed
+from .sample_distributed import main as run_distributed_sampling
 __all__ = [
     # sample_optimized
     "load_fontdiffuser_pipeline",
@@ -39,4 +38,5 @@ __all__ = [
     "load_style_images",
     "save_checkpoint",
     "log_to_wandb",
+    "run_distributed_sampling",
 ]
