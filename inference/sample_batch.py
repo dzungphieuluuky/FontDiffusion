@@ -1160,7 +1160,7 @@ def sampling_batch_optimized(
             style_image: Image.Image = style_image_path.convert("RGB")
         style_transform: transforms.Compose = get_style_transform(args.style_image_size)
 
-        font: Any = font_manager.get_font(font_name)
+        font = font_manager.get_font(font_name)
         content_transform: transforms.Compose = get_content_transform(
             args.content_image_size
         )

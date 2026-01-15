@@ -108,7 +108,7 @@ def is_char_in_font(font_path, char):
     return False
 
 
-def load_ttf(ttf_path, fsize=128):
+def load_ttf(ttf_path, fsize=128) -> pygame.freetype.Font:
     pygame.init()
 
     font = pygame.freetype.Font(ttf_path, size=fsize)
