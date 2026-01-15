@@ -27,13 +27,13 @@ from tqdm.auto import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from tools import (
+from tools.filename_utils import (
     compute_file_hash,
     get_content_filename,
     get_target_filename,
-    get_hf_bar,
-    ttf2im,
 )
+from tools.utils import ttf2im
+from tools.utilities import get_hf_bar
 
 from sample_optimized import (
     get_content_transform,
