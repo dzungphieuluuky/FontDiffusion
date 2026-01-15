@@ -3,6 +3,8 @@ import cv2
 import yaml
 import copy
 import pygame
+from pygame import freetype
+from pygame.freetype import Font
 import numpy as np
 from PIL import Image
 from fontTools.ttLib import TTFont
