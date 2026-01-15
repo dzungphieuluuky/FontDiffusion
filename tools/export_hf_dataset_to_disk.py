@@ -13,8 +13,8 @@ from typing import Any, Optional
 
 from datasets import Dataset, load_dataset
 from PIL import Image
-from tools.utilities import get_hf_bar
-from tools.filename_utils import (
+from utilities import get_hf_bar
+from filename_utils import (
     compute_file_hash,
     get_content_filename,
     get_target_filename,
