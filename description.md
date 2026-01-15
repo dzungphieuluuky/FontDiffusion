@@ -34,7 +34,7 @@ Các module chính được triển khai bao gồm:
 
 Các file dùng để inference gồm có:
 - `sample_batch.py`: Đây là file dùng để inference trên 1 GPU.
-- `sample_batch_multi_gpus.py`: Đây là file dùng để inference phân tán trên nhiều GPU cùng lúc để tận dụng tối đa quota của Kaggle. Hiện file này đang được dùng chính vì có thể tự động inference bình thường trong trường hợp 1 GPU (Google Colab).
+- `sample_distributed.py`: Đây là file dùng để inference phân tán trên nhiều GPU cùng lúc để tận dụng tối đa quota của Kaggle. Hiện file này đang được dùng chính vì có thể tự động inference bình thường trong trường hợp 1 GPU (Google Colab).
 
 ## Cách Sử Dung Chung
 Từ file `font_diffusion.ipynb` bên dưới, chỉ cần khởi chạy các cell đầu dùng để install package và setup repository từ github, sau đó chỉ cần chạy các cell còn lại theo mong muốn là được. Notebook sẽ git clone toàn bộ repo về kho lưu trữ tạm thời trên nền tảng Cloud (Kaggle, Colab) và dùng các file trong đó để chạy.
@@ -42,7 +42,7 @@ Từ file `font_diffusion.ipynb` bên dưới, chỉ cần khởi chạy các ce
 ### Ví Dụ Sử Dung Cơ Bản:
 - Sinh dataset:
 ```python
-accelerate launch FontDiffusion/sample_batch_multi_gpus.py \
+accelerate launch FontDiffusion/sample_distributed.py \
     --characters "NomTuTao/Ds_10k_ChuNom_TuTao.txt" \
     --style_images "FontDiffusion/style_images" \
     --ckpt_dir "ckpt/" \
@@ -197,7 +197,7 @@ python FontDiffusion/export_hf_dataset_to_disk.py \
 
 **Khi git clone**: Sử dụng để train model. Cần có dataset đã chuẩn bị và checkpoint từ Phase 1 nếu cần.
 
-### 6. `sample_batch_multi_gpus.py`
+### 6. `sample_distributed.py`
 **Mục đích**: Phiên bản đa GPU của `sample_batch.py` sử dụng Accelerate để training hoặc inference phân tán để tăng tốc.
 
 **Chức năng chính**:
