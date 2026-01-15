@@ -20,15 +20,13 @@ import torchvision.transforms as transforms
 from accelerate import Accelerator
 from accelerate.utils import gather_object
 from PIL import Image
-
-from tools.filename_utils import (
+from tools import (
+    ttf2im,
+    get_hf_bar,
     compute_file_hash,
     get_content_filename,
     get_target_filename,
 )
-
-from tools.utils import ttf2im
-from tools.utilities import get_hf_bar
 
 from sample_optimized import (
     get_content_transform,
