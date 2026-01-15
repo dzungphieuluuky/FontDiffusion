@@ -60,7 +60,7 @@ except ImportError:
     WANDB_AVAILABLE: bool = False
 
 # Import FontDiffuser modules
-from sample_optimized import (
+from inference.sample_optimized import (
     load_fontdiffuser_pipeline,
     get_content_transform,
     get_style_transform,
