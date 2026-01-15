@@ -683,11 +683,8 @@ def main():
             logger.info("Cleaning up resources...")
         try:                        
             # 3. Destroy the process group directly from the accelerator's state
-            if accelerator.state.initialized:
-                accelerator.state.destroy_process_group()
-
-            if accelerator.is_main_process:
-                logger.info("✓ Accelerator cleanup complete")
+            accelerator.state.destroy_process_group()
+            logger.info("✓ Accelerator cleanup complete")
             sys.exit(0)
 
         except Exception as e:
