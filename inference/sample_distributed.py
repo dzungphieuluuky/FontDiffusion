@@ -681,13 +681,7 @@ def main():
     finally:
         if accelerator.is_main_process:
             logger.info("Cleaning up resources...")
-        try:
-            # 1. Finalize trackers (WandB, TensorBoard) and logging
-            accelerator.end_training()
-            
-            # 2. Release object references and clear GPU cache
-            accelerator.free_memory()
-            
+        try:                        
             # 3. Destroy the process group directly from the accelerator's state
             if accelerator.state.initialized:
                 accelerator.state.destroy_process_group()
