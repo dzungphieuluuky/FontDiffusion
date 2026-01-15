@@ -679,18 +679,23 @@ def main():
         sys.exit(1)
 
     finally:
-        # ✅ PROPER CLEANUP: Let Accelerator handle process group cleanup
         if accelerator.is_main_process:
             logger.info("Cleaning up resources...")
-        
         try:
-            # Accelerator's end_training() properly handles all cleanup
+            # 1. Finalize trackers (WandB, TensorBoard) and logging
             accelerator.end_training()
+            
+            # 2. Release object references and clear GPU cache
             accelerator.free_memory()
-            state = AcceleratorState()
-            state.destroy_process_group()
+            
+            # 3. Destroy the process group directly from the accelerator's state
+            if accelerator.state.initialized:
+                accelerator.state.destroy_process_group()
+
             if accelerator.is_main_process:
                 logger.info("✓ Accelerator cleanup complete")
+            sys.exit(0)
+
         except Exception as e:
             logger.warning(f"Error during Accelerator cleanup: {e}")
 
