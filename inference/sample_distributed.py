@@ -21,6 +21,7 @@ from accelerate import Accelerator
 from accelerate.utils import gather_object
 from PIL import Image
 
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 from tools.filename_utils import (
     get_content_filename,
     get_target_filename,
@@ -33,12 +34,12 @@ from tools.utils import (
     ttf2im
 )
 
-from sample_optimized import (
+from inference.sample_optimized import (
     get_content_transform,
     get_style_transform,
     load_fontdiffuser_pipeline,
 )
-from sample_batch import (
+from inference.sample_batch import (
     FontManager,
     QualityEvaluator,
     GenerationTracker,
