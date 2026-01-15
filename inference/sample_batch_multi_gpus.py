@@ -14,7 +14,6 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any, dict, list, Optional, set, tuple, Union
 
 import numpy as np
 import torch
@@ -183,10 +182,10 @@ def sampling_batch_with_accelerator(
     args: argparse.Namespace,
     pipe: FontDiffuserDPMPipeline,
     characters: list[str],
-    style_image_path: Union[str, Image.Image],
+    style_image_path: str | Image.Image,
     font_manager: FontManager,
     font_name: str,
-) -> tuple[Optional[list[Image.Image]], Optional[list[str]], Optional[float]]:
+) -> tuple[list[Image.Image] | None, list[str] | None, float | None]:
     """Batch sampling for multiple characters.
 
     Args:
@@ -284,7 +283,7 @@ def batch_generate_images_with_accelerator(
     font_manager: FontManager,
     generation_tracker: GenerationTracker,
     accelerator: Accelerator,
-) -> dict[str, Any]:
+) -> dict[str]:
     """Main batch generation with multi-GPU support."""
 
     # Generate content images
@@ -471,13 +470,13 @@ def batch_generate_images_with_accelerator(
 
 
 def evaluate_results_with_accelerator(
-    results: dict[str, Any],
+    results: dict[str],
     evaluator: QualityEvaluator,
     output_dir: str,
-    ground_truth_dir: Optional[str] = None,
+    ground_truth_dir: str | None,
     compute_fid: bool = False,
-    accelerator: Optional[Accelerator] = None,
-) -> dict[str, Any]:
+    accelerator: Accelerator | None = None,
+) -> dict[str]:
     """Evaluate generated images on main process."""
 
     if not accelerator or not accelerator.is_main_process:

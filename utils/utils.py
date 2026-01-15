@@ -6,12 +6,12 @@ import pygame
 import numpy as np
 from PIL import Image
 from fontTools.ttLib import TTFont
-
+from argparse import Namespace
 import torch
 import torchvision.transforms as transforms
 
 
-def save_args_to_yaml(args, output_file):
+def save_args_to_yaml(args: Namespace, output_file: str) -> None:
     # Convert args namespace to a dictionary
     args_dict = vars(args)
 
@@ -20,14 +20,19 @@ def save_args_to_yaml(args, output_file):
         yaml.dump(args_dict, yaml_file, default_flow_style=False)
 
 
-def save_single_image(save_dir, image):
+def save_single_image(save_dir : str, image: Image.Image) -> None:
     save_path = f"{save_dir}/out_single.png"
     image.save(save_path)
 
 
 def save_image_with_content_style(
-    save_dir, image, content_image_pil, content_image_path, style_image_path, resolution
-):
+    save_dir: str, 
+    image: Image.Image, 
+    content_image_pil: Image.Image, 
+    content_image_path: str, 
+    style_image_path: str, 
+    resolution: int
+) -> None:
     new_image = Image.new("RGB", (resolution * 3, resolution))
     if content_image_pil is not None:
         content_image = content_image_pil

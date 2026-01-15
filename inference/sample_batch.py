@@ -5,7 +5,6 @@ import json
 import hashlib
 import argparse
 from pathlib import Path
-from typing import list, dict, tuple, Optional, Any, set, Union
 from huggingface_hub.utils import tqdm, enable_progress_bars
 import logging
 
@@ -91,7 +90,7 @@ class FontManager:
         Args:
             ttf_path: Path to a single font file or directory containing fonts
         """
-        self.fonts: dict[str, dict[str, Any]] = {}
+        self.fonts: dict[str, dict[str]] = {}
         self.font_paths: list[str] = []
         self._load_fonts(ttf_path)
 
@@ -176,7 +175,7 @@ class FontManager:
         """Get list of loaded font names"""
         return list(self.fonts.keys())
 
-    def get_font(self, font_name: str) -> Any:
+    def get_font(self, font_name: str):
         """Get font object by name"""
         if font_name not in self.fonts:
             raise ValueError(f"Font not found: {font_name}")
@@ -206,7 +205,7 @@ class GenerationTracker:
     Uses hash-based checking for fast lookups
     """
 
-    def __init__(self, checkpoint_path: Optional[str] = None):
+    def __init__(self, checkpoint_path: str | None):
         """
         Initialize generation tracker
 
@@ -214,7 +213,7 @@ class GenerationTracker:
             checkpoint_path: Path to results_checkpoint.json file
         """
         self.generated_hashes: set[str] = set()
-        self.generations: list[dict[str, Any]] = []
+        self.generations: list[dict[str, str]] = []
 
         if checkpoint_path and os.path.exists(checkpoint_path):
             self._load_from_checkpoint(checkpoint_path)
@@ -229,7 +228,7 @@ class GenerationTracker:
 
             # ✅ Track duplicates
             seen_hashes: set[str] = set()
-            unique_generations: list[dict[str, Any]] = []
+            unique_generations: list[dict[str, str]] = []
             duplicate_count: int = 0
 
             # Build hash set for fast lookup and deduplicate
@@ -284,7 +283,7 @@ class GenerationTracker:
         target_hash = compute_file_hash(char, style, font)
         self.generated_hashes.add(target_hash)
 
-    def add_generation(self, generation: dict[str, Any]) -> None:
+    def add_generation(self, generation: dict[str, str]) -> None:
         """Add a generation record"""
         self.generations.append(generation)
 
@@ -303,10 +302,10 @@ class QualityEvaluator:
 
         # Initialize LPIPS
         if LPIPS_AVAILABLE:
-            self.lpips_fn: Optional[Any] = lpips.LPIPS(net="alex").to(device)
+            self.lpips_fn: lpips.LPIPS = lpips.LPIPS(net="alex").to(device)
             self.lpips_fn.eval()
         else:
-            self.lpips_fn: Optional[Any] = None
+            self.lpips_fn = None
 
         self.transform_to_tensor: transforms.ToTensor = transforms.ToTensor()
 
@@ -556,7 +555,7 @@ def parse_args() -> Namespace:
 
 
 def load_characters(
-    characters_arg: str, start_line: int = 1, end_line: Optional[int] = None
+    characters_arg: str, start_line: int = 1, end_line: int = None
 ) -> list[str]:
     """Load characters from file or comma-separated string with line range support"""
     chars: list[str] = []
@@ -776,7 +775,7 @@ def create_args_namespace(args: Namespace) -> Namespace:
     return default_args
 
 
-def save_checkpoint(results: dict[str, Any], output_dir: str) -> None:
+def save_checkpoint(results: dict[str, str], output_dir: str) -> None:
     """
     ✅ Save results_checkpoint.json (single source of truth)
     """
@@ -890,7 +889,7 @@ def batch_generate_images(
     evaluator: QualityEvaluator,
     font_manager: FontManager,
     generation_tracker: GenerationTracker,
-) -> dict[str, Any]:
+) -> dict[str, str]:
     """
     ✅ Main batch generation with hash-based file naming
     """
@@ -1133,11 +1132,11 @@ def sampling_batch_optimized(
     args: Namespace,
     pipe: FontDiffuserDPMPipeline,
     characters: list[str],
-    style_image_path: Union[str, Image.Image],
+    style_image_path: str | Image.Image,
     font_manager: FontManager,
     font_name: str,
-    enable_style_transform: bool = False,  # ✅ ADD THIS PARAMETER
-) -> tuple[Optional[list[Image.Image]], Optional[list[str]], Optional[float]]:
+    enable_style_transform: bool = False,
+) -> tuple[list[Image.Image] | None, list[str] | None, float | None]:
     """Batch sampling for multiple characters with specific font"""
 
     # Get available characters for this font
@@ -1208,7 +1207,6 @@ def sampling_batch_optimized(
                 batch_content: torch.Tensor = content_batch[i : i + batch_size]
                 batch_style: torch.Tensor = style_batch[i : i + batch_size]
 
-                # ✅ PASS STYLE TRANSFORM FLAG TO PIPELINE
                 images: list[Image.Image] = pipe.generate(
                     content_images=batch_content,
                     style_images=batch_style,
@@ -1223,7 +1221,7 @@ def sampling_batch_optimized(
                     skip_type=args.skip_type,
                     method=args.method,
                     correcting_x0_fn=args.correcting_x0_fn,
-                    enable_style_transform=enable_style_transform,  # ✅ ADD THIS
+                    enable_style_transform=enable_style_transform,
                 )
 
                 all_images.extend(images)
@@ -1293,11 +1291,11 @@ def _print_generation_summary(
 
 
 def evaluate_results(
-    results: dict[str, Any],
+    results: dict[str, str],
     evaluator: QualityEvaluator,
-    ground_truth_dir: Optional[str] = None,
+    ground_truth_dir: str = None,
     compute_fid: bool = False,
-) -> dict[str, Any]:
+) -> dict[str, str]:
     """Evaluate generated images against ground truth"""
 
     if not ground_truth_dir or not os.path.exists(ground_truth_dir):
@@ -1435,7 +1433,7 @@ def evaluate_results(
     return results
 
 
-def log_to_wandb(results: dict[str, Any], args: Namespace) -> None:
+def log_to_wandb(results: dict[str, str], args: Namespace) -> None:
     """Log results to Weights & Biases"""
 
     if not WANDB_AVAILABLE:
@@ -1600,7 +1598,7 @@ def log_to_wandb(results: dict[str, Any], args: Namespace) -> None:
 def main() -> None:
     """Main function"""
     args: Namespace = parse_args()
-    results: dict[str, Any] = {}
+    results: dict[str, str] = {}
 
     logger.info("=" * 60)
     logger.info("FONTDIFFUSER SYNTHESIS DATA GENERATION MAGIC")
@@ -1672,7 +1670,7 @@ def main() -> None:
         evaluator: QualityEvaluator = QualityEvaluator(device=args.device)
 
         # Generate images
-        results: dict[str, Any] = batch_generate_images(
+        results: dict[str, str] = batch_generate_images(
             pipe,
             characters,
             style_paths_with_names,
@@ -1697,7 +1695,7 @@ def main() -> None:
             log_to_wandb(results, args)
 
         logger.info("=" * 60)
-        logger.info("✅ GENERATION COMPLETE!")
+        logger.info(" Generation done!")
         logger.info("=" * 60)
         logger.info(f"Output structure:")
         logger.info(f"  {args.output_dir}/")
@@ -1709,7 +1707,7 @@ def main() -> None:
         logger.info(f"    │   │   ├── U+XXXX_char_style0_hash.png")
         logger.info(f"    │   │   └── ...")
         logger.info(f"    │   └── ...")
-        logger.info(f"    └── results_checkpoint.json ✅ (single source of truth)")
+        logger.info(f"    └── results_checkpoint.json")
 
     except KeyboardInterrupt:
         logger.info("\n\n⚠ Generation interrupted by user!")

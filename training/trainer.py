@@ -3,7 +3,6 @@ import math
 import os
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Optional, dict, list, tuple, Any
 import traceback
 
 from tifffile import logger
@@ -315,7 +314,7 @@ class FontDiffuserTrainer:
         content_images: torch.tensor,
         style_images: torch.tensor,
         drop_prob: float,
-        samples: Optional[dict[str, torch.tensor]] = None,
+        samples: dict[str, torch.tensor] | None,
     ) -> tuple[torch.tensor, torch.tensor]:
         """Apply classifier-free guidance by masking some samples.
         
