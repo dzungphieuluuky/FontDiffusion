@@ -21,7 +21,7 @@ from accelerate import Accelerator
 from accelerate.utils import gather_object
 from PIL import Image
 
-from ..tools import (
+from tools import (
     ttf2im,
     get_hf_bar,
     compute_file_hash,
