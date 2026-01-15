@@ -18,8 +18,9 @@ from accelerate.logging import get_logger
 from accelerate.utils import set_seed
 from diffusers.optimization import get_scheduler
 
-from dataset.font_dataset import FontDataset
-from dataset.collate_fn import CollateFN
+from dataset.font_dataset_fst import FontDataset as FontDatasetFST
+from dataset.collate_fn_fst import CollateFN as CollateFNFST
+
 from configs.fontdiffuser import get_parser
 from src import (
     FontDiffuserModel,
@@ -60,8 +61,8 @@ def get_args():
     parser.add_argument(
         "--fst_num_queries",
         type=int,
-        default=256,
-        help="Number of learnable queries in FST"
+        default=220,
+        help="Number of learnable queries in FST (default 220 for 256 total)"
     )
     parser.add_argument(
         "--fst_query_dim",
@@ -76,10 +77,10 @@ def get_args():
         help="Number of multi-scale features in MSSE"
     )
     parser.add_argument(
-        "--style_source_ratio",
+        "--style_source_same_prob",
         type=float,
         default=0.5,
-        help="Ratio of samples that use different source/target style images"
+        help="Probability that source and target style use same font style"
     )
     parser.add_argument(
         "--freeze_original_encoders",
@@ -129,9 +130,9 @@ def build_fontdiffuser_with_fst(args):
     # Optionally freeze original encoders
     if args.freeze_original_encoders:
         logger.info("Freezing original style and content encoders")
-        for param in model.config.style_encoder.parameters():
+        for param in model.style_encoder.parameters():
             param.requires_grad = False
-        for param in model.config.content_encoder.parameters():
+        for param in model.content_encoder.parameters():
             param.requires_grad = False
     
     return model
@@ -225,17 +226,22 @@ def main():
             transforms.Normalize([0.5], [0.5]),
         ]
     )
-    train_font_dataset = FontDataset(
+    
+    # Create dataset with FST support
+    train_font_dataset = FontDatasetFST(
         args=args,
         phase="train",
         transforms=[content_transforms, style_transforms, target_transforms],
         scr=args.phase_2,
+        use_fst=args.use_fst,
+        style_source_same_prob=args.style_source_same_prob
     )
+    
     train_dataloader = torch.utils.data.DataLoader(
         train_font_dataset,
         shuffle=True,
         batch_size=args.train_batch_size,
-        collate_fn=CollateFN(),
+        collate_fn=CollateFNFST(verbose=False),
     )
 
     # Build optimizer and learning rate
@@ -253,9 +259,13 @@ def main():
         trainable_params = [
             p for p in model.parameters() if p.requires_grad
         ]
-        logger.info(f"Training {len(trainable_params)} parameter groups (FST only)")
+        num_trainable = sum(p.numel() for p in trainable_params)
+        logger.info(f"Training {len(trainable_params)} parameter groups "
+                   f"({num_trainable:,} parameters, FST only)")
     else:
         trainable_params = model.parameters()
+        num_trainable = sum(p.numel() for p in trainable_params if p.requires_grad)
+        logger.info(f"Training all parameters ({num_trainable:,} total)")
     
     optimizer = torch.optim.AdamW(
         trainable_params,
@@ -335,30 +345,20 @@ def main():
                     if mask_value == 1:
                         content_images[i, :, :, :] = 1
                         style_images[i, :, :, :] = 1
+                        if args.use_fst and "style_source_image" in samples:
+                            samples["style_source_image"][i, :, :, :] = 1
 
                 # Forward pass - different for FST model
                 if args.use_fst:
-                    # For FST, we need style source and target images
-                    # Option 1: Use same style image for both (simpler)
-                    # Option 2: Use different reference characters (more complex)
-                    
-                    # Here we use the same style image for simplicity
-                    # In practice, you might want to sample different reference chars
-                    style_source_images = style_images.clone()
-                    style_target_images = style_images
-                    
-                    # Randomly use different source images for diversity
-                    if torch.rand(1).item() < args.style_source_ratio:
-                        # Shuffle to create different source-target pairs
-                        perm = torch.randperm(bsz)
-                        style_source_images = style_images[perm]
+                    # Get style source images from the batch
+                    style_source_images = samples.get("style_source_image", style_images)
                     
                     outputs = model(
                         noisy_latents=noisy_target_images,
                         timestep=timesteps,
                         content_img=content_images,
                         style_source_img=style_source_images,
-                        style_target_img=style_target_images,
+                        style_target_img=style_images,
                         content_encoder_downsample_size=args.content_encoder_downsample_size,
                         return_dict=True,
                     )
@@ -447,45 +447,49 @@ def main():
                         os.makedirs(save_dir, exist_ok=True)
                         
                         if args.use_fst:
-                            # Save FST-enhanced model
+                            # Save FST-enhanced model components
+                            # Unwrap model if using accelerator
+                            unwrapped_model = accelerator.unwrap_model(model)
+                            
                             torch.save(
-                                model.diffusion_unet.state_dict(), 
+                                unwrapped_model.diffusion_unet.state_dict(), 
                                 f"{save_dir}/unet.pth"
                             )
                             torch.save(
-                                model.style_encoder.state_dict(),
+                                unwrapped_model.style_encoder.state_dict(),
                                 f"{save_dir}/style_encoder.pth",
                             )
                             torch.save(
-                                model.content_encoder.state_dict(),
+                                unwrapped_model.content_encoder.state_dict(),
                                 f"{save_dir}/content_encoder.pth",
                             )
                             # Save FST-specific modules
                             torch.save(
-                                model.mss_encoder.state_dict(),
+                                unwrapped_model.mss_encoder.state_dict(),
                                 f"{save_dir}/mss_encoder.pth",
                             )
                             torch.save(
-                                model.fst_module.state_dict(),
+                                unwrapped_model.fst_module.state_dict(),
                                 f"{save_dir}/fst_module.pth",
                             )
                             torch.save(
-                                model.fst_projection.state_dict(),
+                                unwrapped_model.fst_projection.state_dict(),
                                 f"{save_dir}/fst_projection.pth",
                             )
-                            torch.save(model, f"{save_dir}/total_model_fst.pth")
+                            torch.save(unwrapped_model, f"{save_dir}/total_model_fst.pth")
                         else:
                             # Save original model
-                            torch.save(model.unet.state_dict(), f"{save_dir}/unet.pth")
+                            unwrapped_model = accelerator.unwrap_model(model)
+                            torch.save(unwrapped_model.unet.state_dict(), f"{save_dir}/unet.pth")
                             torch.save(
-                                model.style_encoder.state_dict(),
+                                unwrapped_model.style_encoder.state_dict(),
                                 f"{save_dir}/style_encoder.pth",
                             )
                             torch.save(
-                                model.content_encoder.state_dict(),
+                                unwrapped_model.content_encoder.state_dict(),
                                 f"{save_dir}/content_encoder.pth",
                             )
-                            torch.save(model, f"{save_dir}/total_model.pth")
+                            torch.save(unwrapped_model, f"{save_dir}/total_model.pth")
                         
                         logging.info(
                             f"[{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}] "
@@ -519,9 +523,10 @@ if __name__ == "__main__":
 Example training command for FontDiffuserWithFST:
 
 # Phase 1: Train with FST modules
-python train_fst.py \
+accelerate launch train_fst.py \
     --use_fst \
     --experience_name="fontdiffuser_fst_phase1" \
+    --data_root="my_dataset" \
     --train_batch_size=4 \
     --gradient_accumulation_steps=4 \
     --max_train_steps=100000 \
@@ -529,16 +534,17 @@ python train_fst.py \
     --ckpt_interval=5000 \
     --log_interval=100 \
     --output_dir="outputs/fst_training" \
-    --style_source_ratio=0.5 \
+    --style_source_same_prob=0.5 \
     --mixed_precision="fp16"
 
 # Phase 2: Fine-tune with SCR loss
-python train_fst.py \
+accelerate launch train_fst.py \
     --use_fst \
     --phase_2 \
     --phase_1_ckpt_dir="outputs/fst_training/global_step_100000" \
-    --scr_ckpt_path="ckpt/scr.pth" \
+    --scr_ckpt_path="ckpt/scr_210000.pth" \
     --experience_name="fontdiffuser_fst_phase2" \
+    --data_root="my_dataset" \
     --train_batch_size=4 \
     --max_train_steps=50000 \
     --learning_rate=1e-5 \
@@ -546,8 +552,9 @@ python train_fst.py \
     --freeze_original_encoders
 
 # Train original model (without FST)
-python train_fst.py \
+accelerate launch train_fst.py \
     --experience_name="fontdiffuser_baseline" \
+    --data_root="my_dataset" \
     --train_batch_size=4 \
     --max_train_steps=100000 \
     --output_dir="outputs/baseline_training"
