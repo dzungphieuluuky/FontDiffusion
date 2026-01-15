@@ -100,8 +100,8 @@ def generate_content_images_with_accelerator(
     Returns:
         Dictionary mapping character to image path
     """
-    output_dir = Path(output_dir)
-    content_dir = output_dir / "ContentImage"
+    output_dir: Path = Path(output_dir)
+    content_dir: Path = output_dir / "ContentImage"
 
     # Main process creates directory
     if accelerator.is_main_process:
@@ -281,7 +281,7 @@ def batch_generate_images_with_accelerator(
     font_manager: FontManager,
     generation_tracker: GenerationTracker,
     accelerator: Accelerator,
-) -> dict[str]:
+) -> dict[str, list[str] | dict[str, dict[str, float]]]:
     """Main batch generation with multi-GPU support."""
 
     # Generate content images
@@ -468,13 +468,13 @@ def batch_generate_images_with_accelerator(
 
 
 def evaluate_results_with_accelerator(
-    results: dict[str],
+    results: dict[str, list[dict[str, str]]],
     evaluator: QualityEvaluator,
     output_dir: str,
     ground_truth_dir: str | None,
     compute_fid: bool = False,
     accelerator: Accelerator | None = None,
-) -> dict[str]:
+) -> dict[str, dict[str, dict[str, float]]]:
     """Evaluate generated images on main process."""
 
     if not accelerator or not accelerator.is_main_process:
@@ -621,16 +621,6 @@ def main():
             logger.info("=" * 60)
 
         pipe = load_fontdiffuser_pipeline(pipeline_args)
-        try:
-            from xformers import enable_xformers_memory_efficient_attention
-
-            pipe.unet.enable_xformers_memory_efficient_attention()
-        except ImportError:
-            if accelerator.is_main_process:
-                logger.info(
-                    "xformers not installed, skipping memory efficient attention"
-                )
-
         if accelerator.is_main_process:
             logger.info("✓ Pipeline loaded successfully.")
 
