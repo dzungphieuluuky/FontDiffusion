@@ -441,8 +441,8 @@ def sampling_batch(
         batch_size: int = getattr(args, "batch_size", 1)
 
         for i in range(0, len(content_batch), batch_size):
-            batch_content: torch.Tensor = content_batch[i : i + batch_size]
-            batch_style: torch.Tensor = style_batch[i : i + batch_size]
+            batch_content: torch.tensor = content_batch[i : i + batch_size]
+            batch_style: torch.tensor = style_batch[i : i + batch_size]
 
             images: list[Image.Image] = pipe.generate(
                 content_images=batch_content,
@@ -493,8 +493,8 @@ def image_process_batch(
     font_name: str,
     style_image_path: str,
 ) -> tuple[
-    Optional[torch.Tensor],
-    Optional[torch.Tensor],
+    Optional[torch.tensor],
+    Optional[torch.tensor],
     Optional[list[Image.Image]],
     Optional[list[str]],
 ]:
@@ -519,7 +519,7 @@ def image_process_batch(
         return None, None, None, None
 
     # Generate content images
-    content_images: list[torch.Tensor] = []
+    content_images: list[torch.tensor] = []
     content_images_pil: list[Image.Image] = []
 
     for char in available_chars:
@@ -537,8 +537,8 @@ def image_process_batch(
         return None, None, None, None
 
     # Stack into batch
-    content_batch: torch.Tensor = torch.stack(content_images)
-    style_batch: torch.Tensor = style_transform(style_image)[None, :].repeat(
+    content_batch: torch.tensor = torch.stack(content_images)
+    style_batch: torch.tensor = style_transform(style_image)[None, :].repeat(
         len(content_images), 1, 1, 1
     )
 
