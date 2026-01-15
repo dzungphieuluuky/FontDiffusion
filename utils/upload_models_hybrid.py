@@ -17,8 +17,7 @@ from safetensors.torch import save_file
 from huggingface_hub import HfApi, create_repo, login
 from tqdm.auto import tqdm
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from utilities import load_model_checkpoint, save_model_checkpoint
+from utils import load_model_checkpoint, save_model_checkpoint
 
 logger = logging.getLogger("ModelsUploader")
 
