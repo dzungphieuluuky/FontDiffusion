@@ -129,9 +129,9 @@ def build_fontdiffuser_with_fst(args):
     # Optionally freeze original encoders
     if args.freeze_original_encoders:
         logger.info("Freezing original style and content encoders")
-        for param in model.style_encoder.parameters():
+        for param in model.config.style_encoder.parameters():
             param.requires_grad = False
-        for param in model.content_encoder.parameters():
+        for param in model.config.content_encoder.parameters():
             param.requires_grad = False
     
     return model
