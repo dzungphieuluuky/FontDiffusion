@@ -18,7 +18,7 @@ import torch
 import torchvision.transforms as transforms
 from accelerate.utils import set_seed
 
-from src import (
+from ..src import (
     FontDiffuserDPMPipeline,
     FontDiffuserModelDPM,
     build_ddpm_scheduler,
@@ -26,14 +26,14 @@ from src import (
     build_content_encoder,
     build_style_encoder,
 )
-from tools.utils import (
+from ..tools.utils import (
     ttf2im,
     load_ttf,
     is_char_in_font,
     save_args_to_yaml,
 )
 
-from tools.filename_utils import (
+from ..tools.filename_utils import (
     get_content_filename,
     get_target_filename,
     compute_file_hash,

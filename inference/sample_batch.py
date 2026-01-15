@@ -15,21 +15,21 @@ from PIL import Image
 import torchvision.transforms as transforms
 from argparse import Namespace, ArgumentParser
 
-from src.dpm_solver.pipeline_dpm_solver import FontDiffuserDPMPipeline
-from tools.utilities import get_hf_bar
-from tools.utils import (
+from ..src.dpm_solver.pipeline_dpm_solver import FontDiffuserDPMPipeline
+from ..tools.utilities import get_hf_bar
+from ..tools.utils import (
     load_ttf,
     ttf2im,
     is_char_in_font,
 )
-from tools.filename_utils import (
+from ..tools.filename_utils import (
     get_content_filename,
     get_target_filename,
     compute_file_hash,
 )
 
 # Import from same package (inference/)
-from sample_optimized import (
+from .sample_optimized import (
     load_fontdiffuser_pipeline,
     get_content_transform,
     get_style_transform,
