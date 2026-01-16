@@ -7,7 +7,14 @@ import shutil
 import sys
 import time
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import (
+    Any,
+    Iterable,
+    Optional,
+    TypeVar,
+    Generic,
+    Iterator
+)
 import os
 
 import torch
@@ -30,11 +37,12 @@ HF_BAR_FORMAT = (
     "[{elapsed}<{remaining}, {rate_fmt}]"
 )
 
+T = TypeVar("T")
 
-class HFTqdm(hf_tqdm):
+class HFTqdm(hf_tqdm, Generic[T]):
     def __init__(
         self,
-        iterable: Optional[Iterable[Any]] = None,
+        iterable: Optional[Iterable[T]] = None,
         desc: str = "Processing",
         total: Optional[int] = None,
         unit: str = "iteration",
@@ -54,6 +62,9 @@ class HFTqdm(hf_tqdm):
         self._base_desc = desc
         self._start_time = time.time()
         self._warning_shown = False
+
+    def __iter__(self) -> Iterator[T]:
+        return super().__iter__()  # type: ignore[return-value]
 
     def update(self, n: int = 1) -> None:  # type: ignore[override]
         super().update(n)

@@ -128,7 +128,7 @@ class DatasetBuilder:
 
         skipped: int = 0
 
-        for gen in tqdm(generations, desc="Loading image pairs", unit="pair"):
+        for gen in HFTqdm(generations, desc="Loading image pairs", unit="pair"):
             char: str = gen.get("character", "")
             style: str = gen.get("style", "")
             font: str = gen.get("font", "unknown")

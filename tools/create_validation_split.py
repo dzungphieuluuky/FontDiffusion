@@ -458,25 +458,25 @@ class ValidationSplitCreator:
 
         try:
             with open(original_checkpoint_path, "r", encoding="utf-8") as f:
-                original_data = json.load(f)
+                original_data: dict[str, list[dict[str, str]]] = json.load(f)
         except Exception as e:
             logger.info(f"    ⚠️  Error loading checkpoint: {e}")
             return
 
         # Filter generations
-        original_generations = original_data.get("generations", [])
-        filtered_generations = []
+        original_generations: list[dict[str, str]] = original_data.get("generations", [])
+        filtered_generations: list[dict[str, str]] = []
 
         for gen in HFTqdm(
             original_generations,
             desc="    Filtering",
-            ncols=80,
+            ncols=120,
             unit="gen",
             leave=False,
             bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
         ):
-            char = gen.get("character")
-            style = gen.get("style")
+            char: str = gen.get("character")
+            style: str = gen.get("style")
 
             # Include only if:
             # 1. Character is in this split
