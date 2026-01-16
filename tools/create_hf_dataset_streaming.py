@@ -417,6 +417,7 @@ def main():
     parser.add_argument(
         "--use-batched",
         action="store_true",
+        default=False,
         help="Use batched mode instead of streaming",
     )
 
