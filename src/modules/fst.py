@@ -87,9 +87,9 @@ class FontStyleTransformationModule(nn.Module):
 
     def forward(
         self,
-        source_features: list[torch.tensor],  # f_{x_r}^s = [f^{s,1}, ..., f^{s,n_s}]
-        target_features: list[torch.tensor],  # f_{y_r}^s = [f^{s,1}, ..., f^{s,n_s}]
-    ) -> torch.tensor:
+        source_features: list[torch.Tensor],  # f_{x_r}^s = [f^{s,1}, ..., f^{s,n_s}]
+        target_features: list[torch.Tensor],  # f_{y_r}^s = [f^{s,1}, ..., f^{s,n_s}]
+    ) -> torch.Tensor:
         """
         Computes the font style transformation representation L_{x→y}^r.
 
@@ -176,7 +176,7 @@ class TransformerBlock(nn.Module):
         )
 
     def forward(
-        self, x: torch.tensor, context: torch.tensor = None, value: torch.tensor = None
+        self, x: torch.Tensor, context: torch.Tensor = None, value: torch.Tensor = None
     ):
         # Self-attention or cross-attention
         if self.is_cross_attention and context is not None:
@@ -201,7 +201,7 @@ class SelfAttention(nn.Module):
         self.to_qkv = nn.Linear(dim, dim * 3)
         self.proj = nn.Linear(dim, dim)
 
-    def forward(self, x: torch.tensor) -> torch.tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, N, C = x.shape
         qkv = (
             self.to_qkv(x)
@@ -232,8 +232,8 @@ class CrossAttention(nn.Module):
         self.proj = nn.Linear(dim, dim)
 
     def forward(
-        self, x: torch.tensor, context: torch.tensor, value: torch.tensor = None
-    ) -> torch.tensor:
+        self, x: torch.Tensor, context: torch.Tensor, value: torch.Tensor = None
+    ) -> torch.Tensor:
         if value is None:
             value = context
 

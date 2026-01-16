@@ -18,9 +18,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import torchvision.transforms as transforms
 from accelerate import Accelerator
-from accelerate.state import AcceleratorState
 from accelerate.utils import gather_object
 from PIL import Image
 

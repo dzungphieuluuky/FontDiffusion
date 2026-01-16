@@ -2,10 +2,8 @@ import os
 import sys
 import time
 import json
-import hashlib
 import argparse
-from pathlib import Path
-from huggingface_hub.utils import tqdm, enable_progress_bars
+from huggingface_hub.utils import enable_progress_bars
 import logging
 
 import numpy as np
@@ -37,6 +35,7 @@ from inference.sample_optimized import (
 
 logger = logging.getLogger("BatchSampler")
 enable_progress_bars()
+
 # Import evaluation metrics
 try:
     import lpips
@@ -308,10 +307,10 @@ class QualityEvaluator:
 
         try:
             # Convert to tensors [-1, 1]
-            img1_tensor: torch.tensor = (
+            img1_tensor: torch.Tensor = (
                 self.transform_to_tensor(img1).unsqueeze(0).to(self.device) * 2 - 1
             )
-            img2_tensor: torch.tensor = (
+            img2_tensor: torch.Tensor = (
                 self.transform_to_tensor(img2).unsqueeze(0).to(self.device) * 2 - 1
             )
 
@@ -1157,7 +1156,7 @@ def sampling_batch_optimized(
         )
 
         # Generate content images
-        content_images: list[torch.tensor] = []
+        content_images: list[torch.Tensor] = []
         content_images_pil: list[Image.Image] = []
 
         for char in HFTqdm(
@@ -1177,8 +1176,8 @@ def sampling_batch_optimized(
             return None, None, None
 
         # Stack into batch
-        content_batch: torch.tensor = torch.stack(content_images)
-        style_batch: torch.tensor = style_transform(style_image)[None, :].repeat(
+        content_batch: torch.Tensor = torch.stack(content_images)
+        style_batch: torch.Tensor = style_transform(style_image)[None, :].repeat(
             len(content_images), 1, 1, 1
         )
 
@@ -1200,8 +1199,8 @@ def sampling_batch_optimized(
                 colour="#1055C9",
             )
             for batch_idx, i in enumerate(batch_pbar):
-                batch_content: torch.tensor = content_batch[i : i + batch_size]
-                batch_style: torch.tensor = style_batch[i : i + batch_size]
+                batch_content: torch.Tensor = content_batch[i : i + batch_size]
+                batch_style: torch.Tensor = style_batch[i : i + batch_size]
 
                 images: list[Image.Image] = pipe.generate(
                     content_images=batch_content,

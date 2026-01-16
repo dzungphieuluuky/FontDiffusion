@@ -12,8 +12,12 @@ import os
 
 import torch
 from safetensors.torch import save_file
-from datasets.utils import tqdm as hf_tqdm
+from datasets.utils import (
+    tqdm as hf_tqdm,
+    enable_progress_bar
+)
 
+enable_progress_bar()
 HF_BLUE = "#1055C9"
 HF_GREEN = "#41A67E"
 HF_ORANGE = "#FF8C00"
@@ -32,7 +36,7 @@ class HFTqdm(hf_tqdm):
         iterable: Optional[Iterable[Any]] = None,
         desc: str = "Processing",
         total: Optional[int] = None,
-        unit: str = "it",
+        unit: str = "iteration",
         disable: bool = False,
         **kwargs: Any,
     ) -> None:

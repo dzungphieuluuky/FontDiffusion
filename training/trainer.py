@@ -312,11 +312,11 @@ class FontDiffuserTrainer:
 
     def apply_classifier_free_guidance(
         self,
-        content_images: torch.tensor,
-        style_images: torch.tensor,
+        content_images: torch.Tensor,
+        style_images: torch.Tensor,
         drop_prob: float,
-        samples: dict[str, torch.tensor] | None,
-    ) -> tuple[torch.tensor, torch.tensor]:
+        samples: dict[str, torch.Tensor] | None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Apply classifier-free guidance by masking some samples.
 
         Returns clones of inputs to avoid in-place modifications affecting gradients.
@@ -348,13 +348,13 @@ class FontDiffuserTrainer:
 
     def compute_losses(
         self,
-        noise_pred: torch.tensor,
-        noise: torch.tensor,
-        offset_out_sum: torch.tensor,
-        noisy_target_images: torch.tensor,
-        nonorm_target_images: torch.tensor,
-        timesteps: torch.tensor,
-    ) -> tuple[torch.tensor, dict[str, float], torch.tensor]:
+        noise_pred: torch.Tensor,
+        noise: torch.Tensor,
+        offset_out_sum: torch.Tensor,
+        noisy_target_images: torch.Tensor,
+        nonorm_target_images: torch.Tensor,
+        timesteps: torch.Tensor,
+    ) -> tuple[torch.Tensor, dict[str, float], torch.Tensor]:
         """Compute all losses for the training step."""
         # Diffusion loss
         diff_loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")
@@ -447,8 +447,8 @@ class FontDiffuserTrainer:
 
     def train_step(
         self,
-        samples: dict[str, torch.tensor],
-    ) -> tuple[torch.tensor, dict[str, float]]:
+        samples: dict[str, torch.Tensor],
+    ) -> tuple[torch.Tensor, dict[str, float]]:
         """Perform a single training step."""
         self.model.train()
 
