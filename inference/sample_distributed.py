@@ -224,7 +224,7 @@ def sampling_batch_with_accelerator(
 
             # Process in batches
             all_images = []
-            for i in range(0, len(content_batch), args.batch_size):
+            for i in get_hf_bar(range(0, len(content_batch), args.batch_size)):
                 batch_content = content_batch[i : i + args.batch_size]
                 batch_style = style_batch[i : i + args.batch_size]
 
