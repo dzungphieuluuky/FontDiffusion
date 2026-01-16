@@ -1,58 +1,51 @@
 
-# Copilot Instructions for FontDiffuser
+
+# Copilot Instructions for FontDiffuser (2026)
 
 ## Project Overview
-FontDiffuser is a neural network toolkit for font style transfer and generation using diffusion models. It supports both single and batch character processing, with optimizations for efficient inference and memory usage. The toolkit is designed for research and production workflows, with a focus on reproducibility and extensibility.
+FontDiffuser is a modular toolkit for font style transfer and generation using diffusion models. It supports single/batch character processing, multi-GPU inference, and reproducible, hash-based outputs. The codebase is research-oriented but production-ready, with a focus on extensibility and reproducibility.
 
 ## Architecture & Data Flow
-- **configs/**: Argument parsers and configuration logic (see fontdiffuser.py). All scripts share a common parser for consistency.
-- **src/**: Core model architectures and pipeline (model.py, build_optimized.py). Model code must remain backward compatible with checkpoint formats.
-- **utils.py**: Utility functions for font/image handling, LRU caching, normalization, and image saving.
-- **filename_utils.py**: Hash-based file naming for generated images ensures uniqueness and traceability.
-- **sample_optimized.py**: Main entry for optimized inference (single or batch). Handles device, precision, and memory optimizations.
-- **train.py**: Training entrypoint, using Accelerate for distributed/mixed-precision training. Arguments are sourced from configs/fontdiffuser.py.
-- **dataset/**: Custom dataset and collate logic for font data. Integrates with PyTorch DataLoader.
-- **ckpt/**: Pretrained model checkpoints (required for inference). Place all weights here and specify with --ckpt_dir.
+- **configs/**: Centralized argument parsing (see fontdiffuser.py). All scripts import this for consistent CLI/API.
+- **src/**: Core model architectures (model.py, build_optimized.py, modules/). Model code must remain backward compatible with checkpoint formats.
+- **tools/**: Utilities for dataset creation, validation, and export. E.g., create_hf_dataset.py uses results_checkpoint.json as the single source of truth.
+- **inference/**: Inference pipelines (sample_optimized.py, sample_batch.py, sample_distributed.py). Use sample_optimized.py for most tasks; sample_distributed.py for multi-GPU.
+- **dataset/**: Custom dataset and collate logic. FontDataset and CollateFN handle flexible input and batching.
+- **ckpt/**: Pretrained model checkpoints. All inference/training expects weights here, referenced by --ckpt_dir.
 
 ## Developer Workflows
-- **Optimized Inference:**
-  - Use sample_optimized.py for most inference tasks.
-  - Example: `python sample_optimized.py --ckpt_dir ckpt --content_character "A" --style_image_path path/to/style.png --save_image --save_image_dir results/`
-  - For batch: add `--character_input` and `--batch_size` (see README for details).
+- **Inference:**
+  - Use sample_optimized.py for most inference. Example:
+    ```bash
+    python inference/sample_optimized.py --ckpt_dir ckpt --content_character "A" --style_image_path path/to/style.png --save_image --save_image_dir results/
+    ```
+  - For batch/multi-GPU: use sample_batch.py or sample_distributed.py with appropriate arguments.
 - **Training:**
-  - Use train.py with arguments from configs/fontdiffuser.py.
-  - Distributed/mixed-precision training via Accelerate.
-- **Gradio Demo:**
-  - gradio_app.py provides a web UI for interactive testing and rapid prototyping.
+  - Use train.py (or train_fst.py for FST) with arguments from configs/fontdiffuser.py. Distributed/mixed-precision via Accelerate.
+- **Dataset Creation/Validation:**
+  - Use tools/create_hf_dataset.py and tools/diagnose_dataset.py. Always use results_checkpoint.json as the ground truth for generated data.
+- **Interactive Demo:**
+  - gradio_app.py provides a web UI for rapid prototyping.
 
-## Project-Specific Patterns
-- **Optimizations:**
-  - All optimizations (FP16, xformers, channels_last, torch.compile) are safe and do not alter model weights/outputs.
-  - Model building in src/build_optimized.py must remain backward compatible with checkpoint architectures.
-- **Caching:**
-  - LRU caching is used for font loading, character checks, and image transforms (see utils.py).
-- **File Naming:**
-  - Generated images use hash-based filenames (see filename_utils.py) for reproducibility and deduplication.
-- **Flexible Input:**
-  - Supports both character and image input for content/style. Input type is auto-detected by argument presence.
+## Project-Specific Patterns & Conventions
+- **Argument Parsing:** All scripts use the shared parser from configs/fontdiffuser.py. Never duplicate argument logic.
+- **Type Hints:** Use lowercase types (list, dict, torch.tensor, etc.) everywhere. Prefer torch.from_numpy() for numpy→tensor.
+- **File Naming:** All generated images use hash-based filenames (see tools/filename_utils.py) for deduplication and traceability.
+- **Caching:** LRU caching is used for font loading, image transforms, and character checks (see tools/utils.py).
+- **Data Integrity:** All dataset creation/validation scripts use results_checkpoint.json as the single source of truth. Never trust directory listings alone.
+- **Optimizations:** All performance flags (FP16, xformers, channels_last, torch.compile) are safe and do not alter model outputs.
+- **Checkpoints:** Place all weights in ckpt/ and reference with --ckpt_dir. Checkpoint names must match model architecture.
 
-## Conventions & Integration
-- **Argument Parsing:**
-  - All scripts use a shared parser from configs/fontdiffuser.py for consistency and maintainability.
-- **Data Organization:**
-  - Font and image data are organized under data/ and fonts/. Generated results are saved in user-specified directories.
-- **Checkpoints:**
-  - Place pretrained weights in ckpt/ and specify with --ckpt_dir. Checkpoint names must match expected architecture.
-- **External Dependencies:**
-  - Key: diffusers, xformers, torch, Pillow, fontTools, gradio, accelerate. See requirements.txt for full list.
+## Integration & External Dependencies
+- Key dependencies: diffusers, xformers, torch, Pillow, fontTools, gradio, accelerate, datasets. See requirements.txt for full list.
+- Data is organized under data/, fonts/, and my_dataset/. Generated results are saved in user-specified directories.
 
 ## Examples & Further Guidance
-- See README.md for usage, command examples, and troubleshooting.
 - For new scripts, follow the structure and argument patterns in sample_optimized.py and train.py.
-- For batch processing, see the batch example in README.md and sample_optimized.py.
+- For batch/multi-GPU, see sample_distributed.py and scripts/export_files.bat.
+- For dataset creation/validation, see tools/create_hf_dataset.py and tools/diagnose_dataset.py.
 - For interactive testing, use gradio_app.py.
-- Remember to declare modern type hints with lowercase types (list, tuple, set, dict,...) for functions and classes definitions.
-- Use torch.tensor instead of torch.Tensor when declaring types for PyTorch tensors.
-- When converting from numpy arrays to PyTorch tensors, use memory efficient methods like torch.from_numpy() instead of torch.tensor().
+- See README.md for usage, command examples, and troubleshooting.
+
 ---
 For further details, consult the README or open an issue for project-specific questions.
