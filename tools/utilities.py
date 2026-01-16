@@ -12,7 +12,7 @@ import os
 
 import torch
 from safetensors.torch import save_file
-from huggingface_hub.utils import tqdm as hf_tqdm
+from datasets.utils import tqdm as hf_tqdm
 
 HF_BLUE = "#1055C9"
 HF_GREEN = "#41A67E"
@@ -27,25 +27,31 @@ HF_BAR_FORMAT = (
 
 
 class HFTqdm(hf_tqdm):
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(
+        self,
+        iterable: Optional[Iterable[Any]] = None,
+        desc: str = "Processing",
+        total: Optional[int] = None,
+        unit: str = "it",
+        disable: bool = False,
+        **kwargs: Any,
+    ) -> None:
         # Default values matching the Hugging‑Face style
-        kwargs.setdefault("unit", "it")
+        kwargs.setdefault("unit", unit)
         kwargs.setdefault("unit_scale", True)
         kwargs.setdefault("bar_format", HF_BAR_FORMAT)
         kwargs.setdefault("colour", HF_BLUE)
         kwargs.setdefault("ascii", False)
-        kwargs.setdefault("ncols", 100)
-        kwargs.setdefault("smoothing", 0.7)
+        kwargs.setdefault("ncols", 120)
         kwargs.setdefault("leave", True)
-
-        self._base_desc = kwargs.get("desc", "Processing")
+        kwargs["disable"] = disable
+        super().__init__(iterable=iterable, desc=desc, total=total, **kwargs)
+        self._base_desc = desc
         self._start_time = time.time()
         self._warning_shown = False
 
     def update(self, n: int = 1) -> None:  # type: ignore[override]
         super().update(n)
-
         if self.total:
             progress = self.n / self.total
             self.colour = HF_BLUE if progress < 1.0 else HF_GREEN
@@ -83,33 +89,6 @@ class HFTqdm(hf_tqdm):
             self.set_description(f"✗ {self._base_desc} (failed)", refresh=False)
         self.close()
         return False
-
-
-def get_hf_bar(
-    iterable: Optional[Iterable[Any]] = None,
-    desc: str = "Processing",
-    total: Optional[int] = None,
-    unit: str = "it",
-    disable: bool = False,
-    **kwargs: Any,
-) -> HFTqdm:
-    """
-    Factory for a Hugging‑Face style progress bar.
-
-    Parameters
-    ----------
-    iterable : Iterable | None
-        The iterable to wrap (if any).
-    desc : str
-        Initial description.
-    total : int | None
-        Total number of steps.
-    unit : str
-        Unit name for the bar.
-    """
-    kwargs["unit"] = unit
-    kwargs["disable"] = disable
-    return HFTqdm(iterable=iterable, desc=desc, total=total, **kwargs)
 
 
 # --------------------------------------------------------------------------- #

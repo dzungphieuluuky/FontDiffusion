@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 from datasets import Dataset, load_dataset
 from PIL import Image
-from utilities import get_hf_bar
+from utilities import HFTqdm
 from filename_utils import (
     compute_file_hash,
     get_content_filename,
@@ -281,7 +281,7 @@ class DatasetExporter:
         exported_content = set()
         generations = []
 
-        for sample in get_hf_bar(dataset, desc="Exporting images", unit="sample"):
+        for sample in HFTqdm(dataset, desc="Exporting images", unit="sample"):
             char = sample["character"]
             style = sample["style"]
             font = sample.get("font", "unknown")

@@ -29,7 +29,7 @@ from tools.filename_utils import (
     get_target_filename,
     compute_file_hash,
 )
-from tools.utilities import get_hf_bar
+from tools.utilities import HFTqdm
 from tools.utils import ttf2im
 
 from inference.sample_optimized import (
@@ -230,7 +230,7 @@ def sampling_batch_with_accelerator(
 
             # Process in batches
             all_images = []
-            for i in get_hf_bar(range(0, len(content_batch), args.batch_size)):
+            for i in HFTqdm(range(0, len(content_batch), args.batch_size)):
                 batch_content = content_batch[i : i + args.batch_size]
                 batch_style = style_batch[i : i + args.batch_size]
 

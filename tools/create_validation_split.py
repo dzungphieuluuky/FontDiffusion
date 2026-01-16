@@ -9,14 +9,13 @@ from collections import defaultdict
 import random
 
 from huggingface_hub.utils import tqdm
-import hashlib
 
 from filename_utils import (
     parse_content_filename,
     parse_target_filename,
 )
 from utilities import (
-    get_hf_bar,
+    HFTqdm,
 )
 
 logger = logging.getLogger("ValidationSplitCreator")
@@ -100,7 +99,7 @@ class ValidationSplitCreator:
         # Scan content images
         logger.info("\n🔍 Scanning content images...")
         if content_dir.exists():
-            for img_file in get_hf_bar(
+            for img_file in HFTqdm(
                 list(content_dir.glob("*.png")),
                 desc="Content images",
                 unit="img",
@@ -120,7 +119,7 @@ class ValidationSplitCreator:
         style_mismatch_details = defaultdict(list)
         unparseable_files = []  # ✅ Collect unparseable files for later diagnosis
 
-        for style_folder in get_hf_bar(
+        for style_folder in HFTqdm(
             sorted(target_dir.iterdir()),
             desc="Styles",
             unit="style",
@@ -213,7 +212,7 @@ class ValidationSplitCreator:
         valid_pairs: dict[tuple[str, str], bool] = {}
         missing_content_count = 0
 
-        for char, style in get_hf_bar(
+        for char, style in HFTqdm(
             target_files.keys(),
             desc="Validating pairs",
             ncols=100,
@@ -369,7 +368,7 @@ class ValidationSplitCreator:
 
         # Copy content images
         logger.info(f"  📥 Copying content images for {split_name}...")
-        for char in get_hf_bar(
+        for char in HFTqdm(
             sorted(allowed_chars),
             desc="  Content",
             ncols=80,
@@ -401,7 +400,7 @@ class ValidationSplitCreator:
 
         # Copy target images
         logger.info(f"  📥 Copying target images for {split_name}...")
-        for (char, style), target_path_str in get_hf_bar(
+        for (char, style), target_path_str in HFTqdm(
             sorted(target_files.items()),
             desc="  Target",
             ncols=80,
@@ -468,7 +467,7 @@ class ValidationSplitCreator:
         original_generations = original_data.get("generations", [])
         filtered_generations = []
 
-        for gen in get_hf_bar(
+        for gen in HFTqdm(
             original_generations,
             desc="    Filtering",
             ncols=80,

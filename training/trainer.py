@@ -1,7 +1,7 @@
 import logging
 import math
 import os
-from dataclasses import dataclass, asdict
+from dataclasses import asdict
 from pathlib import Path
 import traceback
 
@@ -36,7 +36,7 @@ from tools.utilities import (
     find_checkpoint,
     load_model_checkpoint,
     save_model_checkpoint,
-    get_hf_bar,
+    HFTqdm,
 )
 
 from training.config import TrainingConfig
@@ -627,7 +627,7 @@ class FontDiffuserTrainer:
                 logger.warning("Starting training from scratch")
 
         # Setup progress bar
-        progress_bar = get_hf_bar(
+        progress_bar = HFTqdm(
             range(self.config.max_train_steps),
             disable=not self.accelerator.is_local_main_process,
             desc="Training",

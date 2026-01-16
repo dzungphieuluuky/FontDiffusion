@@ -16,7 +16,7 @@ import torchvision.transforms as transforms
 from argparse import Namespace, ArgumentParser
 
 from src.dpm_solver.pipeline_dpm_solver import FontDiffuserDPMPipeline
-from tools.utilities import get_hf_bar
+from tools.utilities import HFTqdm
 from tools.utils import (
     load_ttf,
     ttf2im,
@@ -582,7 +582,7 @@ def load_characters(
         )
         logger.info(f"   Processing {end_idx - start_idx} lines...")
 
-        for line_num, line in get_hf_bar(
+        for line_num, line in HFTqdm(
             enumerate(all_lines[start_idx:end_idx], start=start_line),
             total=(end_idx - start_idx),
             desc="📖 Reading character file",
@@ -691,7 +691,7 @@ def load_style_images(style_images_arg: str) -> list[tuple[str, str]]:
     logger.info(f"📂 Verifying {len(style_paths)} style images...")
     verified_paths: list[tuple[str, str]] = []
 
-    for path in get_hf_bar(
+    for path in HFTqdm(
         style_paths,
         desc="✓ Verifying style images",
         colour="green",
@@ -822,7 +822,7 @@ def generate_content_images(
     chars_already_exist: list[str] = []
     generated_new: int = 0
 
-    for char in get_hf_bar(
+    for char in HFTqdm(
         characters,
         desc="📸 Generating content images",
         colour="magenta",
@@ -971,7 +971,7 @@ def batch_generate_images(
     generation_start_time = time.time()
 
     # Main generation loop
-    for style_idx, (style_path, style_name) in get_hf_bar(
+    for style_idx, (style_path, style_name) in HFTqdm(
         enumerate(style_paths_with_names),
         total=len(style_paths_with_names),
         desc="🎨 Generating styles",
@@ -1160,7 +1160,7 @@ def sampling_batch_optimized(
         content_images: list[torch.tensor] = []
         content_images_pil: list[Image.Image] = []
 
-        for char in get_hf_bar(
+        for char in HFTqdm(
             available_chars,
             desc=f"  📸 Preparing {font_name}",
             colour="cyan",
@@ -1194,7 +1194,7 @@ def sampling_batch_optimized(
             batch_size: int = args.batch_size
 
             num_batches = (len(content_batch) + batch_size - 1) // batch_size
-            batch_pbar = get_hf_bar(
+            batch_pbar = HFTqdm(
                 range(0, len(content_batch), batch_size),
                 desc="    🚀 Batch Inference",
                 colour="#1055C9",
@@ -1310,7 +1310,7 @@ def evaluate_results(
     missing_gt: int = 0
 
     # Evaluate each generation
-    for gen in get_hf_bar(
+    for gen in HFTqdm(
         results["generations"],
         desc="📊 Evaluating",
         colour="green",
