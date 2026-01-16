@@ -159,13 +159,13 @@ def parse_args():
     parser.add_argument(
         "--data_root",
         type=str,
-        default="my_dataset/train_original",
+        default="my_dataset/handwritten_original",
         help="Path to dataset root containing ContentImage/ and TargetImage/",
     )
     parser.add_argument(
         "--output",
         type=str,
-        default="my_dataset/train_original/results_checkpoint.json",
+        default="my_dataset/handwritten_original/results_checkpoint.json",
         help="Path to output results_checkpoint.json file",
     )
     return parser.parse_args()
@@ -174,7 +174,7 @@ def parse_args():
 def main() -> None:
     """Main entry point"""
     logger.info("=" * 60)
-    logger.info("REGENERATING RESULTS_CHECKPOINT.JSON FROM DISK")
+    logger.info("Regenerating results_checkpoint.json from disk")
     logger.info("=" * 60)
 
     args = parse_args()
@@ -183,7 +183,7 @@ def main() -> None:
         checkpoint = generate_checkpoint_from_disk(args.data_root)
         save_checkpoint(checkpoint, args.output)
         logger.info("=" * 60)
-        logger.info("✅ CHECKPOINT GENERATION COMPLETE")
+        logger.info("✅ Checkpoint generation completed successfully")
         logger.info("=" * 60)
 
     except FileNotFoundError as e:
