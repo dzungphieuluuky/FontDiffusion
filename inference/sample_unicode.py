@@ -265,9 +265,7 @@ class FontDiffuserSampler:
 
         return images[0]
 
-    def sample_multiple_characters(
-        self, characters: list[str], save_dir: str = None
-    ):
+    def sample_multiple_characters(self, characters: list[str], save_dir: str = None):
         """Generate multiple characters consecutively"""
         results = {}
 

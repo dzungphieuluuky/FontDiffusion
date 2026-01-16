@@ -25,7 +25,6 @@ from src import (
     build_unet,
     build_content_encoder,
     build_style_encoder,
-
     UNet,
     ContentEncoder,
     StyleEncoder,
@@ -44,6 +43,8 @@ from tools.filename_utils import (
 )
 
 logger = logging.getLogger("OptimizedSampler")
+
+
 def arg_parse() -> Namespace:
     """Parse command line arguments"""
     from configs.fontdiffuser import get_parser
@@ -299,7 +300,18 @@ def get_style_transform(style_image_size: tuple[int, int]) -> transforms.Compose
 
 
 def load_state_dict_auto(path: str):
-    """Load a state_dict from .pth or .safetensors file automatically."""
+    """
+    Load state_dict from .pth or .safetensors automatically
+
+    Args:
+        path (str): Path to checkpoint file
+
+    Raises:
+        ImportError: safetensors not installed for .safetensors files
+
+    Returns:
+        _type_: Loaded state_dict
+    """
     if path.endswith(".safetensors"):
         try:
             from safetensors.torch import load_file as safe_load_file
@@ -311,9 +323,13 @@ def load_state_dict_auto(path: str):
 
 
 def load_fontdiffuser_pipeline(args: Namespace) -> FontDiffuserDPMPipeline:
-    """
-    Load FontDiffuser pipeline with SAFE optimizations
-    Only applies optimizations that don't change model architecture
+    """Load Font Diffuser pipeline with optimizations
+
+    Args:
+        args (Namespace): Arguments namespace
+
+    Returns:
+        FontDiffuserDPMPipeline: Loaded FontDiffuserDPMPipeline instance
     """
     logger.info("Loading FontDiffuser pipeline...")
 
@@ -358,7 +374,7 @@ def load_fontdiffuser_pipeline(args: Namespace) -> FontDiffuserDPMPipeline:
         style_encoder = style_encoder.to(memory_format=torch.channels_last)
         content_encoder = content_encoder.to(memory_format=torch.channels_last)
         logger.info("✓ Converted to channels-last")
-    
+
     if args.compile:
         logger.info("Compiling model with torch.compile...")
         unet = torch.compile(unet)
@@ -617,7 +633,9 @@ def main() -> None:
                 available: list[str] = font_manager.get_available_chars_for_font(
                     font_name, characters
                 )
-                logger.info(f"  Available characters: {len(available)}/{len(characters)}")
+                logger.info(
+                    f"  Available characters: {len(available)}/{len(characters)}"
+                )
 
                 if not available:
                     logger.info("  ⚠ Skipping font (no characters available)")

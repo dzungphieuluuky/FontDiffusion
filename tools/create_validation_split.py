@@ -464,7 +464,9 @@ class ValidationSplitCreator:
             return
 
         # Filter generations
-        original_generations: list[dict[str, str]] = original_data.get("generations", [])
+        original_generations: list[dict[str, str]] = original_data.get(
+            "generations", []
+        )
         filtered_generations: list[dict[str, str]] = []
 
         for gen in HFTqdm(

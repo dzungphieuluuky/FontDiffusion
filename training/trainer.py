@@ -296,17 +296,6 @@ class FontDiffuserTrainer:
         # Log configuration
         config_dict = {
             "training_config": asdict(self.config),
-            "model_info": {
-                "unet_params": sum(
-                    p.numel() for p in self.model.config.unet.parameters()
-                ),
-                "style_encoder_params": sum(
-                    p.numel() for p in self.model.config.style_encoder.parameters()
-                ),
-                "content_encoder_params": sum(
-                    p.numel() for p in self.model.config.content_encoder.parameters()
-                ),
-            },
         }
         self.accelerator.log(config_dict)
 

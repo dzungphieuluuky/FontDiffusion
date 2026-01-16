@@ -369,6 +369,7 @@ class DatasetExporter:
         # Use parallel export if workers > 1, otherwise sequential
         if self.config.num_workers > 1:
             self.config.num_workers = min(self.config.num_workers, os.cpu_count())
+            print(f"Using {self.config.num_workers} parallel workers for export")
             metadata = self._export_images_parallel(dataset)
         else:
             metadata = self._export_images_sequential(dataset)
@@ -396,7 +397,7 @@ def export_dataset(
         local_dataset_path: Local dataset path (alternative to repo_id)
         split: Dataset split name (default: 'train')
         token: HuggingFace API token for private datasets
-        num_workers: Number of parallel workers for image saving (default: 4)
+        num_workers: Number of parallel workers for image saving (default: 8)
         batch_size: Number of samples to process per batch (default: 1000)
 
     Returns:
@@ -470,8 +471,8 @@ Examples:
     parser.add_argument(
         "--workers",
         type=int,
-        default=4,
-        help="Number of parallel workers for image saving (default: 4)",
+        default=8,
+        help="Number of parallel workers for image saving (default: 8)",
     )
     parser.add_argument(
         "--batch-size",

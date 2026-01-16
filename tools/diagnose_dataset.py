@@ -194,7 +194,7 @@ class DatasetDiagnostics:
         Compares checkpoint records against actual files in ContentImage/ and TargetImage/.
         """
         logger.info("=" * 70)
-        logger.info("VERIFYING CHECKPOINT FILES ON DISK")
+        logger.info("Verifying checkpoint files on disk")
         logger.info("=" * 70)
 
         missing_content: int = 0
@@ -248,7 +248,7 @@ class DatasetDiagnostics:
         This identifies orphan images that may not be part of the dataset.
         """
         logger.info("=" * 70)
-        logger.info("CHECKING FOR EXTRA FILES NOT IN CHECKPOINT")
+        logger.info("Checking for extra files not in checkpoint")
         logger.info("=" * 70)
 
         # Build set of expected paths from checkpoint
@@ -306,7 +306,7 @@ class DatasetDiagnostics:
             Coverage matrix: {character: {style: has_valid_pair}}
         """
         logger.info("=" * 70)
-        logger.info("DIAGNOSING CHARACTER-STYLE COVERAGE (from checkpoint)")
+        logger.info("Diagnosing character-style coverage (from checkpoint)")
         logger.info("=" * 70)
 
         # Extract unique values from checkpoint
@@ -350,7 +350,7 @@ class DatasetDiagnostics:
         styles: list[str] = sorted(self.stats["unique_styles"])
 
         logger.info("=" * 70)
-        logger.info("COVERAGE SUMMARY (from checkpoint)")
+        logger.info("Coverage Summary (from checkpoint)")
         logger.info("=" * 70)
 
         # Per-style statistics
@@ -532,7 +532,7 @@ class DatasetDiagnostics:
         report = self.generate_report(output_file)
 
         logger.info("\n" + "=" * 70)
-        logger.info("DIAGNOSIS COMPLETE")
+        logger.info("Diagnosis Completed!")
         logger.info("=" * 70)
 
         return report

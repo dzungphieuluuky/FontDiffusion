@@ -7,22 +7,12 @@ import shutil
 import sys
 import time
 from pathlib import Path
-from typing import (
-    Any,
-    Iterable,
-    Optional,
-    TypeVar,
-    Generic,
-    Iterator
-)
+from typing import Any, Iterable, Optional, TypeVar, Generic, Iterator
 import os
 
 import torch
 from safetensors.torch import save_file
-from datasets.utils import (
-    tqdm as hf_tqdm,
-    enable_progress_bar
-)
+from datasets.utils import tqdm as hf_tqdm, enable_progress_bar
 
 enable_progress_bar()
 
@@ -38,6 +28,7 @@ HF_BAR_FORMAT = (
 )
 
 T = TypeVar("T")
+
 
 class HFTqdm(hf_tqdm, Generic[T]):
     def __init__(

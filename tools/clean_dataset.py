@@ -8,6 +8,7 @@ Updates results_checkpoint.json to reflect the cleaned dataset.
 
 import json
 import logging
+import os
 from pathlib import Path
 
 from huggingface_hub.utils import tqdm
@@ -420,10 +421,13 @@ def main():
         logger.warning("=" * 70)
         logger.warning("⚠️  ACTUAL DELETION MODE - Files will be permanently deleted!")
         logger.warning("=" * 70)
-        confirm = input("\nType 'DELETE' to confirm: ")
-        if confirm != "DELETE":
-            logger.info("Cancelled.")
-            return
+
+        # If Kaggle is running then bypass this prompt
+        if "KAGGLE_KERNEL_RUN_TYPE" not in os.environ:
+            confirm = input("\nType 'DELETE' to confirm: ")
+            if confirm != "DELETE":
+                logger.info("Cancelled.")
+                return
 
     # Run cleaning
     cleaner = DatasetCleaner(args.dataset_dir, dry_run=dry_run)
