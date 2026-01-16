@@ -10,8 +10,7 @@ import json
 import logging
 import os
 from pathlib import Path
-
-from huggingface_hub.utils import tqdm
+from utilities import HFTqdm
 
 logger = logging.getLogger("DatasetCleaner")
 logging.basicConfig(
@@ -242,7 +241,7 @@ class DatasetCleaner:
 
         # Remove content images
         logger.info(f"\nRemoving content images...")
-        for content_path in tqdm(content_files, desc="Content images", unit="file"):
+        for content_path in HFTqdm(content_files, desc="Content images", unit="file"):
             full_path = self.dataset_dir / content_path
             if full_path.exists():
                 if not self.dry_run:
@@ -256,7 +255,7 @@ class DatasetCleaner:
 
         # Remove target images
         logger.info(f"\nRemoving target images...")
-        for target_path in tqdm(target_files, desc="Target images", unit="file"):
+        for target_path in HFTqdm(target_files, desc="Target images", unit="file"):
             full_path = self.dataset_dir / target_path
             if full_path.exists():
                 if not self.dry_run:
@@ -383,7 +382,7 @@ class DatasetCleaner:
         self.print_summary()
 
         logger.info("\n" + "=" * 70)
-        logger.info("CLEANING COMPLETE")
+        logger.info("Your Dataset has been purified! 🎉")
         logger.info("=" * 70)
 
         return True

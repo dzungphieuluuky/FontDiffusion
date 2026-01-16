@@ -11,8 +11,7 @@ import logging
 from collections import defaultdict
 from pathlib import Path
 
-from huggingface_hub.utils import tqdm
-
+from utilities import HFTqdm
 logger = logging.getLogger("DatasetDiagnostics")
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -200,7 +199,7 @@ class DatasetDiagnostics:
         missing_content: int = 0
         missing_target: int = 0
 
-        for record in tqdm(
+        for record in HFTqdm(
             self.checkpoint_records, desc="Checking files", unit="record"
         ):
             char: str = record.get("character", "")
