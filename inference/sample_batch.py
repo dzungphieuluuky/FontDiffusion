@@ -217,24 +217,23 @@ class GenerationTracker:
         """Load existing generations from checkpoint"""
         try:
             with open(checkpoint_path, "r", encoding="utf-8") as f:
-                results = json.load(f)
+                results: dict[str, list[dict[str, str]]] = json.load(f)
 
-            raw_generations = results.get("generations", [])
+            raw_generations: list[dict[str, str]] = results.get("generations", [])
 
-            # ✅ Track duplicates
             seen_hashes: set[str] = set()
             unique_generations: list[dict[str, str]] = []
             duplicate_count: int = 0
 
             # Build hash set for fast lookup and deduplicate
             for gen in raw_generations:
-                target_hash = gen.get("target_hash")
+                target_hash: str = gen.get("target_hash")
 
                 if not target_hash:
                     # Compute hash if not in checkpoint
-                    char = gen.get("character", "")
-                    style = gen.get("style", "")
-                    font = gen.get("font", "")
+                    char: str = gen.get("character", "")
+                    style: str = gen.get("style", "")
+                    font: str = gen.get("font", "")
 
                     # Skip invalid entries
                     if not char or not style:
@@ -242,7 +241,6 @@ class GenerationTracker:
 
                     target_hash = compute_file_hash(char, style, font)
 
-                # ✅ Check for duplicates
                 if target_hash in seen_hashes:
                     duplicate_count += 1
                     continue  # Skip duplicate
@@ -252,7 +250,6 @@ class GenerationTracker:
                 self.generated_hashes.add(target_hash)
                 unique_generations.append(gen)
 
-            # ✅ Store only unique generations
             self.generations = unique_generations
 
             logger.info(
