@@ -75,7 +75,7 @@ class DatasetBuilder:
 
         logger.info("Directory structure validated successfully")
 
-    def _load_checkpoint(self) -> dict[str, Any]:
+    def _load_checkpoint(self) -> dict[str, list[dict[str, str]]]:
         """Load and validate results checkpoint.
 
         Returns:
@@ -87,9 +87,9 @@ class DatasetBuilder:
         checkpoint_path = self.data_dir / self.CHECKPOINT_FILE
 
         with checkpoint_path.open("r", encoding="utf-8") as f:
-            data = json.load(f)
+            data: dict[str, list[dict[str, str]]] = json.load(f)
 
-        generations = data.get("generations", [])
+        generations: list[dict[str, str]] = data.get("generations", [])
         if not generations:
             raise ValueError("No generations found in checkpoint")
 
@@ -112,29 +112,28 @@ class DatasetBuilder:
         """
         logger.info("Building dataset...")
 
-        checkpoint = self._load_checkpoint()
-        generations = checkpoint["generations"]
+        checkpoint: dict[str, list[dict[str, str]]] = self._load_checkpoint()
+        generations: list[dict[str, str]] = checkpoint["generations"]
 
         # Pre-allocate lists for better performance
-        characters = []
-        styles = []
-        fonts = []
-        content_images = []
-        target_images = []
-        content_hashes = []
-        target_hashes = []
+        characters: list[str] = []
+        styles: list[str] = []
+        fonts: list[str] = []
+        content_images: list[Image.Image] = []
+        target_images: list[Image.Image] = []
+        content_hashes: list[str] = []
+        target_hashes: list[str] = []
 
-        skipped = 0
+        skipped: int = 0
 
         for gen in get_hf_bar(generations, desc="Loading image pairs", unit="pair"):
-            char = gen.get("character")
-            style = gen.get("style")
-            font = gen.get("font", "unknown")
+            char: str = gen.get("character", "")
+            style: str = gen.get("style", "")
+            font: str = gen.get("font", "unknown")
 
             # Construct paths
-            content_path = self.data_dir / gen.get("content_image_path", "")
-            target_path = self.data_dir / gen.get("target_image_path", "")
-
+            content_path: Path = self.data_dir / gen.get("content_image_path", "")
+            target_path: Path = self.data_dir / gen.get("target_image_path", "")
             # Validate paths exist
             if not content_path.exists() or not target_path.exists():
                 skipped += 1
@@ -142,8 +141,8 @@ class DatasetBuilder:
 
             # Load images
             try:
-                content_img = Image.open(content_path).convert("RGB")
-                target_img = Image.open(target_path).convert("RGB")
+                content_img: Image.Image = Image.open(content_path).convert("RGB")
+                target_img: Image.Image = Image.open(target_path).convert("RGB")
             except Exception as e:
                 logger.warning(f"Failed to load images for {char}/{style}: {e}")
                 skipped += 1

@@ -57,9 +57,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         """
         # Store FST-specific args before calling super
         self.use_fst = getattr(args, "use_fst", True)
-        self.freeze_original_encoders = getattr(
-            args, "freeze_original_encoders", False
-        )
+        self.freeze_original_encoders = getattr(args, "freeze_original_encoders", False)
         self.style_source_same_prob = getattr(args, "style_source_same_prob", 0.5)
 
         # Parse FST configuration

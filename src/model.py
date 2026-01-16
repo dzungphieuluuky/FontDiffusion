@@ -16,11 +16,12 @@ from src.modules.content_encoder import ContentEncoder
 from src.modules.style_encoder import StyleEncoder
 from src.modules.unet import UNet
 
+
 class FontDiffuserWithFST(nn.Module):
     """Enhanced FontDiffuser with FSTDiff modules."""
 
     def __init__(
-        self, 
+        self,
         original_fontdiffuser: nn.Module,
         feature_channels: list[int] = None,
         num_queries: int = 256,
@@ -28,7 +29,7 @@ class FontDiffuserWithFST(nn.Module):
         num_scales: int = 5,
     ):
         super().__init__()
-        
+
         # Keep original FontDiffuser components
         self.content_encoder = original_fontdiffuser.content_encoder
         self.diffusion_unet = original_fontdiffuser.unet
@@ -42,7 +43,7 @@ class FontDiffuserWithFST(nn.Module):
         # Determine feature channels from MSSE output shapes if not provided
         if feature_channels is None:
             feature_channels = [64, 128, 256, 512, 1024]
-        
+
         self.fst_module = FontStyleTransformationModule(
             feature_channels=feature_channels,
             num_queries=num_queries,  # ← Use parameter instead of hardcoded

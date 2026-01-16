@@ -54,6 +54,7 @@ logger = logging.getLogger("MultiGPUsBatchSampler")
 # Optional dependencies
 try:
     import lpips
+
     LPIPS_AVAILABLE = True
 except ImportError:
     LPIPS_AVAILABLE = False
@@ -61,6 +62,7 @@ except ImportError:
 
 try:
     from pytorch_fid import fid_score
+
     FID_AVAILABLE = True
 except ImportError:
     FID_AVAILABLE = False
@@ -68,6 +70,7 @@ except ImportError:
 
 try:
     from skimage.metrics import structural_similarity as ssim
+
     SSIM_AVAILABLE = True
 except ImportError:
     SSIM_AVAILABLE = False
@@ -75,6 +78,7 @@ except ImportError:
 
 try:
     import wandb
+
     WANDB_AVAILABLE = True
 except ImportError:
     WANDB_AVAILABLE = False
@@ -142,7 +146,9 @@ def generate_content_images_with_accelerator(
                 local_char_paths[char] = str(char_path)
 
             except Exception as e:
-                logger.warning(f"GPU {accelerator.process_index}: Error generating '{char}': {e}")
+                logger.warning(
+                    f"GPU {accelerator.process_index}: Error generating '{char}': {e}"
+                )
 
     # FIX 2: Gather results from all GPUs properly
     accelerator.wait_for_everyone()
@@ -152,10 +158,10 @@ def generate_content_images_with_accelerator(
     merged_char_paths = {}
     for paths in all_char_paths_list:
         merged_char_paths.update(paths)
-    
+
     if accelerator.is_main_process:
         logger.info(f"Generated {len(merged_char_paths)} content images")
-    
+
     # FIX 4: Return on ALL processes, not just main
     return merged_char_paths
 
@@ -386,7 +392,9 @@ def batch_generate_images_with_accelerator(
                         local_generated_count += 1
 
                     except Exception as e:
-                        logger.warning(f"GPU {accelerator.process_index}: Error saving '{char}': {e}")
+                        logger.warning(
+                            f"GPU {accelerator.process_index}: Error saving '{char}': {e}"
+                        )
                         local_failed_count += 1
 
                 # Record inference time
@@ -404,27 +412,29 @@ def batch_generate_images_with_accelerator(
                 # FIX 9: Checkpoint synchronization - all processes wait
                 if args.save_interval > 0 and (style_idx + 1) % args.save_interval == 0:
                     accelerator.wait_for_everyone()
-                    
+
                     # FIX 10: Gather results from all GPUs before saving
                     all_generations = gather_object(results["generations"])
-                    
+
                     if accelerator.is_main_process:
                         # Merge all generations
                         merged_generations = []
                         for gen_list in all_generations:
                             merged_generations.extend(gen_list)
-                        
+
                         checkpoint_results = results.copy()
                         checkpoint_results["generations"] = merged_generations
                         save_checkpoint(checkpoint_results, args.output_dir)
                         logger.info(
                             f"Checkpoint saved at style {style_idx + 1}/{len(local_styles)}"
                         )
-                    
+
                     accelerator.wait_for_everyone()
 
             except Exception as e:
-                logger.error(f"GPU {accelerator.process_index}: Error processing {style_name}: {e}")
+                logger.error(
+                    f"GPU {accelerator.process_index}: Error processing {style_name}: {e}"
+                )
                 local_failed_count += (
                     len(chars_to_generate)
                     if "chars_to_generate" in locals()
@@ -433,33 +443,33 @@ def batch_generate_images_with_accelerator(
 
     # FIX 11: Gather final results from all GPUs
     accelerator.wait_for_everyone()
-    
+
     all_generations = gather_object(results["generations"])
     all_inference_times = gather_object(results["metrics"]["inference_times"])
-    
+
     # FIX 12: Gather counters from all processes
     all_generated_counts = gather_object([local_generated_count])
     all_skipped_counts = gather_object([local_skipped_count])
     all_failed_counts = gather_object([local_failed_count])
-    
+
     if accelerator.is_main_process:
         # Merge results
         merged_generations = []
         for gen_list in all_generations:
             merged_generations.extend(gen_list)
-        
+
         merged_inference_times = []
         for time_list in all_inference_times:
             merged_inference_times.extend(time_list)
-        
+
         results["generations"] = merged_generations
         results["metrics"]["inference_times"] = merged_inference_times
-        
+
         # Sum counters
         total_generated = sum(all_generated_counts)
         total_skipped = sum(all_skipped_counts)
         total_failed = sum(all_failed_counts)
-        
+
         logger.info("=" * 60)
         logger.info("GENERATION COMPLETE")
         logger.info("=" * 60)
@@ -608,7 +618,7 @@ def main():
             logger.info(
                 f"  Results checkpoint path: {os.path.join(args.output_dir, 'results_checkpoint.json')}"
             )
-        
+
         # Create output directory on all processes
         os.makedirs(args.output_dir, exist_ok=True)
         accelerator.wait_for_everyone()
@@ -629,23 +639,23 @@ def main():
             logger.info("=" * 60)
 
         pipe = load_fontdiffuser_pipeline(pipeline_args)
-        
+
         if accelerator.is_main_process:
             logger.info("✓ Pipeline loaded successfully.")
 
         # FIX 16: Prepare pipeline BEFORE wait_for_everyone
         pipe = accelerator.prepare(pipe)
-        
+
         accelerator.wait_for_everyone()
-        
+
         if accelerator.is_main_process:
             logger.info("✓ Pipeline prepared with Accelerator.")
 
         # Initialize evaluator on all processes
         evaluator = QualityEvaluator(device=args.device)
-        
+
         accelerator.wait_for_everyone()
-        
+
         if accelerator.is_main_process:
             logger.info("✓ Quality evaluator initialized.")
             logger.info(
@@ -664,9 +674,9 @@ def main():
             generation_tracker,
             accelerator,
         )
-        
+
         accelerator.wait_for_everyone()
-        
+
         # Evaluate on main process only
         if accelerator.is_main_process:
             if args.evaluate and args.ground_truth_dir:
@@ -686,17 +696,21 @@ def main():
             logger.info("=" * 60)
             logger.info("✅ NomGenie dataset generation complete!")
             logger.info("=" * 60)
-        
+
         # FIX 18: Final synchronization
         accelerator.wait_for_everyone()
 
     except KeyboardInterrupt:
-        logger.warning(f"GPU {accelerator.process_index}: Generation interrupted by user")
+        logger.warning(
+            f"GPU {accelerator.process_index}: Generation interrupted by user"
+        )
         accelerator.wait_for_everyone()
         sys.exit(130)
 
     except Exception as e:
-        logger.error(f"GPU {accelerator.process_index}: Fatal error: {e}", exc_info=True)
+        logger.error(
+            f"GPU {accelerator.process_index}: Fatal error: {e}", exc_info=True
+        )
         accelerator.wait_for_everyone()
         sys.exit(1)
 
@@ -707,16 +721,18 @@ def main():
             # FIX 19: Proper cleanup
             accelerator.wait_for_everyone()
             accelerator.free_memory()
-            
+
             # Only destroy process group if initialized
             if torch.distributed.is_available() and torch.distributed.is_initialized():
                 torch.distributed.destroy_process_group()
-            
+
             if accelerator.is_main_process:
                 logger.info("✓ Cleanup complete")
-            
+
         except Exception as e:
-            logger.warning(f"GPU {accelerator.process_index}: Error during cleanup: {e}")
+            logger.warning(
+                f"GPU {accelerator.process_index}: Error during cleanup: {e}"
+            )
 
 
 if __name__ == "__main__":

@@ -74,7 +74,7 @@ class DatasetBuilder:
 
         logger.info("Directory structure validated successfully")
 
-    def _load_checkpoint(self) -> dict[str, Any]:
+    def _load_checkpoint(self) -> dict[str, list[dict[str, str]]]:
         """Load and validate results checkpoint.
 
         Returns:
@@ -86,7 +86,7 @@ class DatasetBuilder:
         checkpoint_path = self.data_dir / self.CHECKPOINT_FILE
 
         with checkpoint_path.open("r", encoding="utf-8") as f:
-            data = json.load(f)
+            data: dict[str, list[dict[str, str]]] = json.load(f)
 
         generations = data.get("generations", [])
         if not generations:
@@ -108,20 +108,20 @@ class DatasetBuilder:
 
         This generator loads images one at a time to minimize memory usage.
         """
-        checkpoint = self._load_checkpoint()
-        generations = checkpoint["generations"]
+        checkpoint: dict[str, list[dict[str, str]]] = self._load_checkpoint()
+        generations: list[dict[str, str]] = checkpoint["generations"]
 
-        skipped = 0
-        processed = 0
+        skipped: int = 0
+        processed: int = 0
 
         for gen in generations:
-            char = gen.get("character")
-            style = gen.get("style")
-            font = gen.get("font", "unknown")
+            char: str = gen.get("character", "")
+            style: str = gen.get("style", "")
+            font: str = gen.get("font", "unknown")
 
             # Construct paths
-            content_path = self.data_dir / gen.get("content_image_path", "")
-            target_path = self.data_dir / gen.get("target_image_path", "")
+            content_path: Path = self.data_dir / gen.get("content_image_path", "")
+            target_path: Path = self.data_dir / gen.get("target_image_path", "")
 
             # Validate paths exist
             if not content_path.exists() or not target_path.exists():
@@ -130,8 +130,8 @@ class DatasetBuilder:
 
             # Load images
             try:
-                content_img = Image.open(content_path).convert("RGB")
-                target_img = Image.open(target_path).convert("RGB")
+                content_img: Image.Image = Image.open(content_path).convert("RGB")
+                target_img: Image.Image = Image.open(target_path).convert("RGB")
             except Exception as e:
                 logger.warning(f"Failed to load images for {char}/{style}: {e}")
                 skipped += 1
