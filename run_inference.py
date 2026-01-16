@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 def create_parser() -> argparse.ArgumentParser:
     """Create the main argument parser for inference entry point.
-    
+
     Only defines --mode. All other arguments are passed through to submodules.
     """
     parser = argparse.ArgumentParser(
@@ -120,10 +120,10 @@ SUBCOMMAND HELP:
 
 def run_sample_optimized(remaining_args: list[str]) -> int:
     """Run single-image optimized inference.
-    
+
     Args:
         remaining_args: All arguments after --mode (passed to sample_optimized)
-        
+
     Returns:
         Exit code (0 for success, non-zero for failure)
     """
@@ -131,11 +131,11 @@ def run_sample_optimized(remaining_args: list[str]) -> int:
         from inference.sample_optimized import main as sample_optimized_main
 
         logger.info("Starting sample_optimized inference...")
-        
+
         # Reconstruct sys.argv for submodule
         old_argv = sys.argv
         sys.argv = [sys.argv[0]] + remaining_args
-        
+
         try:
             sample_optimized_main()
             logger.info("✓ Sample optimized inference complete")
@@ -157,10 +157,10 @@ def run_sample_optimized(remaining_args: list[str]) -> int:
 
 def run_sample_batch(remaining_args: list[str]) -> int:
     """Run batch inference.
-    
+
     Args:
         remaining_args: All arguments after --mode (passed to sample_batch)
-        
+
     Returns:
         Exit code (0 for success, non-zero for failure)
     """
@@ -168,11 +168,11 @@ def run_sample_batch(remaining_args: list[str]) -> int:
         from inference.sample_batch import main as sample_batch_main
 
         logger.info("Starting sample_batch inference...")
-        
+
         # Reconstruct sys.argv for submodule
         old_argv = sys.argv
         sys.argv = [sys.argv[0]] + remaining_args
-        
+
         try:
             sample_batch_main()
             logger.info("✓ Sample batch inference complete")
@@ -194,10 +194,10 @@ def run_sample_batch(remaining_args: list[str]) -> int:
 
 def run_sample_distributed(remaining_args: list[str]) -> int:
     """Run distributed multi-GPU inference.
-    
+
     Args:
         remaining_args: All arguments after --mode (passed to sample_distributed)
-        
+
     Returns:
         Exit code (0 for success, non-zero for failure)
     """
@@ -205,11 +205,11 @@ def run_sample_distributed(remaining_args: list[str]) -> int:
         from inference.sample_distributed import main as sample_distributed_main
 
         logger.info("Starting sample_distributed inference...")
-        
+
         # Reconstruct sys.argv for submodule
         old_argv = sys.argv
         sys.argv = [sys.argv[0]] + remaining_args
-        
+
         try:
             sample_distributed_main()
             logger.info("✓ Sample distributed inference complete")
@@ -231,7 +231,7 @@ def run_sample_distributed(remaining_args: list[str]) -> int:
 
 def main() -> int:
     """Main entry point for inference operations.
-    
+
     Returns:
         Exit code (0 for success, non-zero for failure)
     """

@@ -13,8 +13,8 @@ setup(
         "gradio>=4.0.0",
     ],
     entry_points={
-        'console_scripts': [
-            'fontdiffuser=fontdiffusion.cli:main',
+        "console_scripts": [
+            "fontdiffuser=fontdiffusion.cli:main",
         ],
     },
 )

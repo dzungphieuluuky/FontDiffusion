@@ -144,10 +144,12 @@ class DatasetExporter:
             # Prepare content image save task
             content_filename = get_content_filename(char)
             content_img = sample.get("content_image")
-            
+
             if isinstance(content_img, Image.Image):
                 content_path = self.content_dir / content_filename
-                save_tasks.append(("content", content_img, content_path, content_filename))
+                save_tasks.append(
+                    ("content", content_img, content_path, content_filename)
+                )
                 content_filenames.add(content_filename)
 
             # Prepare target image save task
@@ -227,12 +229,14 @@ class DatasetExporter:
                 # Count saves
                 content_in_batch = len([t for t in save_tasks if t[0] == "content"])
                 target_in_batch = len([t for t in save_tasks if t[0] == "target"])
-                
+
                 total_content_saves += min(
-                    success_count, len([t for t in filtered_tasks if t[1].parent == self.content_dir])
+                    success_count,
+                    len([t for t in filtered_tasks if t[1].parent == self.content_dir]),
                 )
                 total_target_saves += min(
-                    success_count, len([t for t in filtered_tasks if t[1].parent != self.content_dir])
+                    success_count,
+                    len([t for t in filtered_tasks if t[1].parent != self.content_dir]),
                 )
 
                 all_generations.extend(generations)

@@ -686,6 +686,7 @@ def main():
             accelerator.free_memory()
             # Alternative: Use torch's cleanup if needed
             import torch.distributed as dist
+
             if dist.is_available() and dist.is_initialized():
                 dist.destroy_process_group()
             logger.info("✓ Accelerator cleanup complete")
@@ -693,7 +694,7 @@ def main():
 
         except Exception as e:
             logger.warning(f"Error during Accelerator cleanup: {e}")
-        
+
 
 if __name__ == "__main__":
     main()
