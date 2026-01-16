@@ -166,7 +166,6 @@ class DatasetBuilder:
 
         logger.info(f"Successfully loaded {len(characters)} samples")
 
-        # Define explicit features for better type safety
         features = Features(
             {
                 "character": Value("string"),

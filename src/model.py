@@ -12,37 +12,42 @@ from typing import Dict
 
 from src.modules.msse import MultiScaleStyleEncoder
 from src.modules.fst import FontStyleTransformationModule
-
+from src.modules.content_encoder import ContentEncoder
+from src.modules.style_encoder import StyleEncoder
+from src.modules.unet import UNet
 
 class FontDiffuserWithFST(nn.Module):
-    """
-    Enhanced FontDiffuser with FSTDiff modules.
-    Architecture: ContentEncoder + MSSE + FST → Diffusion U-Net
-    """
+    """Enhanced FontDiffuser with FSTDiff modules."""
 
-    def __init__(self, original_fontdiffuser):
+    def __init__(
+        self, 
+        original_fontdiffuser: nn.Module,
+        feature_channels: list[int] = None,
+        num_queries: int = 256,
+        query_dim: int = 128,
+        num_scales: int = 5,
+    ):
         super().__init__()
-
+        
         # Keep original FontDiffuser components
         self.content_encoder = original_fontdiffuser.content_encoder
         self.diffusion_unet = original_fontdiffuser.unet
-        self.style_encoder = (
-            original_fontdiffuser.style_encoder
-        )  # Original for SCR loss
+        self.style_encoder = original_fontdiffuser.style_encoder
 
         # Add new FSTDiff modules
         self.mss_encoder = MultiScaleStyleEncoder(
-            in_channels=1, base_channels=64, num_scales=5
+            in_channels=3, base_channels=64, num_scales=num_scales
         )
 
-        # Determine feature channels from MSSE output shapes
-        # Input 96x96 → scales: [48, 24, 12, 6, 6] with channels [64, 128, 256, 512, 1024]
-        feature_channels = [64, 128, 256, 512, 1024]
+        # Determine feature channels from MSSE output shapes if not provided
+        if feature_channels is None:
+            feature_channels = [64, 128, 256, 512, 1024]
+        
         self.fst_module = FontStyleTransformationModule(
             feature_channels=feature_channels,
-            num_queries=256,
-            query_dim=128,
-            num_scale_features=5,
+            num_queries=num_queries,  # ← Use parameter instead of hardcoded
+            query_dim=query_dim,
+            num_scale_features=num_scales,
             num_cross_attn_blocks=2,
             num_self_attn_blocks=2,
         )
