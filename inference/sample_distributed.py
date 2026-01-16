@@ -681,15 +681,19 @@ def main():
     finally:
         if accelerator.is_main_process:
             logger.info("Cleaning up resources...")
-        try:                        
-            # 3. Destroy the process group directly from the accelerator's state
-            accelerator.state.destroy_process_group()
+        try:
+            # Use Accelerator's free method to clean up resources
+            accelerator.free_memory()
+            # Alternative: Use torch's cleanup if needed
+            import torch.distributed as dist
+            if dist.is_available() and dist.is_initialized():
+                dist.destroy_process_group()
             logger.info("✓ Accelerator cleanup complete")
             sys.exit(0)
 
         except Exception as e:
             logger.warning(f"Error during Accelerator cleanup: {e}")
-
+        
 
 if __name__ == "__main__":
     main()
