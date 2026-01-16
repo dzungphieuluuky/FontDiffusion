@@ -13,10 +13,12 @@ from typing import Any, Optional
 
 from datasets import Dataset, Features, Image as HFImage, Value
 from PIL import Image
+from huggingface_hub.utils import tqdm
 
 from utilities import (
     get_hf_bar,
 )
+
 from filename_utils import compute_file_hash
 
 logger = logging.getLogger("DatasetCreator")
@@ -126,7 +128,7 @@ class DatasetBuilder:
 
         skipped: int = 0
 
-        for gen in get_hf_bar(generations, desc="Loading image pairs", unit="pair"):
+        for gen in tqdm(generations, desc="Loading image pairs", unit="pair"):
             char: str = gen.get("character", "")
             style: str = gen.get("style", "")
             font: str = gen.get("font", "unknown")
