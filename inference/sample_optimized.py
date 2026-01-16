@@ -5,12 +5,12 @@ Multi-character batch processing
 Multi-font support
 """
 
+import logging
 import os
 import time
-import hashlib
 from PIL import Image
 from pathlib import Path
-from typing import Optional, Any, Union
+from typing import Optional, Any
 from functools import lru_cache
 from argparse import Namespace, ArgumentParser
 
@@ -25,6 +25,10 @@ from src import (
     build_unet,
     build_content_encoder,
     build_style_encoder,
+
+    UNet,
+    ContentEncoder,
+    StyleEncoder,
 )
 from tools.utils import (
     ttf2im,
@@ -39,7 +43,7 @@ from tools.filename_utils import (
     compute_file_hash,
 )
 
-
+logger = logging.getLogger("OptimizedSampler")
 def arg_parse() -> Namespace:
     """Parse command line arguments"""
     from configs.fontdiffuser import get_parser
@@ -143,7 +147,7 @@ class FontManager:
                 "font": None,  # Lazy load
                 "name": font_name,
             }
-            print(f"✓ Font loaded: {font_name}")
+            logger.info(f"✓ Font loaded: {font_name}")
 
         elif os.path.isdir(ttf_path):
             # Directory with multiple fonts
@@ -159,9 +163,9 @@ class FontManager:
 
             self.font_paths = sorted(font_files)
 
-            print(f"\n{'=' * 60}")
-            print(f"Loading {len(font_files)} fonts from directory...")
-            print("=" * 60)
+            logger.info(f"\n{'=' * 60}")
+            logger.info(f"Loading {len(font_files)} fonts from directory...")
+            logger.info("=" * 60)
 
             for font_path in self.font_paths:
                 font_name: str = os.path.splitext(os.path.basename(font_path))[0]
@@ -170,10 +174,10 @@ class FontManager:
                     "font": None,  # Lazy load
                     "name": font_name,
                 }
-                print(f"✓ {font_name}")
+                logger.info(f"✓ {font_name}")
 
-            print("=" * 60)
-            print(f"Loaded {len(self.fonts)} fonts\n")
+            logger.info("=" * 60)
+            logger.info(f"Loaded {len(self.fonts)} fonts\n")
         else:
             raise ValueError(f"Invalid ttf_path: {ttf_path}")
 
@@ -213,7 +217,7 @@ class FontManager:
 
 
 def parse_characters(
-    content_character: Optional[str] = None, characters_file: Optional[str] = None
+    content_character: str = None, characters_file: str = None
 ) -> list[str]:
     """
     Parse character input from multiple sources
@@ -229,7 +233,7 @@ def parse_characters(
 
     # Priority 1: characters_file argument
     if characters_file and os.path.isfile(characters_file):
-        print(f"Loading characters from file: {characters_file}")
+        logger.info(f"Loading characters from file: {characters_file}")
         with open(characters_file, "r", encoding="utf-8") as f:
             for line in f:
                 line_stripped: str = line.strip()
@@ -238,14 +242,14 @@ def parse_characters(
                         chars.append(line_stripped)
                     else:
                         chars.extend(list(line_stripped))
-        print(f"  Loaded {len(chars)} characters")
+        logger.info(f"  Loaded {len(chars)} characters")
         return chars
 
     # Priority 2: content_character argument
     if content_character:
         # Check if it's a file path
         if os.path.isfile(content_character):
-            print(f"Loading characters from file: {content_character}")
+            logger.info(f"Loading characters from file: {content_character}")
             with open(content_character, "r", encoding="utf-8") as f:
                 for line in f:
                     line_stripped: str = line.strip()
@@ -254,7 +258,7 @@ def parse_characters(
                             chars.append(line_stripped)
                         else:
                             chars.extend(list(line_stripped))
-            print(f"  Loaded {len(chars)} characters")
+            logger.info(f"  Loaded {len(chars)} characters")
             return chars
 
         # Check if comma-separated
@@ -311,10 +315,10 @@ def load_fontdiffuser_pipeline(args: Namespace) -> FontDiffuserDPMPipeline:
     Load FontDiffuser pipeline with SAFE optimizations
     Only applies optimizations that don't change model architecture
     """
-    print("Loading FontDiffuser pipeline...")
+    logger.info("Loading FontDiffuser pipeline...")
 
     # Load the model state_dict
-    unet: Any = build_unet(args=args)
+    unet: UNet = build_unet(args=args)
     unet_ckpt_path = (
         f"{args.ckpt_dir}/unet.safetensors"
         if os.path.exists(f"{args.ckpt_dir}/unet.safetensors")
@@ -322,7 +326,7 @@ def load_fontdiffuser_pipeline(args: Namespace) -> FontDiffuserDPMPipeline:
     )
     unet.load_state_dict(load_state_dict_auto(unet_ckpt_path))
 
-    style_encoder: Any = build_style_encoder(args=args)
+    style_encoder: StyleEncoder = build_style_encoder(args=args)
     style_encoder_ckpt_path = (
         f"{args.ckpt_dir}/style_encoder.safetensors"
         if os.path.exists(f"{args.ckpt_dir}/style_encoder.safetensors")
@@ -330,7 +334,7 @@ def load_fontdiffuser_pipeline(args: Namespace) -> FontDiffuserDPMPipeline:
     )
     style_encoder.load_state_dict(load_state_dict_auto(style_encoder_ckpt_path))
 
-    content_encoder: Any = build_content_encoder(args=args)
+    content_encoder: ContentEncoder = build_content_encoder(args=args)
     content_encoder_ckpt_path = (
         f"{args.ckpt_dir}/content_encoder.safetensors"
         if os.path.exists(f"{args.ckpt_dir}/content_encoder.safetensors")
@@ -338,21 +342,29 @@ def load_fontdiffuser_pipeline(args: Namespace) -> FontDiffuserDPMPipeline:
     )
     content_encoder.load_state_dict(load_state_dict_auto(content_encoder_ckpt_path))
 
-    print("✓ Loaded model state_dict successfully")
+    logger.info("✓ Loaded model state_dict successfully")
 
-    # SAFE: Apply FP16 conversion AFTER loading weights
     if args.fp16:
-        print("Converting to FP16 precision...")
+        logger.info("Converting to FP16 precision...")
         unet = unet.half()
         style_encoder = style_encoder.half()
         content_encoder = content_encoder.half()
+        logger.info("✓ Converted to FP16")
 
     # SAFE: Apply channels-last memory format
     if args.channels_last:
-        print("Converting to channels-last memory format...")
+        logger.info("Converting to channels-last memory format...")
         unet = unet.to(memory_format=torch.channels_last)
         style_encoder = style_encoder.to(memory_format=torch.channels_last)
         content_encoder = content_encoder.to(memory_format=torch.channels_last)
+        logger.info("✓ Converted to channels-last")
+    
+    if args.compile:
+        logger.info("Compiling model with torch.compile...")
+        unet = torch.compile(unet)
+        style_encoder = torch.compile(style_encoder)
+        content_encoder = torch.compile(content_encoder)
+        logger.info("✓ Model compiled")
 
     # Create model
     model: FontDiffuserModelDPM = FontDiffuserModelDPM(
@@ -364,21 +376,21 @@ def load_fontdiffuser_pipeline(args: Namespace) -> FontDiffuserDPMPipeline:
     model.to(args.device, dtype=dtype)
     model.eval()
 
-    print("✓ Model moved to device")
+    logger.info("✓ Model moved to device")
 
     # Load the training ddpm_scheduler
     train_scheduler: Any = build_ddpm_scheduler(args=args)
-    print("✓ Loaded training DDPM scheduler successfully")
+    logger.info("✓ Loaded training DDPM scheduler successfully")
 
     # Load the DPM_Solver to generate the sample
     pipe: FontDiffuserDPMPipeline = FontDiffuserDPMPipeline(
         model=model,
         ddpm_train_scheduler=train_scheduler,
         model_type=getattr(args, "model_type", None),
-        guidance_type=getattr(args, "guidance_type", None),
+        guidance_type=getattr(args, "guidance_type", "classifier-free"),
         guidance_scale=getattr(args, "guidance_scale", 7.5),
     )
-    print("✓ Loaded DPM-Solver pipeline successfully")
+    logger.info("✓ Loaded DPM-Solver pipeline successfully")
     return pipe
 
 
@@ -391,7 +403,7 @@ def sampling_batch(
     style_image_path: str,
     style_name: str = "style0",
     save_content_images: bool = True,
-) -> tuple[Optional[list[Image.Image]], Optional[list[str]], float]:
+) -> tuple[list[Image.Image] | list[str] | float]:
     """
     Batch sampling for multiple characters with single font and style
     Uses hash-based file naming
@@ -433,7 +445,7 @@ def sampling_batch(
             content_batch = content_batch.to(memory_format=torch.channels_last)
             style_batch = style_batch.to(memory_format=torch.channels_last)
 
-        print(f"  Sampling {len(valid_chars)} characters with DPM-Solver++ ...")
+        logger.info(f"  Sampling {len(valid_chars)} characters with DPM-Solver++ ...")
         start: float = time.time()
 
         # Process in batches
@@ -479,7 +491,7 @@ def sampling_batch(
                 img_path: str = os.path.join(target_dir, target_filename)
                 img.save(img_path)
 
-        print(
+        logger.info(
             f"  ✓ Generated {len(all_images)} images in {inference_time:.2f}s ({inference_time / len(all_images):.3f}s/img)"
         )
 
@@ -493,10 +505,10 @@ def image_process_batch(
     font_name: str,
     style_image_path: str,
 ) -> tuple[
-    Optional[torch.Tensor],
-    Optional[torch.Tensor],
-    Optional[list[Image.Image]],
-    Optional[list[str]],
+    torch.Tensor | None,
+    torch.Tensor | None,
+    list[Image.Image] | None,
+    list[str] | None,
 ]:
     """Process multiple characters in batch"""
     # Load style image
@@ -515,7 +527,7 @@ def image_process_batch(
     )
 
     if not available_chars:
-        print(f"Warning: No characters available in font '{font_name}'")
+        logger.info(f"Warning: No characters available in font '{font_name}'")
         return None, None, None, None
 
     # Generate content images
@@ -530,7 +542,7 @@ def image_process_batch(
             content_images_pil.append(content_image.copy())
             content_images.append(content_transform(content_image))
         except Exception as e:
-            print(f"Error processing character '{char}': {e}")
+            logger.info(f"Error processing character '{char}': {e}")
             continue
 
     if not content_images:
@@ -549,16 +561,16 @@ def main() -> None:
     """Main function"""
     args: Namespace = arg_parse()
 
-    print("\n" + "=" * 60)
-    print("FONTDIFFUSER - OPTIMIZED SAMPLING")
-    print("=" * 60)
-    print(f"Model: {args.ckpt_dir}")
-    print(f"Device: {args.device}")
-    print(f"FP16: {getattr(args, 'fp16', False)}")
-    print(f"Channels Last: {getattr(args, 'channels_last', False)}")
-    print(f"Compile: {getattr(args, 'compile', False)}")
-    print(f"Batch Size: {getattr(args, 'batch_size', 1)}")
-    print("=" * 60 + "\n")
+    logger.info("\n" + "=" * 60)
+    logger.info("FONTDIFFUSER - OPTIMIZED SAMPLING")
+    logger.info("=" * 60)
+    logger.info(f"Model: {args.ckpt_dir}")
+    logger.info(f"Device: {args.device}")
+    logger.info(f"FP16: {getattr(args, 'fp16', False)}")
+    logger.info(f"Channels Last: {getattr(args, 'channels_last', False)}")
+    logger.info(f"Compile: {getattr(args, 'compile', False)}")
+    logger.info(f"Batch Size: {getattr(args, 'batch_size', 1)}")
+    logger.info("=" * 60 + "\n")
 
     # Load pipeline
     pipe: FontDiffuserDPMPipeline = load_fontdiffuser_pipeline(args=args)
@@ -572,12 +584,12 @@ def main() -> None:
     if getattr(args, "character_input", False) and characters:
         if len(characters) > 1 or os.path.isdir(args.ttf_path):
             # Multi-character or multi-font mode
-            print(f"\n{'=' * 60}")
-            print("BATCH MODE ACTIVATED")
-            print(
+            logger.info(f"\n{'=' * 60}")
+            logger.info("BATCH MODE ACTIVATED")
+            logger.info(
                 f"Characters: {len(characters)} - {characters[:10]}{'...' if len(characters) > 10 else ''}"
             )
-            print("=" * 60)
+            logger.info("=" * 60)
 
             # Load font manager
             font_manager: FontManager = FontManager(args.ttf_path)
@@ -597,18 +609,18 @@ def main() -> None:
             # Process each font
             total_generated: int = 0
             for font_idx, font_name in enumerate(font_names):
-                print(f"\n{'=' * 60}")
-                print(f"[Font {font_idx + 1}/{len(font_names)}] {font_name}")
-                print("=" * 60)
+                logger.info(f"\n{'=' * 60}")
+                logger.info(f"[Font {font_idx + 1}/{len(font_names)}] {font_name}")
+                logger.info("=" * 60)
 
                 # Get available characters
                 available: list[str] = font_manager.get_available_chars_for_font(
                     font_name, characters
                 )
-                print(f"  Available characters: {len(available)}/{len(characters)}")
+                logger.info(f"  Available characters: {len(available)}/{len(characters)}")
 
                 if not available:
-                    print("  ⚠ Skipping font (no characters available)")
+                    logger.info("  ⚠ Skipping font (no characters available)")
                     continue
 
                 # Sample in batch
@@ -628,18 +640,18 @@ def main() -> None:
 
                 total_generated += len(images)
 
-            print("\n" + "=" * 60)
-            print("✓ BATCH PROCESSING COMPLETE")
-            print("=" * 60)
-            print(f"Total images generated: {total_generated}")
-            print(f"\nOutput structure:")
-            print(f"  {args.save_image_dir}/")
-            print(f"    ├── ContentImage/")
-            print(f"    │   └── U+XXXX_char_hash.png")
-            print(f"    └── TargetImage/")
-            print(f"        └── {style_name}/")
-            print(f"            └── U+XXXX_char_{style_name}_hash.png")
-            print("=" * 60)
+            logger.info("\n" + "=" * 60)
+            logger.info("✓ BATCH PROCESSING COMPLETE")
+            logger.info("=" * 60)
+            logger.info(f"Total images generated: {total_generated}")
+            logger.info(f"\nOutput structure:")
+            logger.info(f"  {args.save_image_dir}/")
+            logger.info(f"    ├── ContentImage/")
+            logger.info(f"    │   └── U+XXXX_char_hash.png")
+            logger.info(f"    └── TargetImage/")
+            logger.info(f"        └── {style_name}/")
+            logger.info(f"            └── U+XXXX_char_{style_name}_hash.png")
+            logger.info("=" * 60)
 
 
 if __name__ == "__main__":

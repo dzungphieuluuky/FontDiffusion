@@ -16,7 +16,7 @@ from PIL import Image
 from huggingface_hub.utils import tqdm
 
 from utilities import (
-    get_hf_bar,
+    HFTqdm,
 )
 
 from filename_utils import compute_file_hash

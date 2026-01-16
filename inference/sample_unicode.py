@@ -186,7 +186,7 @@ class FontDiffuserSampler:
         if args.character_input:
             self.ttf_font = load_ttf(ttf_path=args.ttf_path)
 
-    def sample_single_character(self, character: str, save_dir: Optional[str] = None):
+    def sample_single_character(self, character: str, save_dir: str = None):
         """Generate a single character with the loaded style"""
         if save_dir is None:
             save_dir = self.args.save_image_dir
@@ -266,7 +266,7 @@ class FontDiffuserSampler:
         return images[0]
 
     def sample_multiple_characters(
-        self, characters: list[str], save_dir: Optional[str] = None
+        self, characters: list[str], save_dir: str = None
     ):
         """Generate multiple characters consecutively"""
         results = {}

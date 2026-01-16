@@ -637,7 +637,6 @@ def main():
             logger.info("=" * 60)
 
         pipe = load_fontdiffuser_pipeline(pipeline_args)
-
         if accelerator.is_main_process:
             logger.info("✓ Pipeline loaded successfully.")
 

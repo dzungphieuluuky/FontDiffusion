@@ -14,7 +14,7 @@ from typing import Any, Generator, Optional
 from datasets import Dataset, Features, Image as HFImage, Value
 from PIL import Image
 
-from utilities import get_hf_bar
+from utilities import HFTqdm
 from filename_utils import compute_file_hash
 
 logger = logging.getLogger("DatasetCreator")
@@ -29,7 +29,7 @@ class DatasetConfig:
     split: str = "train"
     push_to_hub: bool = True
     private: bool = False
-    token: Optional[str] = None
+    token: str = None
     batch_size: int = 100  # Process in batches to limit memory usage
 
     def __post_init__(self):
@@ -312,8 +312,8 @@ def create_dataset(
     split: str = "train",
     push_to_hub: bool = True,
     private: bool = False,
-    token: Optional[str] = None,
-    local_save_path: Optional[str | Path] = None,
+    token: str = None,
+    local_save_path: str | Path = None,
     batch_size: int = 100,
     use_streaming: bool = True,
 ) -> Dataset:

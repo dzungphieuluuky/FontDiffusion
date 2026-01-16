@@ -30,7 +30,7 @@ from src import (
 from src.model import FontDiffuserWithFST
 from tools.utilities import (
     find_checkpoint,
-    get_hf_bar,
+    HFTqdm,
     load_model_checkpoint,
     save_model_checkpoint,
 )
