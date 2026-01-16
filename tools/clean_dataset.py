@@ -10,7 +10,7 @@ import json
 import logging
 from pathlib import Path
 
-from tqdm import tqdm
+from huggingface_hub.utils import tqdm
 
 logger = logging.getLogger("DatasetCleaner")
 logging.basicConfig(

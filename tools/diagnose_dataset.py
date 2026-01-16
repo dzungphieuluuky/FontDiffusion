@@ -11,7 +11,7 @@ import logging
 from collections import defaultdict
 from pathlib import Path
 
-from tqdm import tqdm
+from huggingface_hub.utils import tqdm
 
 logger = logging.getLogger("DatasetDiagnostics")
 logging.basicConfig(
