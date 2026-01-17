@@ -15,9 +15,8 @@ import logging
 
 from safetensors.torch import save_file
 from huggingface_hub import HfApi, create_repo, login
-from utilities import HFTqdm
 
-from .utilities import load_model_checkpoint, save_model_checkpoint
+from utilities import load_model_checkpoint, save_model_checkpoint, HFTqdm
 
 logger = logging.getLogger("ModelsUploader")
 

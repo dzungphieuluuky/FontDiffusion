@@ -1,106 +1,123 @@
 # FontDiffuser
 
-FontDiffuser is a neural network-based font style transfer and generation toolkit. It leverages diffusion models to synthesize or transfer font styles, supporting both single and batch character processing with a variety of optimizations for efficient inference.
+Diffusion-based font style transfer and generation toolkit with optimized inference, batch processing, and reproducible, hash-named outputs.
 
 ## Features
+- Font style transfer (content ↔ style)
+- Optimized inference: FP16, xformers, channels_last, torch.compile
+- Batch & distributed sampling pipelines
+- LRU caching for fonts/transforms
+- Hash-based filenames and single source of truth (`results_checkpoint.json`)
+- Tools for dataset creation, validation, and export
 
-- **Font Style Transfer:** Generate new font images by transferring style from one font/image to another.
-- **Optimized Inference:** Supports FP16, torch.compile, channels_last, xformers, and other optimizations for fast and memory-efficient inference.
-- **Batch Processing:** Efficiently process multiple characters in a single run.
-- **Caching:** Uses LRU caching for font loading, character checks, and image transforms.
-- **Flexible Input:** Accepts both character and image inputs for content and style.
-- **Safe for Pretrained Weights:** All optimizations are safe and do not alter model weights or outputs.
-
-## Installation
-
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/dzungphieuluuky/FontDiffusion.git
-   cd FontDiffusion
-   ```
-
-2. **Install dependencies:**
-   ```bash
-   uv pip install -r requirements.txt
-   ```
-
-3. **(Optional) Install xformers for memory-efficient attention:**
-   ```bash
-   uv pip install xformers
-   ```
-
-## Usage
-
-### Optimized Inference
-
-Run the optimized sampling script:
-
+## Quick setup (Windows / Linux / Colab / Kaggle)
+1. Clone:
 ```bash
-python sample_optimized.py --ckpt_dir path/to/checkpoints --content_character "A" --style_image_path path/to/style.png --save_image --save_image_dir results/
+git clone https://github.com/dzungphieuluuky/FontDiffusion.git
+cd FontDiffusion
 ```
-
-**Common arguments:**
-- `--ckpt_dir`: Path to pretrained model checkpoints.
-- `--content_character`: Character to generate (if using font input).
-- `--content_image_path`: Path to content image (if using image input).
-- `--style_image_path`: Path to style image.
-- `--ttf_path`: Path to TTF font file.
-- `--save_image`: Save generated images.
-- `--save_image_dir`: Directory to save results.
-- `--device`: Device for inference (e.g., `cuda:0`).
-- `--fp16`: Use half-precision inference.
-- `--enable_xformers`: Enable xformers memory-efficient attention.
-
-For a full list of options, run:
+2. Install dependencies (uses `uv` wrapper if available):
 ```bash
-python sample_optimized.py --help
+uv pip install -r requirements.txt
 ```
 
-### Batch Processing
+Colab notebook: https://colab.research.google.com/github/dzungphieuluuky/FontDiffusion/blob/main/font_diffusion.ipynb  
+Kaggle notebook: https://www.kaggle.com/code/dzung271828/font-diffusion
 
-To process multiple characters in a batch:
+
+## Repo layout
+- configs/ — central CLI parser (`configs/fontdiffuser.py`)
+- src/ — model implementations and optimized builds
+  - src/modules/ — attention, encoders, UNet, SCR modules
+- inference/ — sampling pipelines
+  - sample_optimized.py (single-GPU), sample_batch.py, sample_distributed.py
+- training/ — training orchestration and trainer implementations
+  - trainer.py, trainer_fst.py, config.py
+- dataset/ — dataset classes and collate logic
+- tools/ — dataset creation, validation, filename utilities, exports
+- scripts/ — helper shell/batch scripts for common workflows
+- ckpt/ — place pretrained checkpoints here
+- results_checkpoint.json — canonical metadata for generated datasets
+
+## Usage examples
+
+### Unified inference entrypoint (recommended)
+Use run_inference.py to route to optimized, batch, or distributed sampling while reusing the central parser.
+- Single-image optimized:
 ```bash
-python sample_optimized.py --ckpt_dir path/to/checkpoints --character_input --content_character "ABCD" --style_image_path path/to/style.png --batch_size 4 --save_image --save_image_dir results/
+python run_inference.py --mode sample_optimized --ckpt_dir ckpt/ \
+  --content_character "A" --style_image_path path/to/style.png \
+  --save_image --save_image_dir results/
 ```
 
-## Project Structure
-
-```
-font_diffusion/
-├── configs/                # Configuration files and argument parsers
-├── src/                    # Model architectures and pipeline
-├── utils.py                # Utility functions (font loading, image saving, etc.)
-├── sample_optimized.py     # Main optimized inference script
-├── requirements.txt        # Python dependencies
-└── README.md               # Project documentation
+- Batch generation (single GPU):
+```bash
+python run_inference.py --mode sample_batch --ckpt_dir ckpt/ \
+  --characters chars.txt --style_images styles/ --ttf_path fonts/default.ttf \
+  --output_dir results/ --batch_size 8 --fp16 --compile
 ```
 
-## Model Checkpoints
-
-Download pretrained checkpoints and place them in a directory (e.g., `checkpoints/`). Specify this path with `--ckpt_dir`.
-
-## Citation
-
-If you use FontDiffuser in your research, please cite:
-
+- Distributed multi-GPU generation (Accelerate):
+```bash
+accelerate launch run_inference.py --mode sample_distributed --ckpt_dir ckpt/ \
+  --characters chars.txt --style_images styles/ --ttf_path "fonts/*.ttf" \
+  --output_dir my_dataset/ --batch_size 4 --save_interval 10 --use_wandb
 ```
-@misc{fontdiffuser2025,
-  title={FontDiffuser: Diffusion Models for Font Style Transfer},
-  author={Your Name},
-  year={2025},
-  url={https://github.com/yourusername/font_diffusion}
+
+### Create Hugging Face dataset from generated outputs
+- Non-streaming (loads images into memory; simple):
+```bash
+python tools/create_hf_dataset.py --data-dir ./results/ --repo-id username/fontdiffuser-ds \
+  --split train --no-push --local-save ./hf_cache/
+```
+
+- Streaming mode (memory-efficient; use on Colab / Kaggle):
+```bash
+python tools/create_hf_dataset_streaming.py --data-dir ./results/ --repo-id username/fontdiffuser-ds \
+  --split train --no-push --local-save ./hf_cache/ --batch-size 200
+```
+
+### Export a Hugging Face dataset back to FontDiffusion layout
+- Sequential / simple export from local dataset:
+```bash
+python tools/export_hf_dataset_to_disk.py --output-dir ./exported/ --local-path ./hf_cache/ --split train
+```
+
+- High-performance parallel export from Hub or local:
+```bash
+python tools/export_hf_dataset_to_disk_parallel.py --output-dir ./exported_parallel/ \
+  --repo-id username/fontdiffuser-ds --split train --workers 8 --batch-size 1000
+```
+
+Notes:
+- All commands share CLI flags defined in `configs/fontdiffuser.py`; prefer the unified entrypoint (`run_inference.py`) for inference.
+- Use streaming dataset creation when working in low‑RAM environments (Colab / Kaggle).
+
+## Conventions & Notes (must-follow)
+- Centralized CLI: always use `configs/fontdiffuser.py` — do not duplicate parsers.
+- Single source of truth for dataset metadata: `results_checkpoint.json`.
+- Filename hashing: use tools/filename_utils.py for deterministic names.
+- Preserve checkpoint formats; migrations require explicit scripts.
+- Use utilities in tools/ for IO, hashing, and validation.
+
+## Development & Debugging
+- Use `tools/diagnose_dataset.py` to validate dataset integrity before training.
+- If training raises FileNotFoundError for images, ensure `results_checkpoint.json` matches files on disk and that create-validation/copy steps did not drop files.
+- For dataset image extensions, code accepts both `.png` and `.jpg` where utilities are used.
+
+## Scripts
+- scripts/train_phase_1.sh, scripts/train_phase_2.sh — example training runs
+- scripts/run_batch_example.sh — example batch inference
+
+## Acknowledgements
+```
+@misc{FontDiffuser,
+  title={FontDiffuser: One-Shot Font Generation via Denoising Diffusion with Multi-Scale Content Aggregation and Style Contrastive Learning},
+  author={Zhenhua Yang, Dezhi Peng, Yuxin Kong, Yuyi Zhang, Cong Yao, Lianwen Jin},
+  year={2023},
+  url={https://github.com/yeungchenwa/FontDiffuser}
 }
 ```
 
 ## License
-
-This project is licensed under the MIT License.
-
-## Acknowledgements
-
-- [Diffusers](https://github.com/huggingface/diffusers)
-- [xformers](https://github.com/facebookresearch/xformers)
-- [Pillow](https://python-pillow.org/)
-
----
-For questions or contributions, please open an issue or pull request.
+MIT
