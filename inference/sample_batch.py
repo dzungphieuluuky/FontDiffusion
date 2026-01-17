@@ -1428,7 +1428,7 @@ def evaluate_results(
     return results
 
 
-def log_to_wandb(results: dict[str, list[dict]], args: Namespace) -> None:
+def log_to_wandb(results: dict[str, dict], args: Namespace) -> None:
     """Log results to Weights & Biases"""
 
     if not WANDB_AVAILABLE:
