@@ -1440,8 +1440,7 @@ def log_to_wandb(results: dict[str, dict], args: Namespace) -> None:
         logger.info(f"{'LOGGING TO WEIGHTS & BIASES':^60}")
         logger.info("=" * 60)
 
-        # Initialize wandb
-        run_name = args.wandb_run_name
+        run_name: str | None = args.wandb_run_name
 
         wandb.init(
             project=args.wandb_project,
@@ -1461,7 +1460,7 @@ def log_to_wandb(results: dict[str, dict], args: Namespace) -> None:
         )
 
         # Log generation statistics
-        num_generations = len(results.get("generations", []))
+        num_generations: int = len(results.get("generations", []))
         wandb.log(
             {
                 "total_generations": num_generations,
@@ -1472,7 +1471,7 @@ def log_to_wandb(results: dict[str, dict], args: Namespace) -> None:
         )
 
         # Log metrics if available
-        metrics = results.get("metrics", {})
+        metrics: dict = results.get("metrics", {})
 
         if "lpips" in metrics and isinstance(metrics["lpips"], dict):
             wandb.log(
@@ -1501,38 +1500,41 @@ def log_to_wandb(results: dict[str, dict], args: Namespace) -> None:
 
         # Log inference timing
         if "inference_times" in metrics and metrics["inference_times"]:
-            timing_data = metrics["inference_times"]
+            timing_data: list = metrics["inference_times"]
 
-            total_times = [t["total_time"] for t in timing_data if "total_time" in t]
-            times_per_image = [
-                t["time_per_image"] for t in timing_data if "time_per_image" in t
+            # Only process dict entries
+            total_times: list[float] = [
+                t["total_time"] for t in timing_data if isinstance(t, dict) and "total_time" in t
+            ]
+            times_per_image: list[float] = [
+                t["time_per_image"] for t in timing_data if isinstance(t, dict) and "time_per_image" in t
             ]
 
             if total_times:
                 wandb.log(
                     {
-                        "timing/mean_batch_time": np.mean(total_times),
-                        "timing/total_time": np.sum(total_times),
+                        "timing/mean_batch_time": float(np.mean(total_times)),
+                        "timing/total_time": float(np.sum(total_times)),
                     }
                 )
 
             if times_per_image:
                 wandb.log(
                     {
-                        "timing/mean_time_per_image": np.mean(times_per_image),
-                        "timing/median_time_per_image": np.median(times_per_image),
+                        "timing/mean_time_per_image": float(np.mean(times_per_image)),
+                        "timing/median_time_per_image": float(np.median(times_per_image)),
                     }
                 )
 
         # Log sample images
         logger.info("\n📸 Logging sample images...")
-        sample_generations = results.get("generations", [])[:20]  # Log first 20
+        sample_generations: list[dict] = results.get("generations", [])[:20]
 
-        sample_images = []
+        sample_images: list = []
         for gen in sample_generations:
-            target_path = gen.get("target_image_path", "")
+            target_path: str = gen.get("target_image_path", "")
             if target_path:
-                full_path = os.path.join(args.output_dir, target_path)
+                full_path: str = os.path.join(args.output_dir, target_path)
                 if os.path.exists(full_path):
                     try:
                         img = Image.open(full_path)
@@ -1562,7 +1564,7 @@ def log_to_wandb(results: dict[str, dict], args: Namespace) -> None:
             ]
         )
 
-        for gen in results.get("generations", [])[:100]:  # Log first 100
+        for gen in results.get("generations", [])[:100]:
             generation_table.add_data(
                 gen.get("character", ""),
                 gen.get("style", ""),
@@ -1588,7 +1590,6 @@ def log_to_wandb(results: dict[str, dict], args: Namespace) -> None:
         import traceback
 
         traceback.print_exc()
-
 
 def main() -> None:
     """Main function"""
