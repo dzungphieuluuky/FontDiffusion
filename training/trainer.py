@@ -411,12 +411,11 @@ class FontDiffuserTrainer:
             f"Expected neg_images shape [B, num_neg, C, H, W], got {neg_images.shape}"
         )
 
-        # ✅ PASS 5D TENSOR DIRECTLY - DO NOT FLATTEN
         sample_emb, pos_emb, neg_emb = self.scr(
             pred_original_sample_norm,  # [B, 3, resolution, resolution]
             target_images,  # [B, 3, resolution, resolution]
             neg_images,  # [B, num_neg, 3, resolution, resolution]
-            nce_layers=self._parse_nce_layers(),
+            nce_layers=self.args.nce_layers,
         )
 
         sc_loss = self.scr.calculate_nce_loss(
@@ -426,13 +425,6 @@ class FontDiffuserTrainer:
         )
 
         return sc_loss
-
-    def _parse_nce_layers(self) -> list:
-        """Parse NCE layers from args (handle both string and list)."""
-        nce_layers = getattr(self.args, "nce_layers", "0,1,2,3")
-        if isinstance(nce_layers, str):
-            return [int(x) for x in nce_layers.split(",")]
-        return nce_layers
 
     def train_step(
         self,
