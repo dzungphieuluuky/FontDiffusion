@@ -15,7 +15,7 @@ import logging
 
 from safetensors.torch import save_file
 from huggingface_hub import HfApi, create_repo, login
-from tqdm.auto import tqdm
+from utilities import HFTqdm
 
 from .utilities import load_model_checkpoint, save_model_checkpoint
 
@@ -370,7 +370,7 @@ def convert_files_parallel(
         }
 
         # Process results
-        for future in tqdm(
+        for future in HFTqdm(
             concurrent.futures.as_completed(future_to_file),
             total=len(future_to_file),
             desc="Converting files",
@@ -415,7 +415,7 @@ def convert_files_sequential(pth_files: list[Path], verbose: bool) -> dict[str, 
 
     print(f"Converting {len(pth_files)} .pth files sequentially...")
 
-    for pth_path in tqdm(
+    for pth_path in HFTqdm(
         pth_files, desc="Converting files", unit="file", disable=not verbose
     ):
         try:

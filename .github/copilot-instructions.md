@@ -1,3 +1,60 @@
+# Copilot Instructions — FontDiffuser (concise)
+
+Purpose: help an AI coding agent get productive quickly in this repo by documenting architecture, workflows, conventions, and integration points.
+
+- **Big picture**: The repo implements diffusion-based font style transfer.
+  - Model code: `src/` (see `model.py`, `build_optimized.py`).
+  - Inference pipelines: `inference/` (`sample_optimized.py`, `sample_batch.py`, `sample_distributed.py`).
+  - Training: `train.py`, `train_fst.py` (training orchestration lives at repo root and `training/`).
+  - Dataset & ingestion: `dataset/` + `tools/` utilities (creation, validation, export).
+  - Checkpoints: `ckpt/` (all scripts expect `--ckpt_dir ckpt`).
+
+- **Core conventions (must-follow)**
+  - Centralized CLI: all scripts use the shared parser in `configs/fontdiffuser.py`. Reuse it — do not reimplement argument parsing.
+  - Checkpoint compatibility: maintain backward-compatible checkpoint formats; do not rename internal layer keys silently.
+  - Filename hashing: generated images and exported artifacts use hash-based names (see `tools/filename_utils.py`) — rely on these for dedup and provenance.
+  - Single source of truth for generated datasets: `results_checkpoint.json` (used by dataset tools). Do not infer metadata from folder listings alone.
+
+- **Performance & runtime patterns**
+  - Performance flags like FP16, `xformers`, `channels_last`, and `torch.compile` are used and considered safe for determinism in this codebase — follow existing flags in `inference/sample_optimized.py`.
+  - Multi-GPU inference uses `sample_distributed.py` / `sample_batch.py`; testing locally should prefer `sample_optimized.py`.
+
+- **Important files & where to look first**
+  - Config / CLI: `configs/fontdiffuser.py`
+  - Single-GPU inference example: `inference/sample_optimized.py`
+  - Training entrypoints: `train.py`, `train_fst.py`
+  - Dataset creation: `tools/create_hf_dataset.py`, `tools/create_hf_dataset_streaming.py`
+  - Filename helpers: `tools/filename_utils.py`
+  - Checkpoints directory: `ckpt/` (contains `unet`, `style_encoder`, `content_encoder` files)
+
+- **Typical developer tasks (examples)**
+  - Run inference (single image):
+    ```bash
+    python inference/sample_optimized.py --ckpt_dir ckpt --content_character "A" --style_image_path style_images/foo.png --save_image --save_image_dir results/
+    ```
+  - Start training (single-node):
+    ```bash
+    python train.py --config_path configs/fontdiffuser.py --ckpt_dir ckpt
+    ```
+  - Create HF dataset (streaming):
+    ```bash
+    python tools/create_hf_dataset_streaming.py --out_dir my_dataset/ --checkpoint results_checkpoint.json
+    ```
+
+- **Patterns an agent should use when modifying code**
+  - Minimal, surgical edits: prefer updating behavior via flags/config rather than broad refactors.
+  - Preserve public checkpoint and filename formats — include migration steps when changing them.
+  - Reuse existing utilities in `tools/` and `dataset/` for IO, hashing, and validation.
+
+- **Dependencies & integration**
+  - Key runtime deps: `torch`, `diffusers`, `xformers`, `Pillow`, `fontTools`, `accelerate`, `datasets` — check `requirements.txt`.
+  - External integrations: model weights are loaded from `ckpt/`; dataset exports rely on HF dataset tooling in `tools/`.
+
+- **When to ask the human**
+  - If a change affects checkpoint naming or weight layout.
+  - If a proposed change could alter file-hash output or dataset `results_checkpoint.json` schema.
+
+If anything here is unclear or you'd like a longer, example-driven version, tell me which area to expand (inference, training, dataset tooling, or checkpoint handling).
 
 
 # Copilot Instructions for FontDiffuser (2026)

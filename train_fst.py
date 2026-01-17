@@ -89,7 +89,7 @@ def main():
 
         # Log configuration
         logger.info("=" * 80)
-        logger.info("FONTDIFFUSER FST TRAINING")
+        logger.info("FontDiffusionWithFST Training Configuration")
         logger.info("=" * 80)
         logger.info(f"Experiment: {args.experience_name}")
         logger.info(f"Output directory: {args.output_dir}")
@@ -120,7 +120,7 @@ def main():
         trainer.train()
 
         logger.info("=" * 80)
-        logger.info("✅ TRAINING COMPLETED SUCCESSFULLY")
+        logger.info("✅ Training completed successfully!")
         logger.info("=" * 80)
 
     except KeyboardInterrupt:

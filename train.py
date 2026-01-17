@@ -71,9 +71,10 @@ def main():
 
     # Create and run trainer
     trainer = FontDiffuserTrainer(args)
+    logger.info("Setting up training...")
     trainer.setup()
+    logger.info("Starting training...")
     trainer.train()
-
     logger.info("Training completed successfully")
 
 

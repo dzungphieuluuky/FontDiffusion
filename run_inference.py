@@ -247,15 +247,17 @@ def main() -> int:
 
     # Route to appropriate inference mode with remaining arguments
     if mode == "sample_optimized":
+        logger.info("Running single-image optimized inference...")
         return run_sample_optimized(remaining_args)
     elif mode == "sample_batch":
+        logger.info("Running batch inference...")
         return run_sample_batch(remaining_args)
     elif mode == "sample_distributed":
+        logger.info("Running distributed multi-GPU inference...")
         return run_sample_distributed(remaining_args)
     else:
         logger.error(f"Unknown mode: {mode}")
-        return 1
-
+        return 1    
 
 if __name__ == "__main__":
     sys.exit(main())
