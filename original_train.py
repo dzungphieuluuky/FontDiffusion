@@ -13,9 +13,9 @@ from accelerate.logging import get_logger
 from accelerate.utils import set_seed
 from diffusers.optimization import get_scheduler
 
-from dataset.font_dataset import FontDataset
-from dataset.collate_fn import CollateFN
-from configs.fontdiffuser import get_parser
+from src.dataset.font_dataset import FontDataset
+from src.dataset.collate_fn import CollateFN
+from src.configs.fontdiffuser import get_parser
 from src import (
     FontDiffuserModel,
     ContentPerceptualLoss,

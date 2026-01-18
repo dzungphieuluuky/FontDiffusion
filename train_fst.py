@@ -7,8 +7,8 @@ import logging
 import os
 import sys
 
-from configs.fontdiffuser import get_parser
-from training.trainer_fst import FontDiffuserFSTTrainer
+from src.configs.fontdiffuser import get_parser
+from src.trainers.trainer_fst import FontDiffuserFSTTrainer
 
 # Setup logging
 logging.basicConfig(

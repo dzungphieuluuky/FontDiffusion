@@ -19,9 +19,9 @@ from torchvision import transforms
 from tqdm.auto import tqdm
 
 
-from configs.fontdiffuser import get_parser
-from training.config import TrainingConfig
-from training.trainer import FontDiffuserTrainer
+from src.configs.fontdiffuser import get_parser
+from src.trainers.training_config import TrainingConfig
+from src.trainers.trainer import FontDiffuserTrainer
 
 logger = logging.getLogger("FontDiffuserTrainer")
 
