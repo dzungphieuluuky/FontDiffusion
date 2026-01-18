@@ -1,0 +1,28 @@
+# Testing requirements for FontDiffuser
+# Install with: pip install -r tests/requirements-test.txt
+
+# Core testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-timeout>=2.1.0
+pytest-xdist>=3.0.0  # Parallel test execution
+
+# Deep Learning
+torch>=2.0.0
+torchvision>=0.15.0
+numpy>=1.20.0
+
+# Dataset utilities
+Pillow>=9.0.0
+scipy>=1.8.0
+
+# Optional: Better test output
+pytest-sugar>=0.9.6
+pytest-html>=3.1.0
+
+# Optional: Profiling and debugging
+pytest-profiling>=1.7.0
+memory-profiler>=0.60.0
+
+# Type checking (optional)
+mypy>=0.950
