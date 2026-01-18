@@ -47,7 +47,7 @@ logger = logging.getLogger("OptimizedSampler")
 
 def arg_parse() -> Namespace:
     """Parse command line arguments"""
-    from configs.fontdiffuser import get_parser
+    from src.configs.fontdiffuser import get_parser
 
     parser: ArgumentParser = get_parser()
 

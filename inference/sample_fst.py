@@ -31,7 +31,7 @@ from tools.utils import (
 
 
 def arg_parse():
-    from configs.fontdiffuser import get_parser
+    from src.configs.fontdiffuser import get_parser
 
     parser = get_parser()
     parser.add_argument("--ckpt_dir", type=str, default=None)

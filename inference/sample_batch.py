@@ -715,7 +715,7 @@ def create_args_namespace(args: Namespace) -> Namespace:
     """Create args namespace for FontDiffuser pipeline"""
 
     try:
-        from configs.fontdiffuser import get_parser
+        from src.configs.fontdiffuser import get_parser
 
         parser: ArgumentParser = get_parser()
         default_args: Namespace = parser.parse_args([])
