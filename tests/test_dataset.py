@@ -31,7 +31,7 @@ class TestDatasetLoading:
     def test_fontdataset_initialization(self, dataset_dir):
         """Test FontDataset can be initialized."""
         try:
-            from dataset.font_dataset import FontDataset
+            from src.dataset.font_dataset import FontDataset
             
             dataset = FontDataset(
                 data_root=str(dataset_dir),
@@ -48,7 +48,7 @@ class TestDatasetLoading:
     def test_fontdataset_getitem(self, dataset_dir):
         """Test FontDataset __getitem__ returns correct format."""
         try:
-            from dataset.font_dataset import FontDataset
+            from src.dataset.font_dataset import FontDataset
             
             dataset = FontDataset(
                 data_root=str(dataset_dir),

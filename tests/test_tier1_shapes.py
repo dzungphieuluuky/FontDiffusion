@@ -14,7 +14,7 @@ from typing import Tuple
 # Import core modules
 from src.modules.msse import MultiScaleStyleEncoder, ResidualBlock
 from src.modules.fst import FontStyleTransformationModule
-from src.criterion import ContentPerceptualLoss
+from src.losses.criterion import ContentPerceptualLoss
 
 
 class TestMultiScaleStyleEncoderShapes:
@@ -187,7 +187,7 @@ class TestVGG16PerceptualLossShapes:
     
     def test_vgg16_forward_pass(self, device, assert_no_nan):
         """Test VGG16 feature extraction."""
-        from src.criterion import VGG16
+        from src.losses.criterion import VGG16
         
         vgg = VGG16().to(device)
         vgg.eval()

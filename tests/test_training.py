@@ -10,7 +10,7 @@ class TestTrainingSetup:
     def test_training_config_parsing(self):
         """Test training config can be parsed."""
         try:
-            from configs.fontdiffuser import get_parser
+            from src.configs.fontdiffuser import get_parser
             
             parser = get_parser()
             assert parser is not None
