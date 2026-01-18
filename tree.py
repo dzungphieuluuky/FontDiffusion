@@ -31,11 +31,17 @@ def tree_lines(root: Path, ignore_git=False, exts=None, max_depth=None):
 
         indent = " " * (cur_depth * 2)
         rel_dir = str(Path(dirpath).resolve()).replace(str(root), "").lstrip(os.sep)
-        yield f"{indent}{Path(dirpath).name}/" if rel_dir != "" else f"{Path(dirpath).name}/"
+        yield (
+            f"{indent}{Path(dirpath).name}/"
+            if rel_dir != ""
+            else f"{Path(dirpath).name}/"
+        )
 
         filenames = sorted(filenames)
         for fn in filenames:
-            rel_path = os.path.join(os.path.relpath(dirpath, root), fn).replace(os.sep, "/")
+            rel_path = os.path.join(os.path.relpath(dirpath, root), fn).replace(
+                os.sep, "/"
+            )
             if rel_path.startswith("./"):
                 rel_path = rel_path[2:]
             if ignore_git and rel_path in ignored:
@@ -46,17 +52,33 @@ def tree_lines(root: Path, ignore_git=False, exts=None, max_depth=None):
 
 
 def main():
-    p = argparse.ArgumentParser(description="Print tree structure of a workspace to stdout")
-    p.add_argument("--root", "-r", default=".", help="Workspace root (default: current dir)")
-    p.add_argument("--ext", "-e", default="*.jpg,*.png", help="Comma separated extensions to include (e.g. .py,.md)")
-    p.add_argument("--ignore-git", action="store_true", default=False, help="Exclude files listed in .gitignore (requires git)")
+    p = argparse.ArgumentParser(
+        description="Print tree structure of a workspace to stdout"
+    )
+    p.add_argument(
+        "--root", "-r", default=".", help="Workspace root (default: current dir)"
+    )
+    p.add_argument(
+        "--ext",
+        "-e",
+        default="*.jpg,*.png",
+        help="Comma separated extensions to include (e.g. .py,.md)",
+    )
+    p.add_argument(
+        "--ignore-git",
+        action="store_true",
+        default=False,
+        help="Exclude files listed in .gitignore (requires git)",
+    )
     p.add_argument("--max-depth", type=int, default=None, help="Max depth to traverse")
     args = p.parse_args()
 
     root = Path(args.root)
     exts = [s.strip() for s in args.ext.split(",")] if args.ext else None
 
-    for line in tree_lines(root, ignore_git=args.ignore_git, exts=exts, max_depth=args.max_depth):
+    for line in tree_lines(
+        root, ignore_git=args.ignore_git, exts=exts, max_depth=args.max_depth
+    ):
         print(line)
 
 

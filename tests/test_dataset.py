@@ -13,7 +13,7 @@ class TestDatasetLoading:
         assert (dataset_dir / "train" / "ContentImage").exists()
         assert (dataset_dir / "train" / "StyleSourceImage").exists()
         assert (dataset_dir / "train" / "StyleTargetImage").exists()
-        
+
         # Check images exist
         content_images = list((dataset_dir / "train" / "ContentImage").glob("*.jpg"))
         assert len(content_images) == 3
@@ -24,7 +24,7 @@ class TestDatasetLoading:
         img_path = list((dataset_dir / "train" / "ContentImage").glob("*.jpg"))[0]
         img = Image.open(img_path)
         assert img.size == (96, 96)
-        assert img.mode == 'RGB'
+        assert img.mode == "RGB"
 
     @pytest.mark.dataset
     @pytest.mark.slow
@@ -32,13 +32,13 @@ class TestDatasetLoading:
         """Test FontDataset can be initialized."""
         try:
             from src.dataset.font_dataset import FontDataset
-            
+
             dataset = FontDataset(
                 data_root=str(dataset_dir),
                 split="train",
                 character_list=None,
             )
-            
+
             assert len(dataset) > 0
         except ImportError:
             pytest.skip("FontDataset not available")
@@ -49,19 +49,19 @@ class TestDatasetLoading:
         """Test FontDataset __getitem__ returns correct format."""
         try:
             from src.dataset.font_dataset import FontDataset
-            
+
             dataset = FontDataset(
                 data_root=str(dataset_dir),
                 split="train",
                 character_list=None,
             )
-            
+
             sample = dataset[0]
-            
+
             assert isinstance(sample, dict)
-            assert 'content_image' in sample
-            assert 'style_source_image' in sample
-            assert 'style_target_image' in sample
+            assert "content_image" in sample
+            assert "style_source_image" in sample
+            assert "style_target_image" in sample
         except (ImportError, FileNotFoundError, Exception):
             pytest.skip("FontDataset test skipped")
 
@@ -74,10 +74,10 @@ class TestDatasetValidation:
         """Test image format validation."""
         img_path = list((dataset_dir / "train" / "ContentImage").glob("*.jpg"))[0]
         img = Image.open(img_path)
-        
+
         # Valid image
         assert img.size == (96, 96)
-        assert img.mode == 'RGB'
+        assert img.mode == "RGB"
 
     @pytest.mark.dataset
     def test_missing_image_handling(self, dataset_dir):

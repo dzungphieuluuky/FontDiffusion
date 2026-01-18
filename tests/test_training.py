@@ -11,7 +11,7 @@ class TestTrainingSetup:
         """Test training config can be parsed."""
         try:
             from src.configs.fontdiffuser import get_parser
-            
+
             parser = get_parser()
             assert parser is not None
         except ImportError:
@@ -22,7 +22,7 @@ class TestTrainingSetup:
         """Test optimizer can be created."""
         model = torch.nn.Linear(10, 5)
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
-        
+
         assert optimizer is not None
         assert len(optimizer.param_groups) > 0
 
@@ -32,19 +32,19 @@ class TestTrainingSetup:
         model = torch.nn.Linear(10, 5)
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=100)
-        
+
         assert scheduler is not None
 
     @pytest.mark.unit
     def test_loss_computation(self):
         """Test loss computation."""
         batch_size, channels, height, width = 2, 4, 12, 12
-        
+
         noise_pred = torch.randn(batch_size, channels, height, width)
         target_noise = torch.randn(batch_size, channels, height, width)
-        
+
         loss = torch.nn.functional.mse_loss(noise_pred, target_noise)
-        
+
         assert loss.item() >= 0
         assert loss.requires_grad
 
@@ -53,18 +53,18 @@ class TestTrainingSetup:
         """Test gradient accumulation over batches."""
         model = torch.nn.Linear(10, 5)
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
-        
+
         accumulated_loss = 0.0
         num_accumulation_steps = 4
-        
+
         for i in range(num_accumulation_steps):
             x = torch.randn(2, 10)
             y = torch.randn(2, 5)
-            
+
             out = model(x)
             loss = torch.nn.functional.mse_loss(out, y)
             accumulated_loss += loss.item()
-        
+
         avg_loss = accumulated_loss / num_accumulation_steps
         assert avg_loss >= 0
 
@@ -77,17 +77,17 @@ class TestTrainingLoop:
         """Test a single training step."""
         model = torch.nn.Linear(16, 4)  # Simplified model
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
-        
+
         # Flatten latents for linear model
         x = sample_latents.reshape(sample_latents.size(0), -1)
-        
+
         optimizer.zero_grad()
         noise_pred = model(x)
         target_noise = torch.randn_like(noise_pred)
         loss = torch.nn.functional.mse_loss(noise_pred, target_noise)
         loss.backward()
         optimizer.step()
-        
+
         assert loss.item() >= 0
 
     @pytest.mark.unit
@@ -95,7 +95,7 @@ class TestTrainingLoop:
         """Test timestep scheduling."""
         num_steps = 1000
         timesteps = torch.randint(0, num_steps, (4,))
-        
+
         assert timesteps.min() >= 0
         assert timesteps.max() < num_steps
 
@@ -109,7 +109,7 @@ class TestTrainingLoop:
             torch.nn.Linear(64, 4),
         )
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
-        
+
         losses = []
         for step in range(5):
             x = torch.randn(2, 16)
@@ -120,6 +120,6 @@ class TestTrainingLoop:
             loss.backward()
             optimizer.step()
             losses.append(loss.item())
-        
+
         assert len(losses) == 5
         assert all(l >= 0 for l in losses)

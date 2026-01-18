@@ -12,6 +12,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from utilities import HFTqdm
+
 logger = logging.getLogger("DatasetDiagnostics")
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",

@@ -257,7 +257,8 @@ def main() -> int:
         return run_sample_distributed(remaining_args)
     else:
         logger.error(f"Unknown mode: {mode}")
-        return 1    
+        return 1
+
 
 if __name__ == "__main__":
     sys.exit(main())

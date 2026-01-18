@@ -1504,10 +1504,14 @@ def log_to_wandb(results: dict[str, dict], args: Namespace) -> None:
 
             # Only process dict entries
             total_times: list[float] = [
-                t["total_time"] for t in timing_data if isinstance(t, dict) and "total_time" in t
+                t["total_time"]
+                for t in timing_data
+                if isinstance(t, dict) and "total_time" in t
             ]
             times_per_image: list[float] = [
-                t["time_per_image"] for t in timing_data if isinstance(t, dict) and "time_per_image" in t
+                t["time_per_image"]
+                for t in timing_data
+                if isinstance(t, dict) and "time_per_image" in t
             ]
 
             if total_times:
@@ -1522,7 +1526,9 @@ def log_to_wandb(results: dict[str, dict], args: Namespace) -> None:
                 wandb.log(
                     {
                         "timing/mean_time_per_image": float(np.mean(times_per_image)),
-                        "timing/median_time_per_image": float(np.median(times_per_image)),
+                        "timing/median_time_per_image": float(
+                            np.median(times_per_image)
+                        ),
                     }
                 )
 
@@ -1590,6 +1596,7 @@ def log_to_wandb(results: dict[str, dict], args: Namespace) -> None:
         import traceback
 
         traceback.print_exc()
+
 
 def main() -> None:
     """Main function"""
