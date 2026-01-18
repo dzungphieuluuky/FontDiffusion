@@ -21,7 +21,7 @@ def get_parser():
         default=None,
         help="The output directory where the model predictions and checkpoints will be written.",
     )
-    parser.add_argument("--report_to", type=str, default="tensorboard")
+    parser.add_argument("--report_to", type=str, default="wandb", help="The logging library to use.")
     parser.add_argument(
         "--logging_dir",
         type=str,
@@ -263,4 +263,19 @@ def get_parser():
         default=False,
         help="Enable style transformation module",
     )
+
+    parser.add_argument(
+        "--controlnet",
+        action="store_true",
+        default=False,
+        help="Whether to use ControlNet."
+    )
+
+    parser.add_argument(
+        "--instructpix2pix",
+        action="store_true",
+        default=False,
+        help="Whether to use InstructPix2Pix."
+    )
+    
     return parser

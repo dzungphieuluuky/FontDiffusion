@@ -80,7 +80,7 @@ class FontDiffuserWithFST(nn.Module):
         style_target_img: torch.Tensor,
         content_encoder_downsample_size: int = 4,
         return_dict: bool = True,
-    ) -> Dict[str, torch.Tensor]:
+    ) -> dict[str, torch.Tensor]:
         """
         Forward pass with tensor shape tracking.
 
@@ -187,10 +187,10 @@ class FontDiffuserWithFST(nn.Module):
 
     def get_loss_dict(
         self,
-        outputs: Dict[str, torch.Tensor],
+        outputs: dict[str, torch.Tensor],
         target_noise: torch.Tensor,
         reduction: str = "mean",
-    ) -> Dict[str, torch.Tensor]:
+    ) -> dict[str, torch.Tensor]:
         """
         Compute loss components for training.
 
@@ -275,9 +275,9 @@ class FontDiffuserModel(ModelMixin, ConfigMixin):
     @register_to_config
     def __init__(
         self,
-        unet,
-        style_encoder,
-        content_encoder,
+        unet: UNet,
+        style_encoder: StyleEncoder,
+        content_encoder: ContentEncoder,
     ):
         super().__init__()
         self.unet = unet
@@ -337,9 +337,9 @@ class FontDiffuserModelDPM(ModelMixin, ConfigMixin):
     @register_to_config
     def __init__(
         self,
-        unet,
-        style_encoder,
-        content_encoder,
+        unet: UNet,
+        style_encoder: StyleEncoder,
+        content_encoder: ContentEncoder,
     ):
         super().__init__()
         self.unet = unet
