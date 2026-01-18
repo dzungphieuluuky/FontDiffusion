@@ -1,7 +1,7 @@
 # validate_dataset.py
 import argparse
 from pathlib import Path
-from dataset.font_dataset_fst import FontDataset, FontDatasetDebug
+from src.dataset.font_dataset_fst import FontDataset, FontDatasetDebug
 
 
 def validate_dataset(data_root):
