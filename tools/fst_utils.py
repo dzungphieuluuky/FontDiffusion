@@ -74,7 +74,7 @@ class ModelCheckpointManager:
         checkpoint_dir: str,
         load_optimizer: bool = False,
         load_scheduler: bool = False,
-    ) -> Tuple[nn.Module, Optional[torch.optim.Optimizer], Optional[object]]:
+    ) -> tuple[nn.Module, Optional[torch.optim.Optimizer], Optional[object]]:
         """Load FST model checkpoint."""
         ckpt_dir = Path(checkpoint_dir)
 

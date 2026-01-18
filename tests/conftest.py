@@ -31,10 +31,10 @@ class TestConfig:
     seed: int = 42
     resolution: int = 96
     batch_size: int = 2
-    unet_channels: Tuple[int, ...] = (64, 128, 256, 512)
+    unet_channels: tuple[int, ...] = (64, 128, 256, 512)
     style_start_channel: int = 64
     content_start_channel: int = 64
-    style_image_size: Tuple[int, ...] = (96, 96)
+    style_image_size: tuple[int, ...] = (96, 96)
     content_encoder_downsample_size: int = 4
     channel_attn: bool = True
     num_neg: int = 4

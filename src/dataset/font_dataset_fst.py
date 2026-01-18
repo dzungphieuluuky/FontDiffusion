@@ -50,7 +50,7 @@ class FontDataset(Dataset):
         self,
         args,
         phase: str,
-        transforms: Optional[List] = None,
+        transforms: Optional[list] = None,
         scr: bool = False,
         use_fst: bool = False,
         style_source_same_prob: float = 0.5,
@@ -184,7 +184,7 @@ class FontDataset(Dataset):
         source_image = Image.open(source_image_path).convert("RGB")
         return source_image
 
-    def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
+    def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
         """
         Get a sample from the dataset.
 
@@ -326,7 +326,7 @@ class FontDatasetDebug:
     def __init__(self, dataset: FontDataset):
         self.dataset = dataset
 
-    def check_structure(self) -> Dict[str, any]:
+    def check_structure(self) -> dict[str, any]:
         """Check dataset structure and return statistics."""
         stats = {
             "total_samples": len(self.dataset),

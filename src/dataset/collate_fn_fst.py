@@ -26,7 +26,7 @@ class CollateFN(object):
         """
         self.verbose = verbose
 
-    def __call__(self, batch: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def __call__(self, batch: list[dict[str, any]]) -> dict[str, any]:
         """
         Collate a list of samples into a batch.
 
@@ -52,7 +52,7 @@ class CollateFN(object):
 
         return batched_data
 
-    def _collate_tensors(self, key: str, tensors: List[torch.Tensor]) -> torch.Tensor:
+    def _collate_tensors(self, key: str, tensors: list[torch.Tensor]) -> torch.Tensor:
         """
         Collate a list of tensors, handling variable shapes.
 
@@ -84,7 +84,7 @@ class CollateFN(object):
         return self._standardize_and_stack(key, tensors, first_shape)
 
     def _collate_neg_images(
-        self, neg_image_tensors: List[torch.Tensor]
+        self, neg_image_tensors: list[torch.Tensor]
     ) -> torch.Tensor:
         """
         Collate negative images from SCR.
@@ -127,7 +127,7 @@ class CollateFN(object):
         return torch.stack(padded_negs)
 
     def _standardize_and_stack(
-        self, key: str, tensors: List[torch.Tensor], target_shape: torch.Size
+        self, key: str, tensors: list[torch.Tensor], target_shape: torch.Size
     ) -> torch.Tensor:
         """
         Standardize tensor shapes and stack them.
@@ -192,7 +192,7 @@ class CollateFNDebug(CollateFN):
         super().__init__(verbose=True)
         self.call_count = 0
 
-    def __call__(self, batch: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def __call__(self, batch: list[dict[str, Any]]) -> dict[str, Any]:
         """Collate with debug logging."""
         self.call_count += 1
 

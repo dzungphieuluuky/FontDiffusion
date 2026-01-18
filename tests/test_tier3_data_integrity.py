@@ -64,7 +64,7 @@ class DummyFontDataset(Dataset):
 class SimpleDummyCollate:
     """Simple collate function."""
 
-    def __call__(self, batch: List[Dict]) -> Dict:
+    def __call__(self, batch: list[dict]) -> dict:
         """Collate batch."""
         result = {}
         for key in batch[0].keys():
