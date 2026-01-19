@@ -5,14 +5,14 @@ defaults:
   - default
 
 # Input/Output
-characters: null
+characters: ???
 characters_file: null
 start_line: 1
 end_line: null
-style_images: null
+style_images: ???l
 output_dir: "my_dataset/train_original"
 ground_truth_dir: null
-ttf_path: null
+ttf_path: ???
 
 # Batch Processing
 batch_size: 4
@@ -23,13 +23,13 @@ dataset_split: "train_original"
 
 # Evaluation
 evaluate: true
-compute_fid: false
+compute_fid: truee
 enable_attention_slicing: false
 
 # Optimization (batch-specific)
 fast_sampling: false
 
 # Weights & Biases
-use_wandb: false
+use_wandb: true
 wandb_project: "fontdiffuser-eval"
 wandb_run_name: null

@@ -1,0 +1,57 @@
+# Multi-GPU distributed batch inference configuration
+# Inherits from default and adds distributed-specific settings
+
+defaults:
+  - default
+
+# Input/Output
+characters: null
+characters_file: null
+start_line: 1
+end_line: null
+style_images: null
+output_dir: "predictions"
+ground_truth_dir: null
+ttf_path: null
+
+# Batch Processing (distributed optimized)
+batch_size: 16
+save_interval: 1
+
+# Dataset Configuration
+dataset_split: "train_original"
+
+# Evaluation
+evaluate: false
+compute_fid: false
+enable_attention_slicing: false
+
+# Distributed Training Settings
+local_rank: -1
+
+# Optimization (distributed-specific)
+fast_sampling: false
+deterministic: true
+
+# Mixed Precision for multi-GPU
+mixed_precision: "fp16"
+
+# Weights & Biases
+use_wandb: true
+wandb_project: "fontdiffuser-distributed"
+wandb_run_name: null
+
+# Inference-specific optimizations
+channels_last: true
+compile: true
+enable_xformers: false
+
+# Sampling (can be tuned per distributed run)
+num_inference_steps: 20
+guidance_scale: 7.5
+order: 2
+skip_type: "time_uniform"
+method: "multistep"
+
+# Character generation hints
+character_input: null

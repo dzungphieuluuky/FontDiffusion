@@ -241,13 +241,6 @@ def load_fontdiffuser_pipeline(cfg: DictConfig) -> FontDiffuserDPMPipeline:
         content_encoder = content_encoder.to(memory_format=torch.channels_last)
         logger.info("✓ Converted to channels-last")
 
-    if cfg.compile:
-        logger.info("Compiling model with torch.compile...")
-        unet = torch.compile(unet)
-        style_encoder = torch.compile(style_encoder)
-        content_encoder = torch.compile(content_encoder)
-        logger.info("✓ Model compiled")
-
     model: FontDiffuserModelDPM = FontDiffuserModelDPM(
         unet=unet, style_encoder=style_encoder, content_encoder=content_encoder
     )
@@ -431,8 +424,9 @@ def main(cfg: DictConfig) -> None:
     logger.info(OmegaConf.to_yaml(cfg))
     logger.info("=" * 60 + "\n")
 
-    if not cfg.ckpt_dir:
-        raise ValueError("ckpt_dir must be specified")
+    missing_keys = OmegaConf.missing_keys(cfg)
+    if missing_keys:
+        raise RuntimeError(f"Missing mandatory keys: {missing_keys}")
 
     pipe: FontDiffuserDPMPipeline = load_fontdiffuser_pipeline(cfg=cfg)
 

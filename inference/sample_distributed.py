@@ -1,26 +1,19 @@
-"""
-Multi-GPU batch sampling and evaluation for FontDiffuser using Accelerate.
-
-Uses hash-based file naming, results_checkpoint.json as single source of truth,
-and supports resumable generation with proper multi-GPU distribution.
-
-FIXED: Deadlock issues in multi-GPU inference
-"""
-
-import sys
-from pathlib import Path
-import argparse
-import json
 import logging
 import os
+import sys
 import time
+import json
 from pathlib import Path
+from typing import Optional
 
+import hydra
+from omegaconf import DictConfig, OmegaConf
 import numpy as np
 import torch
 from accelerate import Accelerator
 from accelerate.utils import gather_object
 from PIL import Image
+import torchvision.transforms as transforms
 
 from src.tools.filename_utils import (
     get_content_filename,
@@ -34,13 +27,11 @@ from inference.sample_optimized import (
     get_content_transform,
     get_style_transform,
     load_fontdiffuser_pipeline,
+    FontManager,
 )
 from inference.sample_batch import (
-    FontManager,
     QualityEvaluator,
     GenerationTracker,
-    parse_args,
-    create_args_namespace,
     load_characters,
     load_style_images,
     save_checkpoint,
@@ -48,11 +39,11 @@ from inference.sample_batch import (
 )
 from src.dpm_solver.pipeline_dpm_solver import FontDiffuserDPMPipeline
 
-logger = logging.getLogger("MultiGPUsBatchSampler")
+logger = logging.getLogger("DistributedSampler")
+
 # Optional dependencies
 try:
     import lpips
-
     LPIPS_AVAILABLE = True
 except ImportError:
     LPIPS_AVAILABLE = False
@@ -60,7 +51,6 @@ except ImportError:
 
 try:
     from pytorch_fid import fid_score
-
     FID_AVAILABLE = True
 except ImportError:
     FID_AVAILABLE = False
@@ -68,7 +58,6 @@ except ImportError:
 
 try:
     from skimage.metrics import structural_similarity as ssim
-
     SSIM_AVAILABLE = True
 except ImportError:
     SSIM_AVAILABLE = False
@@ -76,7 +65,6 @@ except ImportError:
 
 try:
     import wandb
-
     WANDB_AVAILABLE = True
 except ImportError:
     WANDB_AVAILABLE = False
@@ -115,7 +103,7 @@ def generate_content_images_with_accelerator(
     # Split characters across GPUs
     local_char_paths = {}
     with accelerator.split_between_processes(characters) as local_chars:
-        # FIX 1: All processes must iterate (don't use conditional progress bar disable)
+        # All processes must iterate (don't use conditional progress bar disable)
         for char in local_chars:
             # Find font containing character
             found_font = None
@@ -148,11 +136,11 @@ def generate_content_images_with_accelerator(
                     f"GPU {accelerator.process_index}: Error generating '{char}': {e}"
                 )
 
-    # FIX 2: Gather results from all GPUs properly
+    # Gather results from all GPUs
     accelerator.wait_for_everyone()
     all_char_paths_list = gather_object([local_char_paths])
 
-    # FIX 3: All processes merge results (not just main process)
+    # All processes merge results
     merged_char_paths = {}
     for paths in all_char_paths_list:
         merged_char_paths.update(paths)
@@ -160,12 +148,12 @@ def generate_content_images_with_accelerator(
     if accelerator.is_main_process:
         logger.info(f"Generated {len(merged_char_paths)} content images")
 
-    # FIX 4: Return on ALL processes, not just main
+    # Return on ALL processes
     return merged_char_paths
 
 
 def sampling_batch_with_accelerator(
-    args: argparse.Namespace,
+    cfg: DictConfig,
     pipe: FontDiffuserDPMPipeline,
     characters: list[str],
     style_image_path: str | Image.Image,
@@ -175,7 +163,7 @@ def sampling_batch_with_accelerator(
     """Batch sampling for multiple characters.
 
     Args:
-        args: Arguments
+        cfg: Hydra DictConfig
         pipe: Pipeline
         characters: list of characters
         style_image_path: Style image path or PIL image
@@ -197,9 +185,13 @@ def sampling_batch_with_accelerator(
         else:
             style_image = style_image_path.convert("RGB")
 
-        style_transform = get_style_transform(args.style_image_size)
+        style_transform = get_style_transform(
+            (cfg.style_image_size, cfg.style_image_size)
+        )
         font = font_manager.get_font(font_name)
-        content_transform = get_content_transform(args.content_image_size)
+        content_transform = get_content_transform(
+            (cfg.content_image_size, cfg.content_image_size)
+        )
 
         # Generate content images
         content_images = []
@@ -220,32 +212,36 @@ def sampling_batch_with_accelerator(
         )
 
         with torch.inference_mode():
-            dtype = torch.float16 if args.fp16 else torch.float32
-            content_batch = content_batch.to(args.device, dtype=dtype)
-            style_batch = style_batch.to(args.device, dtype=dtype)
+            dtype = torch.float16 if cfg.fp16 else torch.float32
+            content_batch = content_batch.to(cfg.device, dtype=dtype)
+            style_batch = style_batch.to(cfg.device, dtype=dtype)
+
+            if cfg.channels_last:
+                content_batch = content_batch.to(memory_format=torch.channels_last)
+                style_batch = style_batch.to(memory_format=torch.channels_last)
 
             start = time.perf_counter()
 
             # Process in batches
             all_images = []
-            for i in HFTqdm(range(0, len(content_batch), args.batch_size)):
-                batch_content = content_batch[i : i + args.batch_size]
-                batch_style = style_batch[i : i + args.batch_size]
+            for i in range(0, len(content_batch), cfg.batch_size):
+                batch_content = content_batch[i : i + cfg.batch_size]
+                batch_style = style_batch[i : i + cfg.batch_size]
 
                 images = pipe.generate(
                     content_images=batch_content,
                     style_images=batch_style,
                     batch_size=len(batch_content),
-                    order=args.order,
-                    num_inference_step=args.num_inference_steps,
-                    content_encoder_downsample_size=args.content_encoder_downsample_size,
-                    t_start=args.t_start,
-                    t_end=args.t_end,
-                    dm_size=args.content_image_size,
-                    algorithm_type=args.algorithm_type,
-                    skip_type=args.skip_type,
-                    method=args.method,
-                    correcting_x0_fn=args.correcting_x0_fn,
+                    order=cfg.order,
+                    num_inference_steps=cfg.num_inference_steps,
+                    content_encoder_downsample_size=cfg.content_encoder_downsample_size,
+                    t_start=cfg.t_start,
+                    t_end=cfg.t_end,
+                    dm_size=(cfg.content_image_size, cfg.content_image_size),
+                    algorithm_type=cfg.algorithm_type,
+                    skip_type=cfg.skip_type,
+                    method=cfg.method,
+                    correcting_x0_fn=cfg.correcting_x0_fn,
                 )
                 all_images.extend(images)
 
@@ -264,24 +260,24 @@ def batch_generate_images_with_accelerator(
     characters: list[str],
     style_paths_with_names: list[tuple[str, str]],
     output_dir: str,
-    args: argparse.Namespace,
+    cfg: DictConfig,
     evaluator: QualityEvaluator,
     font_manager: FontManager,
     generation_tracker: GenerationTracker,
     accelerator: Accelerator,
-) -> dict[str, list[str] | dict[str, dict[str, float]]]:
+) -> dict:
     """Main batch generation with multi-GPU support."""
 
-    # FIX 5: Generate content images on all processes
+    # Generate content images on all processes
     char_paths = generate_content_images_with_accelerator(
         characters, font_manager, output_dir, accelerator
     )
 
-    # FIX 6: Check on all processes, not just main
+    # Check on all processes
     if not char_paths:
         raise ValueError("No content images generated")
 
-    # FIX 7: Initialize results on ALL processes
+    # Initialize results on ALL processes
     all_chars_in_checkpoint = set(
         gen.get("character", "") for gen in generation_tracker.generations
     )
@@ -293,7 +289,7 @@ def batch_generate_images_with_accelerator(
     results = {
         "generations": [],
         "metrics": {"lpips": [], "ssim": [], "inference_times": []},
-        "dataset_split": args.dataset_split,
+        "dataset_split": cfg.dataset_split,
         "fonts": font_manager.get_font_names(),
         "characters": sorted(list(all_chars_in_checkpoint)),
         "styles": sorted(list(all_styles_in_checkpoint)),
@@ -324,7 +320,7 @@ def batch_generate_images_with_accelerator(
     local_skipped_count = 0
     local_failed_count = 0
 
-    # FIX 8: Distribute styles across GPUs
+    # Distribute styles across GPUs
     with accelerator.split_between_processes(style_paths_with_names) as local_styles:
         for style_idx, (style_path, style_name) in enumerate(local_styles):
             try:
@@ -346,7 +342,7 @@ def batch_generate_images_with_accelerator(
 
                 # Generate batch
                 images, valid_chars, batch_time = sampling_batch_with_accelerator(
-                    args,
+                    cfg,
                     pipe,
                     chars_to_generate,
                     style_path,
@@ -407,11 +403,11 @@ def batch_generate_images_with_accelerator(
                         }
                     )
 
-                # FIX 9: Checkpoint synchronization - all processes wait
-                if args.save_interval > 0 and (style_idx + 1) % args.save_interval == 0:
+                # Checkpoint synchronization - all processes wait
+                if cfg.save_interval > 0 and (style_idx + 1) % cfg.save_interval == 0:
                     accelerator.wait_for_everyone()
 
-                    # FIX 10: Gather results from all GPUs before saving
+                    # Gather results from all GPUs before saving
                     all_generations = gather_object(results["generations"])
 
                     if accelerator.is_main_process:
@@ -422,7 +418,7 @@ def batch_generate_images_with_accelerator(
 
                         checkpoint_results = results.copy()
                         checkpoint_results["generations"] = merged_generations
-                        save_checkpoint(checkpoint_results, args.output_dir)
+                        save_checkpoint(checkpoint_results, output_dir)
                         logger.info(
                             f"Checkpoint saved at style {style_idx + 1}/{len(local_styles)}"
                         )
@@ -439,13 +435,13 @@ def batch_generate_images_with_accelerator(
                     else len(characters)
                 )
 
-    # FIX 11: Gather final results from all GPUs
+    # Gather final results from all GPUs
     accelerator.wait_for_everyone()
 
     all_generations = gather_object(results["generations"])
     all_inference_times = gather_object(results["metrics"]["inference_times"])
 
-    # FIX 12: Gather counters from all processes
+    # Gather counters from all processes
     all_generated_counts = gather_object([local_generated_count])
     all_skipped_counts = gather_object([local_skipped_count])
     all_failed_counts = gather_object([local_failed_count])
@@ -484,27 +480,26 @@ def batch_generate_images_with_accelerator(
         results["total_chars"] = len(all_chars_in_checkpoint)
         results["total_styles"] = len(all_styles_in_checkpoint)
 
-        save_checkpoint(results, args.output_dir)
+        save_checkpoint(results, output_dir)
 
-    # FIX 13: Wait before returning
+    # Wait before returning
     accelerator.wait_for_everyone()
     return results
 
 
 def evaluate_results_with_accelerator(
-    results: dict[str, list[dict[str, str]]],
+    results: dict,
     evaluator: QualityEvaluator,
     output_dir: str,
-    ground_truth_dir: str | None,
-    compute_fid: bool = False,
+    cfg: DictConfig,
     accelerator: Accelerator | None = None,
-) -> dict[str, dict[str, dict[str, float]]]:
+) -> dict:
     """Evaluate generated images on main process."""
 
     if not accelerator or not accelerator.is_main_process:
         return results
 
-    if not ground_truth_dir or not os.path.exists(ground_truth_dir):
+    if not cfg.ground_truth_dir or not os.path.exists(cfg.ground_truth_dir):
         logger.info("No ground truth directory provided, skipping evaluation")
         return results
 
@@ -528,10 +523,10 @@ def evaluate_results_with_accelerator(
 
         # Try to find ground truth
         gt_filename = get_target_filename(char, style)
-        gt_path = os.path.join(ground_truth_dir, "TargetImage", style, gt_filename)
+        gt_path = os.path.join(cfg.ground_truth_dir, "TargetImage", style, gt_filename)
 
         if not os.path.exists(gt_path):
-            gt_path = os.path.join(ground_truth_dir, style, gt_filename)
+            gt_path = os.path.join(cfg.ground_truth_dir, style, gt_filename)
 
         if not os.path.exists(gt_path):
             continue
@@ -540,15 +535,17 @@ def evaluate_results_with_accelerator(
             generated_img = Image.open(target_path).convert("RGB")
             gt_img = Image.open(gt_path).convert("RGB")
 
-            lpips_score = evaluator.compute_lpips(generated_img, gt_img)
-            if lpips_score >= 0:
-                lpips_scores.append(lpips_score)
-                gen["lpips"] = lpips_score
+            if LPIPS_AVAILABLE:
+                lpips_score = evaluator.compute_lpips(generated_img, gt_img)
+                if lpips_score >= 0:
+                    lpips_scores.append(lpips_score)
+                    gen["lpips"] = lpips_score
 
-            ssim_score = evaluator.compute_ssim(generated_img, gt_img)
-            if ssim_score >= 0:
-                ssim_scores.append(ssim_score)
-                gen["ssim"] = ssim_score
+            if SSIM_AVAILABLE:
+                ssim_score = evaluator.compute_ssim(generated_img, gt_img)
+                if ssim_score >= 0:
+                    ssim_scores.append(ssim_score)
+                    gen["ssim"] = ssim_score
 
             evaluated += 1
         except Exception as e:
@@ -577,95 +574,105 @@ def evaluate_results_with_accelerator(
     return results
 
 
-def main():
-    """Main entry point."""
-    args = parse_args()
-    args = create_args_namespace(args)
+@hydra.main(version_base=None, config_path="configs/inference", config_name="distributed")
+def main(cfg: DictConfig) -> None:
+    """Main entry point for distributed inference."""
+    
+    logger.info("=" * 60)
+    logger.info("FontDiffusion Distributed Inference")
+    logger.info("=" * 60)
+    logger.info(OmegaConf.to_yaml(cfg))
+    logger.info("=" * 60)
+
+    # Validate required fields
+    missing_keys = OmegaConf.missing_keys(cfg)
+    if missing_keys:
+        raise RuntimeError(f"Missing mandatory keys: {missing_keys}")
 
     # Initialize accelerator
     accelerator = Accelerator(
-        mixed_precision="fp16" if args.fp16 else "no",
+        mixed_precision=cfg.mixed_precision,
     )
 
     if accelerator.is_main_process:
-        logger.info("=" * 60)
-        logger.info("FontDiffuser Multi-GPU Batch Sampler")
-        logger.info("=" * 60)
         logger.info(f"Using {accelerator.num_processes} GPUs")
+        logger.info(f"Mixed precision: {cfg.mixed_precision}")
 
     try:
-        # FIX 14: All processes load data
-        characters = load_characters(args.characters, args.start_line, args.end_line)
-        style_paths_with_names = load_style_images(args.style_images)
+        # Load data on all processes
+        characters = load_characters(cfg.characters, cfg.start_line, cfg.end_line)
+        style_paths_with_names = load_style_images(cfg.style_images)
 
         # Initialize font manager on all processes
-        font_manager: FontManager = FontManager(args.ttf_path)
+        font_manager: FontManager = FontManager(cfg.ttf_path)
 
         if accelerator.is_main_process:
-            logger.info(f"✓ Loaded {len(font_manager.get_font_names())} fonts.")
+            logger.info(f"✓ Loaded {len(font_manager.get_font_names())} fonts")
             logger.info(f"📊 Configuration:")
-            logger.info(f"  Dataset split: {args.dataset_split}")
+            logger.info(f"  Dataset split: {cfg.dataset_split}")
             logger.info(
-                f"  Characters: {len(characters)} (lines {args.start_line}-{args.end_line or 'end'})"
+                f"  Characters: {len(characters)} (lines {cfg.start_line}-{cfg.end_line or 'end'})"
             )
             logger.info(f"  Styles: {len(style_paths_with_names)}")
-            logger.info(f"  Output Directory: {args.output_dir}")
-            logger.info(f"  Checkpoint Directory: {args.ckpt_dir}")
-            logger.info(f"  Device: {args.device}")
-            logger.info(f"  Batch Size: {args.batch_size}")
+            logger.info(f"  Output Directory: {cfg.output_dir}")
+            logger.info(f"  Checkpoint Directory: {cfg.ckpt_dir}")
+            logger.info(f"  Device: {cfg.device}")
+            logger.info(f"  Batch Size: {cfg.batch_size}")
             logger.info(
-                f"  Results checkpoint path: {os.path.join(args.output_dir, 'results_checkpoint.json')}"
+                f"  Results checkpoint: {os.path.join(cfg.output_dir, 'results_checkpoint.json')}"
             )
 
         # Create output directory on all processes
-        os.makedirs(args.output_dir, exist_ok=True)
+        os.makedirs(cfg.output_dir, exist_ok=True)
         accelerator.wait_for_everyone()
 
         # Initialize generation tracker on all processes
-        checkpoint_path = os.path.join(args.output_dir, "results_checkpoint.json")
+        checkpoint_path = os.path.join(cfg.output_dir, "results_checkpoint.json")
         generation_tracker = GenerationTracker(
             checkpoint_path if os.path.exists(checkpoint_path) else None
         )
 
-        # Create args namespace for pipeline
-        pipeline_args = create_args_namespace(args)
-
-        # FIX 15: Load pipeline on all processes
+        # Load pipeline on all processes
         if accelerator.is_main_process:
             logger.info("=" * 60)
             logger.info("Loading FontDiffuser pipeline...")
             logger.info("=" * 60)
 
-        pipe = load_fontdiffuser_pipeline(pipeline_args)
+        pipe = load_fontdiffuser_pipeline(cfg=cfg)
+        
         if accelerator.is_main_process:
-            logger.info("✓ Pipeline loaded successfully.")
+            logger.info("✓ Pipeline loaded successfully")
 
-        # FIX 16: Prepare pipeline BEFORE wait_for_everyone
+        # Prepare pipeline with Accelerator BEFORE wait_for_everyone
         pipe = accelerator.prepare(pipe)
+        if cfg.compile:
+            logger.info("Compiling model with torch.compile...")
+            pipe = torch.compile(pipe)
+            logger.info("✓ Model compiled")
 
         accelerator.wait_for_everyone()
 
         if accelerator.is_main_process:
-            logger.info("✓ Pipeline prepared with Accelerator.")
+            logger.info("✓ Pipeline prepared with Accelerator")
 
         # Initialize evaluator on all processes
-        evaluator = QualityEvaluator(device=args.device)
+        evaluator = QualityEvaluator(device=cfg.device)
 
         accelerator.wait_for_everyone()
 
         if accelerator.is_main_process:
-            logger.info("✓ Quality evaluator initialized.")
+            logger.info("✓ Quality evaluator initialized")
             logger.info(
                 f"Generating {len(characters)} × {len(style_paths_with_names)} images"
             )
 
-        # FIX 17: All processes run generation
+        # All processes run generation
         results = batch_generate_images_with_accelerator(
             pipe,
             characters,
             style_paths_with_names,
-            args.output_dir,
-            args,
+            cfg.output_dir,
+            cfg,
             evaluator,
             font_manager,
             generation_tracker,
@@ -676,25 +683,24 @@ def main():
 
         # Evaluate on main process only
         if accelerator.is_main_process:
-            if args.evaluate and args.ground_truth_dir:
+            if cfg.evaluate and cfg.ground_truth_dir:
                 results = evaluate_results_with_accelerator(
                     results,
                     evaluator,
-                    args.output_dir,
-                    args.ground_truth_dir,
-                    args.compute_fid,
+                    cfg.output_dir,
+                    cfg,
                     accelerator,
                 )
 
             # Log to wandb
-            if args.use_wandb:
-                log_to_wandb(results, args)
+            if cfg.use_wandb:
+                log_to_wandb(results, cfg)
 
             logger.info("=" * 60)
-            logger.info("✅ NomGenie dataset generation complete!")
+            logger.info("✅ Multi-GPU generation complete!")
             logger.info("=" * 60)
 
-        # FIX 18: Final synchronization
+        # Final synchronization
         accelerator.wait_for_everyone()
 
     except KeyboardInterrupt:
@@ -715,7 +721,7 @@ def main():
         if accelerator.is_main_process:
             logger.info("Cleaning up resources...")
         try:
-            # FIX 19: Proper cleanup
+            # Proper cleanup
             accelerator.wait_for_everyone()
             accelerator.free_memory()
 

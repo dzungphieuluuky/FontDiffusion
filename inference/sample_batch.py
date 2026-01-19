@@ -656,15 +656,16 @@ def log_to_wandb(results: dict, cfg: DictConfig) -> None:
 def main(cfg: DictConfig) -> None:
     """Main function"""
     logger.info("=" * 60)
-    logger.info("FONTDIFFUSER BATCH GENERATION")
+    logger.info("FontDiffusion Batch Inference")
     logger.info("=" * 60)
     logger.info(OmegaConf.to_yaml(cfg))
     logger.info("=" * 60 + "\n")
 
-    try:
-        if not cfg.ckpt_dir:
-            raise ValueError("ckpt_dir must be specified")
+    missing_keys = OmegaConf.missing_keys(cfg)
+    if missing_keys:
+        raise RuntimeError(f"Missing mandatory keys: {missing_keys}")
 
+    try:
         characters: list[str] = load_characters(
             cfg.characters, cfg.start_line, cfg.end_line
         )
