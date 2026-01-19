@@ -81,6 +81,10 @@ class FontDiffuserTrainer:
     def _setup_models(self):
         """Initialize all model components."""
         # Build core components
+        logger.info(f"Resolution: {self.cfg.resolution}")
+        logger.info(f"Style image size: {self.cfg.style_image_size}")
+        logger.info(f"Phase 2: {self.cfg.phase_2}")
+
         unet = build_unet(cfg=self.cfg)
         style_encoder = build_style_encoder(cfg=self.cfg)
         content_encoder = build_content_encoder(cfg=self.cfg)
