@@ -5,7 +5,10 @@ Maintains exact architecture to load pretrained weights
 
 import torch
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
-from diffusers.models.attention_processor import AttnProcessor2_0
+try:
+    from diffusers.models.attention_processor import AttnProcessor2_0
+except ImportError:
+    AttnProcessor2_0 = None
 from functools import lru_cache
 from src import ContentEncoder, StyleEncoder, UNet, SCR
 
