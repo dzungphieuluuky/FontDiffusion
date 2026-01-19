@@ -1,0 +1,91 @@
+# FontDiffuser Default Training Configuration
+# Maps to argparse arguments in src/configs/fontdiffuser.py
+
+defaults:
+  - _self_
+# Experience & Logging
+seed: 123
+experience_name: "fontdiffuser_training"
+data_root: "my_dataset"
+output_dir: "outputs/FontDiffuser"
+report_to: "wandb"
+logging_dir: "logs"
+
+# Model Architecture
+resolution: 96
+unet_channels: [64, 128, 256, 512]
+style_image_size: 96
+content_image_size: 96
+content_encoder_downsample_size: 3
+channel_attn: true
+content_start_channel: 64
+style_start_channel: 64
+
+# Training Phase Configuration
+phase_1: false
+phase_2: true
+phase_1_ckpt_dir: null
+
+# SCR Module Configuration
+temperature: 0.07
+mode: "refinement"
+scr_image_size: 96
+scr_ckpt_path: null
+num_neg: 16
+nce_layers: "0,1,2,3"
+sc_coefficient: 0.01
+
+# Batch & Training Steps
+train_batch_size: 8
+max_train_steps: 440000
+ckpt_interval: 40000
+gradient_accumulation_steps: 1
+log_interval: 100
+
+# Loss Coefficients
+perceptual_coefficient: 0.01
+offset_coefficient: 0.5
+
+# Learning Rate & Optimizer
+learning_rate: 0.0001
+scale_lr: false
+lr_scheduler: "linear"
+lr_warmup_steps: 10000
+adam_beta1: 0.9
+adam_beta2: 0.999
+adam_weight_decay: 0.01
+adam_epsilon: 1.0e-8
+max_grad_norm: 1.0
+
+# Classifier-Free Guidance
+drop_prob: 0.1
+
+# Scheduler
+beta_scheduler: "scaled_linear"
+
+# Sampling Configuration
+algorithm_type: "dpmsolver++"
+guidance_type: "classifier-free"
+guidance_scale: 7.5
+num_inference_steps: 20
+model_type: "noise"
+order: 2
+skip_type: "time_uniform"
+method: "multistep"
+correcting_x0_fn: null
+t_start: null
+t_end: null
+
+# Validation & Checkpointing
+val_interval: 100
+
+# Mixed Precision
+mixed_precision: "no"
+
+# Features
+enable_style_transform: false
+controlnet: false
+instructpix2pix: false
+
+# Distributed Training
+local_rank: -1

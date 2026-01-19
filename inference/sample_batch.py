@@ -541,14 +541,6 @@ def parse_args() -> Namespace:
         default="train_original",
         help="Dataset split name (e.g., train_original, val)",
     )
-    
-    parser.add_argument(
-        "--ground_truth_dir",
-        type=str,
-        default=None,
-        help="Directory with ground truth images for evaluation",
-    )
-
     return parser.parse_args()
 
 

@@ -1,6 +1,5 @@
 import logging
 import math
-import os
 from dataclasses import asdict
 from pathlib import Path
 import traceback
@@ -11,10 +10,8 @@ from accelerate import Accelerator
 from accelerate.utils import set_seed
 from diffusers.optimization import get_scheduler
 from torchvision import transforms
-from tqdm.auto import tqdm
+from omegaconf import DictConfig, OmegaConf
 
-
-from src.configs.fontdiffuser import get_parser
 from src.dataset import FontDataset, CollateFN
 from src import (
     ContentPerceptualLoss,
@@ -28,10 +25,8 @@ from src import (
 from src.tools.utils import (
     normalize_mean_std,
     reNormalize_img,
-    save_args_to_yaml,
     x0_from_epsilon,
 )
-
 from src.tools.utilities import (
     find_checkpoint,
     load_model_checkpoint,
@@ -39,24 +34,21 @@ from src.tools.utilities import (
     HFTqdm,
 )
 
-from src.trainers.training_config import TrainingConfig
-
 logger = logging.getLogger("FontDiffuserTrainer")
 
 
 class FontDiffuserTrainer:
-    """Main trainer class for FontDiffuser."""
+    """Main trainer class for FontDiffuser with Hydra configuration support."""
 
-    def __init__(self, args):
-        self.args = args
-        self.config = self._create_config(args)
-        self.config.validate()
-
+    def __init__(self, cfg: DictConfig):
+        self.cfg = cfg
+        self.config = cfg.training
+        
         self.accelerator = Accelerator(
-            gradient_accumulation_steps=self.args.gradient_accumulation_steps,
-            mixed_precision=self.args.mixed_precision,
-            log_with=self.args.report_to,
-            project_dir=f"{self.args.output_dir}/{self.args.logging_dir}",
+            gradient_accumulation_steps=self.config.gradient_accumulation_steps,
+            mixed_precision=self.config.mixed_precision,
+            log_with=self.config.logging.report_to,
+            project_dir=f"{self.config.output_dir}/{self.config.logging.logging_dir}",
         )
 
         self.global_step = 0
@@ -71,42 +63,13 @@ class FontDiffuserTrainer:
         self.perceptual_loss = None
         self.scr = None
 
-    def _create_config(self, args) -> TrainingConfig:
-        """Create TrainingConfig from parsed args."""
-        return TrainingConfig(
-            learning_rate=args.learning_rate,
-            train_batch_size=args.train_batch_size,
-            max_train_steps=args.max_train_steps,
-            gradient_accumulation_steps=args.gradient_accumulation_steps,
-            mixed_precision=args.mixed_precision,
-            lr_scheduler=args.lr_scheduler,
-            lr_warmup_steps=args.lr_warmup_steps,
-            adam_beta1=args.adam_beta1,
-            adam_beta2=args.adam_beta2,
-            adam_weight_decay=args.adam_weight_decay,
-            adam_epsilon=args.adam_epsilon,
-            max_grad_norm=args.max_grad_norm,
-            perceptual_coefficient=args.perceptual_coefficient,
-            offset_coefficient=args.offset_coefficient,
-            sc_coefficient=(
-                args.sc_coefficient if hasattr(args, "sc_coefficient") else 1.0
-            ),
-            style_transform_coefficient=getattr(
-                args, "style_transform_coefficient", 0.1
-            ),
-            phase_1=args.phase_1,
-            phase_2=args.phase_2,
-            drop_prob=getattr(args, "drop_prob", 0.1),
-            enable_style_transform=getattr(args, "enable_style_transform", False),
-        )
-
     def setup(self):
         """Setup all components for training."""
         if self.accelerator.is_main_process:
-            Path(self.args.output_dir).mkdir(parents=True, exist_ok=True)
+            Path(self.config.output_dir).mkdir(parents=True, exist_ok=True)
 
-        if self.args.seed is not None:
-            set_seed(self.args.seed)
+        if self.config.seed is not None:
+            set_seed(self.config.seed)
 
         self._setup_models()
         self._setup_data()
@@ -119,17 +82,18 @@ class FontDiffuserTrainer:
     def _setup_models(self):
         """Initialize all model components."""
         # Build core components
-        unet = build_unet(args=self.args)
-        style_encoder = build_style_encoder(args=self.args)
-        content_encoder = build_content_encoder(args=self.args)
-        self.noise_scheduler = build_ddpm_scheduler(self.args)
+        unet = build_unet(cfg=self.cfg)
+        style_encoder = build_style_encoder(cfg=self.cfg)
+        content_encoder = build_content_encoder(cfg=self.cfg)
+        self.noise_scheduler = build_ddpm_scheduler(self.cfg)
+        
         # Load phase 1 checkpoints if specified
-        if self.args.phase_1_ckpt_dir is not None:
+        if self.config.checkpoint.phase_1_ckpt_dir is not None:
             self._load_phase1_checkpoints(
                 unet=unet,
                 style_encoder=style_encoder,
                 content_encoder=content_encoder,
-                ckpt_dir=self.args.phase_1_ckpt_dir,
+                ckpt_dir=self.config.checkpoint.phase_1_ckpt_dir,
             )
 
         # Create main model
@@ -144,10 +108,10 @@ class FontDiffuserTrainer:
 
         # SCR for phase 2 (optional)
         self.scr = None
-        if self.config.phase_2:
-            self.scr = build_scr(args=self.args)
-            if hasattr(self.args, "scr_ckpt_path") and self.args.scr_ckpt_path:
-                self._load_scr_checkpoint(self.args.scr_ckpt_path)
+        if self.config.phase.phase_2:
+            self.scr = build_scr(cfg=self.cfg)
+            if self.config.checkpoint.scr_ckpt_path:
+                self._load_scr_checkpoint(self.config.checkpoint.scr_ckpt_path)
             self.scr.requires_grad_(False)
 
     def _load_phase1_checkpoints(
@@ -195,7 +159,7 @@ class FontDiffuserTrainer:
         content_transforms = transforms.Compose(
             [
                 transforms.Resize(
-                    self.args.content_image_size,
+                    tuple(self.cfg.model.content_encoder.image_size),
                     interpolation=transforms.InterpolationMode.BILINEAR,
                 ),
                 transforms.ToTensor(),
@@ -206,7 +170,7 @@ class FontDiffuserTrainer:
         style_transforms = transforms.Compose(
             [
                 transforms.Resize(
-                    self.args.style_image_size,
+                    tuple(self.cfg.model.style_encoder.image_size),
                     interpolation=transforms.InterpolationMode.BILINEAR,
                 ),
                 transforms.ToTensor(),
@@ -217,7 +181,7 @@ class FontDiffuserTrainer:
         target_transforms = transforms.Compose(
             [
                 transforms.Resize(
-                    (self.args.resolution, self.args.resolution),
+                    (self.cfg.model.unet.sample_size, self.cfg.model.unet.sample_size),
                     interpolation=transforms.InterpolationMode.BILINEAR,
                 ),
                 transforms.ToTensor(),
@@ -226,10 +190,10 @@ class FontDiffuserTrainer:
         )
 
         train_dataset = FontDataset(
-            args=self.args,
+            cfg=self.cfg,
             phase="train",
             transforms=[content_transforms, style_transforms, target_transforms],
-            scr=self.config.phase_2,
+            scr=self.config.phase.phase_2,
         )
 
         self.train_dataloader = torch.utils.data.DataLoader(
@@ -237,16 +201,16 @@ class FontDiffuserTrainer:
             shuffle=True,
             batch_size=self.config.train_batch_size,
             collate_fn=CollateFN(),
-            num_workers=getattr(self.args, "num_workers", 4),
-            pin_memory=True,
-            persistent_workers=True,
+            num_workers=self.config.dataloader.num_workers,
+            pin_memory=self.config.dataloader.pin_memory,
+            persistent_workers=self.config.dataloader.persistent_workers,
         )
 
     def _setup_optimizer(self):
         """Setup optimizer and learning rate scheduler."""
         # Scale learning rate if requested
-        learning_rate = self.config.learning_rate
-        if self.args.scale_lr:
+        learning_rate = self.config.optimizer.learning_rate
+        if self.config.optimizer.scale_lr:
             learning_rate *= (
                 self.config.gradient_accumulation_steps
                 * self.config.train_batch_size
@@ -256,15 +220,15 @@ class FontDiffuserTrainer:
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(),
             lr=learning_rate,
-            betas=(self.config.adam_beta1, self.config.adam_beta2),
-            weight_decay=self.config.adam_weight_decay,
-            eps=self.config.adam_epsilon,
+            betas=(self.config.optimizer.adam_beta1, self.config.optimizer.adam_beta2),
+            weight_decay=self.config.optimizer.adam_weight_decay,
+            eps=self.config.optimizer.adam_epsilon,
         )
 
         self.lr_scheduler = get_scheduler(
-            self.config.lr_scheduler,
+            self.config.optimizer.lr_scheduler,
             optimizer=self.optimizer,
-            num_warmup_steps=self.config.lr_warmup_steps
+            num_warmup_steps=self.config.optimizer.lr_warmup_steps
             * self.config.gradient_accumulation_steps,
             num_training_steps=self.config.max_train_steps
             * self.config.gradient_accumulation_steps,
@@ -285,17 +249,16 @@ class FontDiffuserTrainer:
 
     def _setup_logging(self):
         """Setup logging and tracking."""
-        self.accelerator.init_trackers(self.args.experience_name)
+        self.accelerator.init_trackers(self.config.logging.experience_name)
 
         # Save configuration
-        save_args_to_yaml(
-            args=self.args,
-            output_file=f"{self.args.output_dir}/{self.args.experience_name}_config.yaml",
-        )
+        config_path = Path(self.config.output_dir) / f"{self.config.logging.experience_name}_config.yaml"
+        with open(config_path, 'w') as f:
+            OmegaConf.save(self.cfg, f)
 
         # Log configuration
         config_dict = {
-            "training_config": asdict(self.config),
+            "training_config": OmegaConf.to_container(self.config, resolve=True),
         }
         self.accelerator.log(config_dict)
 
@@ -371,8 +334,8 @@ class FontDiffuserTrainer:
         # Total loss
         total_loss = (
             diff_loss
-            + self.config.perceptual_coefficient * percep_loss
-            + self.config.offset_coefficient * offset_loss
+            + self.config.loss.perceptual_coefficient * percep_loss
+            + self.config.loss.offset_coefficient * offset_loss
         )
 
         loss_dict = {
@@ -390,16 +353,7 @@ class FontDiffuserTrainer:
         target_images: torch.Tensor,
         neg_images: torch.Tensor,
     ) -> torch.Tensor:
-        """Compute SCR loss for phase 2 training.
-
-        Args:
-            pred_original_sample_norm: [B, 3, resolution, resolution]
-            target_images: [B, 3, resolution, resolution]
-            neg_images: [B, num_neg, 3, resolution, resolution] ← 5D, DO NOT RESHAPE
-
-        Returns:
-            sc_loss: scalar tensor
-        """
+        """Compute SCR loss for phase 2 training."""
         # Validate input shapes
         assert pred_original_sample_norm.dim() == 4, (
             f"Expected pred shape [B, C, H, W], got {pred_original_sample_norm.shape}"
@@ -412,10 +366,10 @@ class FontDiffuserTrainer:
         )
 
         sample_emb, pos_emb, neg_emb = self.scr(
-            pred_original_sample_norm,  # [B, 3, resolution, resolution]
-            target_images,  # [B, 3, resolution, resolution]
-            neg_images,  # [B, num_neg, 3, resolution, resolution]
-            nce_layers=self.args.nce_layers,
+            pred_original_sample_norm,
+            target_images,
+            neg_images,
+            nce_layers=self.cfg.model.scr.nce_layers,
         )
 
         sc_loss = self.scr.calculate_nce_loss(
@@ -458,21 +412,17 @@ class FontDiffuserTrainer:
         content_images, style_images = self.apply_classifier_free_guidance(
             content_images,
             style_images,
-            self.config.drop_prob,
+            self.config.training_params.drop_prob,
             samples=samples,
         )
 
         # Forward pass
-        source_style_images = None
-        if self.config.enable_style_transform and "source_style_image" in samples:
-            source_style_images = samples["source_style_image"]
-
         noise_pred, offset_out_sum = self.model(
             x_t=noisy_target_images,
             timesteps=timesteps,
             style_images=style_images,
             content_images=content_images,
-            content_encoder_downsample_size=self.args.content_encoder_downsample_size,
+            content_encoder_downsample_size=self.cfg.model.content_encoder.out_channels,
         )
 
         # Compute losses
@@ -486,7 +436,7 @@ class FontDiffuserTrainer:
         )
 
         # SCR loss for phase 2
-        if self.config.phase_2 and self.scr is not None:
+        if self.config.phase.phase_2 and self.scr is not None:
             neg_images = samples.get("neg_images")
             if neg_images is not None:
                 sc_loss = self.compute_phase2_loss(
@@ -494,7 +444,7 @@ class FontDiffuserTrainer:
                     target_images=target_images,
                     neg_images=neg_images,
                 )
-                total_loss += self.config.sc_coefficient * sc_loss
+                total_loss += self.config.loss.sc_coefficient * sc_loss
                 loss_dict["sc_loss"] = sc_loss.item()
 
         return total_loss, loss_dict
@@ -506,10 +456,10 @@ class FontDiffuserTrainer:
 
         # Determine checkpoint name
         if is_final:
-            save_dir = Path(self.args.output_dir) / "final"
+            save_dir = Path(self.config.output_dir) / "final"
         else:
             save_dir = (
-                Path(self.args.output_dir) / f"checkpoint_step_{self.global_step}"
+                Path(self.config.output_dir) / f"checkpoint_step_{self.global_step}"
             )
 
         save_dir.mkdir(parents=True, exist_ok=True)
@@ -531,13 +481,13 @@ class FontDiffuserTrainer:
         )
 
         # Save full model if requested
-        if getattr(self.args, "save_full_model", False):
+        if self.config.checkpoint.save_full_model:
             save_model_checkpoint(
                 unwrapped_model.state_dict(), save_dir / "full_model.safetensors"
             )
 
         # Save SCR for phase 2
-        if self.config.phase_2 and self.scr is not None:
+        if self.config.phase.phase_2 and self.scr is not None:
             save_model_checkpoint(self.scr.state_dict(), save_dir / "scr.safetensors")
 
         # Save optimizer and scheduler states
@@ -548,7 +498,7 @@ class FontDiffuserTrainer:
                 "model_state_dict": unwrapped_model.state_dict(),
                 "optimizer_state_dict": self.optimizer.state_dict(),
                 "lr_scheduler_state_dict": self.lr_scheduler.state_dict(),
-                "config": asdict(self.config),
+                "config": OmegaConf.to_container(self.config, resolve=True),
             },
             save_dir / "training_state.pt",
         )
@@ -559,11 +509,7 @@ class FontDiffuserTrainer:
         )
 
     def load_checkpoint(self, checkpoint_path: str) -> bool:
-        """Load training checkpoint.
-
-        Returns:
-            bool: True if checkpoint was loaded successfully
-        """
+        """Load training checkpoint."""
         try:
             checkpoint = torch.load(checkpoint_path, map_location="cpu")
 
@@ -600,11 +546,8 @@ class FontDiffuserTrainer:
         )
 
         # Resume from checkpoint if specified
-        if (
-            hasattr(self.args, "resume_from_checkpoint")
-            and self.args.resume_from_checkpoint
-        ):
-            if not self.load_checkpoint(self.args.resume_from_checkpoint):
+        if self.config.checkpoint.resume_from_checkpoint:
+            if not self.load_checkpoint(self.config.checkpoint.resume_from_checkpoint):
                 logger.warning("Starting training from scratch")
 
         # Setup progress bar
@@ -637,7 +580,7 @@ class FontDiffuserTrainer:
                     # Gradient clipping
                     if self.accelerator.sync_gradients:
                         grad_norm = torch.nn.utils.clip_grad_norm_(
-                            self.model.parameters(), self.config.max_grad_norm
+                            self.model.parameters(), self.config.optimizer.max_grad_norm
                         )
 
                     # Optimization step
@@ -683,7 +626,7 @@ class FontDiffuserTrainer:
                         loss_accum_count = 0
 
                         # Log to console
-                        if self.global_step % self.args.log_interval == 0:
+                        if self.global_step % self.config.logging.log_interval == 0:
                             logger.info(
                                 f"Step {self.global_step}: "
                                 f"loss={avg_train_loss:.4f}, "
@@ -693,7 +636,7 @@ class FontDiffuserTrainer:
 
                         # Save checkpoint
                         if (
-                            self.global_step % self.args.ckpt_interval == 0
+                            self.global_step % self.config.checkpoint.ckpt_interval == 0
                             and self.accelerator.is_main_process
                         ):
                             self.save_checkpoint()

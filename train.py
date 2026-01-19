@@ -1,81 +1,70 @@
 """
-FontDiffuser training script with multi-phase support.
+FontDiffuser training script with Hydra configuration support.
 Improved version with memory safety, error handling, and better organization.
 """
 
 import logging
-import math
-import os
-from dataclasses import dataclass, asdict
+import sys
 from pathlib import Path
-import traceback
 
-import torch
-import torch.nn.functional as F
-from accelerate import Accelerator
-from accelerate.utils import set_seed
-from diffusers.optimization import get_scheduler
-from torchvision import transforms
-from tqdm.auto import tqdm
+import hydra
+from omegaconf import DictConfig, OmegaConf
 
-
-from src.configs.fontdiffuser import get_parser
-from src.trainers.training_config import TrainingConfig
 from src.trainers.trainer import FontDiffuserTrainer
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 
 logger = logging.getLogger("FontDiffuserTrainer")
 
 
-def parse_args_training():
-    """Parse command line arguments with additional options."""
-    parser = get_parser()
-
-    # Add new arguments for improved functionality
-    parser.add_argument(
-        "--resume_from_checkpoint",
-        type=str,
-        default=None,
-        help="Path to checkpoint to resume training from",
-    )
-    parser.add_argument(
-        "--num_workers", type=int, default=4, help="Number of workers for data loading"
-    )
-    parser.add_argument(
-        "--save_full_model",
-        action="store_true",
-        help="Save full model checkpoint in addition to components",
-    )
-    parser.add_argument(
-        "--phase-1",
-        action="store_true",
-        help="Enable Phase 1 training (content and style encoders only)",
-    )
-
-    args = parser.parse_args()
-
-    # Handle environment variables
-    env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
-    if env_local_rank != -1:
-        args.local_rank = env_local_rank
-
-    # Process image sizes
-    args.style_image_size = (args.style_image_size, args.style_image_size)
-    args.content_image_size = (args.content_image_size, args.content_image_size)
-
-    return args
-
-
-def main():
-    """Main entry point."""
-    args = parse_args_training()
-
+@hydra.main(version_base=None, config_path="configs/training", config_name="default")
+def main(cfg: DictConfig):
+    """Main entry point with Hydra configuration."""
+    
+    # Log configuration
+    logger.info("="*80)
+    logger.info("Training Configuration:")
+    logger.info("="*80)
+    logger.info(OmegaConf.to_yaml(cfg))
+    logger.info("="*80)
+    
+    # Validate required fields
+    if not cfg.data.dataset_path:
+        raise ValueError("dataset_path must be specified in config")
+    
+    # Process image sizes (convert to tuples if needed)
+    if isinstance(cfg.model.style_encoder.image_size, int):
+        cfg.model.style_encoder.image_size = [
+            cfg.model.style_encoder.image_size,
+            cfg.model.style_encoder.image_size
+        ]
+    
+    if isinstance(cfg.model.content_encoder.image_size, int):
+        cfg.model.content_encoder.image_size = [
+            cfg.model.content_encoder.image_size,
+            cfg.model.content_encoder.image_size
+        ]
+    
     # Create and run trainer
-    trainer = FontDiffuserTrainer(args)
-    logger.info("Setting up training...")
-    trainer.setup()
-    logger.info("Starting training...")
-    trainer.train()
-    logger.info("Training completed successfully")
+    try:
+        trainer = FontDiffuserTrainer(cfg)
+        logger.info("Setting up training...")
+        trainer.setup()
+        logger.info("Starting training...")
+        trainer.train()
+        logger.info("Training completed successfully")
+    except Exception as e:
+        logger.error(f"Training failed with error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise
 
 
 if __name__ == "__main__":

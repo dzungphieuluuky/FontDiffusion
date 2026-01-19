@@ -1,0 +1,99 @@
+# FontDiffuser FST (Few-Shot Transfer) Training Configuration
+# Inherits from default.yaml and overrides specific settings
+
+defaults:
+  - default
+
+# Override data configuration for FST
+data:
+  dataset_path: "my_dataset"
+  train_split: "train"
+  val_split: "val"
+  ttf_path: "fonts"
+
+# Override model configuration for FST (typically smaller/faster)
+model:
+  unet:
+    sample_size: 96
+    block_out_channels: [128, 128, 256, 256, 512, 512]
+
+  style_encoder:
+    image_size: [96, 96]
+    model_channels: 64
+
+  content_encoder:
+    image_size: [96, 96]
+    model_channels: 64
+
+# FST-specific training settings
+training:
+  # Smaller batch size for few-shot learning
+  train_batch_size: 4
+  max_train_steps: 50000
+  gradient_accumulation_steps: 2
+  mixed_precision: "fp16"
+  seed: 42
+  
+  # Optimizer settings for FST
+  optimizer:
+    learning_rate: 0.00005  # Lower learning rate for fine-tuning
+    scale_lr: false
+    lr_scheduler: "cosine"
+    lr_warmup_steps: 500
+    adam_beta1: 0.9
+    adam_beta2: 0.999
+    adam_weight_decay: 0.01
+    adam_epsilon: 1.0e-8
+    max_grad_norm: 1.0
+  
+  # Loss coefficients (adjusted for FST)
+  loss:
+    perceptual_coefficient: 0.02  # Higher perceptual loss for style preservation
+    offset_coefficient: 0.5
+    sc_coefficient: 1.0
+    style_transform_coefficient: 0.2  # Higher for style transformation
+  
+  # Phase 1 training (content and style encoders)
+  phase:
+    phase_1: true
+    phase_2: false
+  
+  # Training parameters
+  training_params:
+    drop_prob: 0.1
+    enable_style_transform: true  # Enable for FST
+  
+  # Dataloader settings
+  dataloader:
+    num_workers: 4
+    pin_memory: true
+    persistent_workers: true
+  
+  # Checkpointing
+  checkpoint:
+    phase_1_ckpt_dir: null
+    scr_ckpt_path: null
+    resume_from_checkpoint: null
+    save_full_model: true  # Save full model for FST
+    ckpt_interval: 2500  # More frequent checkpoints
+  
+  # Logging
+  logging:
+    experience_name: "fontdiffuser_fst"
+    output_dir: "outputs/FontDiffuserFST/phase1"
+    logging_dir: "logs"
+    report_to: "wandb"
+    log_interval: 50  # More frequent logging
+  
+  # Output directory
+  output_dir: "outputs/FontDiffuserFST/phase1"
+
+# Hydra settings
+hydra:
+  run:
+    dir: outputs/fst/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: multirun/fst/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}
+  job:
+    chdir: false
