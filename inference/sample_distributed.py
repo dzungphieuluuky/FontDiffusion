@@ -22,13 +22,13 @@ from accelerate import Accelerator
 from accelerate.utils import gather_object
 from PIL import Image
 
-from tools.filename_utils import (
+from src.tools.filename_utils import (
     get_content_filename,
     get_target_filename,
     compute_file_hash,
 )
-from tools.utilities import HFTqdm
-from tools.utils import ttf2im
+from src.tools.utilities import HFTqdm
+from src.tools.utils import ttf2im
 
 from inference.sample_optimized import (
     get_content_transform,

@@ -29,14 +29,14 @@ from src import (
     ContentEncoder,
     StyleEncoder,
 )
-from tools.utils import (
+from src.tools.utils import (
     ttf2im,
     load_ttf,
     is_char_in_font,
     save_args_to_yaml,
 )
 
-from tools.filename_utils import (
+from src.tools.filename_utils import (
     get_content_filename,
     get_target_filename,
     compute_file_hash,

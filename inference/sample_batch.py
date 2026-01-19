@@ -14,13 +14,13 @@ import torchvision.transforms as transforms
 from argparse import Namespace, ArgumentParser
 
 from src.dpm_solver.pipeline_dpm_solver import FontDiffuserDPMPipeline
-from tools.utilities import HFTqdm
-from tools.utils import (
+from src.tools.utilities import HFTqdm
+from src.tools.utils import (
     load_ttf,
     ttf2im,
     is_char_in_font,
 )
-from tools.filename_utils import (
+from src.tools.filename_utils import (
     get_content_filename,
     get_target_filename,
     compute_file_hash,
