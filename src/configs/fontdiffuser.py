@@ -82,6 +82,12 @@ def get_parser():
         "--phase_2", action="store_true", help="Training in phase 2 using SCR module."
     )
     parser.add_argument(
+        "--phase_1",
+        action="store_true",
+        help="Training in phase 1 without SCR module.",
+    )
+    
+    parser.add_argument(
         "--phase_1_ckpt_dir",
         type=str,
         default=None,
