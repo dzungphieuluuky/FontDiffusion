@@ -36,21 +36,11 @@ def main(cfg: DictConfig):
     logger.info("="*80)
     
     # Validate required fields
-    if not cfg.data.dataset_path:
-        raise ValueError("dataset_path must be specified in config")
+    if not cfg.data_root:
+        raise ValueError("data_root must be specified in config")
     
-    # Process image sizes (convert to tuples if needed)
-    if isinstance(cfg.model.style_encoder.image_size, int):
-        cfg.model.style_encoder.image_size = [
-            cfg.model.style_encoder.image_size,
-            cfg.model.style_encoder.image_size
-        ]
-    
-    if isinstance(cfg.model.content_encoder.image_size, int):
-        cfg.model.content_encoder.image_size = [
-            cfg.model.content_encoder.image_size,
-            cfg.model.content_encoder.image_size
-        ]
+    if not cfg.output_dir:
+        raise ValueError("output_dir must be specified in config")
     
     # Create and run trainer
     try:

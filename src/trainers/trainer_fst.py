@@ -1,11 +1,12 @@
 """
 Trainer class for FontDiffuserWithFST.
 Extends base FontDiffuserTrainer with FST-specific functionality.
+Uses Hydra DictConfig for configuration.
 """
 
 import logging
+import math
 import traceback
-from dataclasses import asdict
 from pathlib import Path
 from typing import Optional
 
@@ -14,6 +15,7 @@ import torch.nn.functional as F
 from accelerate import Accelerator
 from accelerate.utils import set_seed
 from diffusers.optimization import get_scheduler
+from omegaconf import DictConfig, OmegaConf
 from torchvision import transforms
 
 from src.dataset.font_dataset_fst import FontDataset as FontDatasetFST
@@ -37,72 +39,61 @@ from src.tools.utilities import (
 from src.tools.utils import (
     normalize_mean_std,
     reNormalize_img,
-    save_args_to_yaml,
     x0_from_epsilon,
 )
-from src.trainers.training_config import TrainingConfig
 from src.trainers.trainer import FontDiffuserTrainer
 
 logger = logging.getLogger("FontDiffuserFSTTrainer")
 
 
 class FontDiffuserFSTTrainer(FontDiffuserTrainer):
-    """Trainer for FontDiffuserWithFST model with MSSE and FST modules."""
+    """Trainer for FontDiffuserWithFST model with MSSE and FST modules.
+    
+    Inherits from base FontDiffuserTrainer and adds FST-specific functionality.
+    """
 
-    def __init__(self, args):
-        """Initialize FST trainer.
+    def __init__(self, cfg: DictConfig):
+        """Initialize FST trainer with Hydra config.
 
         Args:
-            args: Training arguments with FST-specific parameters
+            cfg: Hydra DictConfig with FST and training parameters
         """
-        # Store FST-specific args before calling super
-        self.use_fst = getattr(args, "use_fst", True)
-        self.freeze_original_encoders = getattr(args, "freeze_original_encoders", False)
-        self.style_source_same_prob = getattr(args, "style_source_same_prob", 0.5)
+        # Extract and validate FST-specific parameters
+        self.use_fst = cfg.get("use_fst", True)
+        self.freeze_original_encoders = cfg.get("freeze_original_encoders", False)
+        self.style_source_same_prob = cfg.get("style_source_same_prob", 0.5)
+        self.save_full_model = cfg.get("save_full_model", True)
 
-        # Parse FST configuration
-        self.fst_feature_channels = self._parse_feature_channels(
-            getattr(args, "fst_feature_channels", "64,128,256,512,1024")
+        # Parse FST feature channels
+        fst_channels = cfg.get("fst_feature_channels", [64, 128, 256, 512, 1024])
+        self.fst_feature_channels = (
+            fst_channels if isinstance(fst_channels, list) else list(fst_channels)
         )
-        self.fst_num_queries = getattr(args, "fst_num_queries", 220)
-        self.fst_query_dim = getattr(args, "fst_query_dim", 128)
-        self.fst_num_scales = getattr(args, "fst_num_scales", 5)
+        
+        self.fst_num_queries = cfg.get("fst_num_queries", 220)
+        self.fst_query_dim = cfg.get("fst_query_dim", 128)
+        self.fst_num_scales = cfg.get("fst_num_scales", 5)
 
-        # Call parent constructor
-        super().__init__(args)
-
-    def _parse_feature_channels(self, channels_str: str) -> list[int]:
-        """Parse feature channels from comma-separated string."""
-        if isinstance(channels_str, str):
-            return [int(x.strip()) for x in channels_str.split(",")]
-        return channels_str
-
-    def _create_config(self, args) -> TrainingConfig:
-        """Create TrainingConfig with FST-specific parameters."""
-        config = super()._create_config(args)
-
-        # Add FST-specific config (if needed for logging)
-        config.use_fst = self.use_fst
-        config.freeze_original_encoders = self.freeze_original_encoders
-        config.style_source_same_prob = self.style_source_same_prob
-
-        return config
+        # Call parent constructor with config
+        super().__init__(cfg)
 
     def _setup_models(self):
         """Initialize FST model components."""
+        logger.info("Building core model components...")
+        
         # Build core components
-        unet = build_unet(args=self.args)
-        style_encoder = build_style_encoder(args=self.args)
-        content_encoder = build_content_encoder(args=self.args)
-        self.noise_scheduler = build_ddpm_scheduler(self.args)
+        unet = build_unet(cfg=self.cfg)
+        style_encoder = build_style_encoder(cfg=self.cfg)
+        content_encoder = build_content_encoder(cfg=self.cfg)
+        self.noise_scheduler = build_ddpm_scheduler(self.cfg)
 
         # Load phase 1 checkpoints if specified
-        if self.args.phase_1_ckpt_dir is not None:
+        if self.cfg.phase_1_ckpt_dir is not None:
             self._load_phase1_checkpoints(
                 unet=unet,
                 style_encoder=style_encoder,
                 content_encoder=content_encoder,
-                ckpt_dir=self.args.phase_1_ckpt_dir,
+                ckpt_dir=self.cfg.phase_1_ckpt_dir,
             )
 
         # Create base FontDiffuser model
@@ -115,6 +106,11 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         # Wrap with FSTDiff enhancement
         if self.use_fst:
             logger.info("Building FontDiffuserWithFST model")
+            logger.info(f"  Feature channels: {self.fst_feature_channels}")
+            logger.info(f"  Num queries: {self.fst_num_queries}")
+            logger.info(f"  Query dim: {self.fst_query_dim}")
+            logger.info(f"  Num scales: {self.fst_num_scales}")
+            
             self.model = FontDiffuserWithFST(
                 base_model,
                 feature_channels=self.fst_feature_channels,
@@ -149,10 +145,10 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
 
         # SCR for phase 2 (optional)
         self.scr = None
-        if self.config.phase_2:
-            self.scr = build_scr(args=self.args)
-            if hasattr(self.args, "scr_ckpt_path") and self.args.scr_ckpt_path:
-                self._load_scr_checkpoint(self.args.scr_ckpt_path)
+        if self.cfg.phase_2:
+            self.scr = build_scr(cfg=self.cfg)
+            if self.cfg.scr_ckpt_path:
+                self._load_scr_checkpoint(self.cfg.scr_ckpt_path)
             self.scr.requires_grad_(False)
 
     def _load_phase1_checkpoints(
@@ -212,10 +208,12 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
 
     def _setup_data(self):
         """Setup FST-compatible data transforms and dataloaders."""
+        logger.info("Setting up data transforms and dataloaders...")
+        
         content_transforms = transforms.Compose(
             [
                 transforms.Resize(
-                    self.args.content_image_size,
+                    (self.cfg.content_image_size, self.cfg.content_image_size),
                     interpolation=transforms.InterpolationMode.BILINEAR,
                 ),
                 transforms.ToTensor(),
@@ -226,7 +224,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         style_transforms = transforms.Compose(
             [
                 transforms.Resize(
-                    self.args.style_image_size,
+                    (self.cfg.style_image_size, self.cfg.style_image_size),
                     interpolation=transforms.InterpolationMode.BILINEAR,
                 ),
                 transforms.ToTensor(),
@@ -237,7 +235,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         target_transforms = transforms.Compose(
             [
                 transforms.Resize(
-                    (self.args.resolution, self.args.resolution),
+                    (self.cfg.resolution, self.cfg.resolution),
                     interpolation=transforms.InterpolationMode.BILINEAR,
                 ),
                 transforms.ToTensor(),
@@ -247,10 +245,10 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
 
         # Use FST-compatible dataset
         train_dataset = FontDatasetFST(
-            args=self.args,
+            cfg=self.cfg,
             phase="train",
             transforms=[content_transforms, style_transforms, target_transforms],
-            scr=self.config.phase_2,
+            scr=self.cfg.phase_2,
             use_fst=self.use_fst,
             style_source_same_prob=self.style_source_same_prob,
         )
@@ -258,9 +256,9 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         self.train_dataloader = torch.utils.data.DataLoader(
             train_dataset,
             shuffle=True,
-            batch_size=self.config.train_batch_size,
+            batch_size=self.cfg.train_batch_size,
             collate_fn=CollateFNFST(verbose=False),
-            num_workers=getattr(self.args, "num_workers", 4),
+            num_workers=4,
             pin_memory=True,
             persistent_workers=True,
         )
@@ -269,12 +267,14 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
 
     def _setup_optimizer(self):
         """Setup optimizer with selective parameter training for FST."""
+        logger.info("Setting up optimizer and scheduler...")
+        
         # Scale learning rate if requested
-        learning_rate = self.config.learning_rate
-        if self.args.scale_lr:
+        learning_rate = self.cfg.learning_rate
+        if self.cfg.scale_lr:
             learning_rate *= (
-                self.config.gradient_accumulation_steps
-                * self.config.train_batch_size
+                self.cfg.gradient_accumulation_steps
+                * self.cfg.train_batch_size
                 * self.accelerator.num_processes
             )
 
@@ -292,18 +292,18 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         self.optimizer = torch.optim.AdamW(
             trainable_params,
             lr=learning_rate,
-            betas=(self.config.adam_beta1, self.config.adam_beta2),
-            weight_decay=self.config.adam_weight_decay,
-            eps=self.config.adam_epsilon,
+            betas=(self.cfg.adam_beta1, self.cfg.adam_beta2),
+            weight_decay=self.cfg.adam_weight_decay,
+            eps=self.cfg.adam_epsilon,
         )
 
         self.lr_scheduler = get_scheduler(
-            self.config.lr_scheduler,
+            self.cfg.lr_scheduler,
             optimizer=self.optimizer,
-            num_warmup_steps=self.config.lr_warmup_steps
-            * self.config.gradient_accumulation_steps,
-            num_training_steps=self.config.max_train_steps
-            * self.config.gradient_accumulation_steps,
+            num_warmup_steps=self.cfg.lr_warmup_steps
+            * self.cfg.gradient_accumulation_steps,
+            num_training_steps=self.cfg.max_train_steps
+            * self.cfg.gradient_accumulation_steps,
         )
 
     def _wrap_components(self):
@@ -397,7 +397,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         content_images, style_images = self.apply_classifier_free_guidance(
             content_images,
             style_images,
-            self.config.drop_prob,
+            self.cfg.drop_prob,
             samples=samples,
         )
 
@@ -412,7 +412,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 content_img=content_images,
                 style_source_img=style_source_images,
                 style_target_img=style_images,
-                content_encoder_downsample_size=self.args.content_encoder_downsample_size,
+                content_encoder_downsample_size=self.cfg.content_encoder_downsample_size,
                 return_dict=True,
             )
             noise_pred = outputs["noise_pred"]
@@ -424,7 +424,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 timesteps=timesteps,
                 style_images=style_images,
                 content_images=content_images,
-                content_encoder_downsample_size=self.args.content_encoder_downsample_size,
+                content_encoder_downsample_size=self.cfg.content_encoder_downsample_size,
             )
 
         # Compute losses
@@ -438,7 +438,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         )
 
         # SCR loss for phase 2
-        if self.config.phase_2 and self.scr is not None:
+        if self.cfg.phase_2 and self.scr is not None:
             neg_images = samples.get("neg_images")
             if neg_images is not None:
                 sc_loss = self.compute_phase2_loss(
@@ -446,7 +446,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                     target_images=target_images,
                     neg_images=neg_images,
                 )
-                total_loss += self.config.sc_coefficient * sc_loss
+                total_loss += self.cfg.sc_coefficient * sc_loss
                 loss_dict["sc_loss"] = sc_loss.item()
 
         return total_loss, loss_dict
@@ -458,10 +458,10 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
 
         # Determine checkpoint name
         if is_final:
-            save_dir = Path(self.args.output_dir) / "final"
+            save_dir = Path(self.cfg.output_dir) / "final"
         else:
             save_dir = (
-                Path(self.args.output_dir) / f"checkpoint_step_{self.global_step}"
+                Path(self.cfg.output_dir) / f"checkpoint_step_{self.global_step}"
             )
 
         save_dir.mkdir(parents=True, exist_ok=True)
@@ -500,30 +500,30 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 save_dir / "fst_projection.safetensors",
             )
 
-            # Save full model
-            if getattr(self.args, "save_full_model", True):
+            # Save full model if requested
+            if self.save_full_model:
                 torch.save(unwrapped_model, save_dir / "total_model_fst.pth")
+                logger.info("✓ Saved full FST model")
         else:
-            # Save original model
+            # Save original model components
             save_model_checkpoint(
-                unwrapped_model.config.unet.state_dict(),
+                unwrapped_model.unet.state_dict(),
                 save_dir / "unet.safetensors",
             )
             save_model_checkpoint(
-                unwrapped_model.config.style_encoder.state_dict(),
+                unwrapped_model.style_encoder.state_dict(),
                 save_dir / "style_encoder.safetensors",
             )
             save_model_checkpoint(
-                unwrapped_model.config.content_encoder.state_dict(),
+                unwrapped_model.content_encoder.state_dict(),
                 save_dir / "content_encoder.safetensors",
             )
 
-            if getattr(self.args, "save_full_model", False):
-                torch.save(unwrapped_model, save_dir / "total_model.pth")
-
         # Save SCR for phase 2
-        if self.config.phase_2 and self.scr is not None:
-            save_model_checkpoint(self.scr.state_dict(), save_dir / "scr.safetensors")
+        if self.cfg.phase_2 and self.scr is not None:
+            save_model_checkpoint(
+                self.scr.state_dict(), save_dir / "scr.safetensors"
+            )
 
         # Save optimizer and scheduler states
         torch.save(
@@ -533,7 +533,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 "model_state_dict": unwrapped_model.state_dict(),
                 "optimizer_state_dict": self.optimizer.state_dict(),
                 "lr_scheduler_state_dict": self.lr_scheduler.state_dict(),
-                "config": asdict(self.config),
+                "config": OmegaConf.to_container(self.cfg, resolve=True),
                 "fst_config": {
                     "use_fst": self.use_fst,
                     "freeze_original_encoders": self.freeze_original_encoders,
