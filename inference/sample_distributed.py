@@ -589,7 +589,7 @@ def main():
 
     if accelerator.is_main_process:
         logger.info("=" * 60)
-        logger.info("FONTDIFFUSER MULTI-GPU SYNTHESIS")
+        logger.info("FontDiffuser Multi-GPU Batch Sampler")
         logger.info("=" * 60)
         logger.info(f"Using {accelerator.num_processes} GPUs")
 

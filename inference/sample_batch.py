@@ -541,6 +541,13 @@ def parse_args() -> Namespace:
         default="train_original",
         help="Dataset split name (e.g., train_original, val)",
     )
+    
+    parser.add_argument(
+        "--ground_truth_dir",
+        type=str,
+        default=None,
+        help="Directory with ground truth images for evaluation",
+    )
 
     return parser.parse_args()
 
@@ -750,6 +757,7 @@ def create_args_namespace(args: Namespace) -> Namespace:
     default_args.cache_models = True
     default_args.controlnet = False
     default_args.resolution = 96
+    default_args.ground_truth_dir = None
 
     # Generation parameters
     default_args.algorithm_type = getattr(default_args, "algorithm_type", "dpmsolver++")
