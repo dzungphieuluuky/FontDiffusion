@@ -1,5 +1,5 @@
 """
-Optimized sampling for FontDiffuser with SAFE optimizations
+Optimized sampling for FontDiffuser with Hydra configuration
 Uses hash-based file naming with unicode characters
 Multi-character batch processing
 Multi-font support
@@ -7,15 +7,17 @@ Multi-font support
 
 import logging
 import os
+import sys
 import time
-from PIL import Image
 from pathlib import Path
-from typing import Optional, Any
+from typing import Any, Optional
 from functools import lru_cache
-from argparse import Namespace, ArgumentParser
 
+import hydra
+from omegaconf import DictConfig, OmegaConf
 import torch
 import torchvision.transforms as transforms
+from PIL import Image
 from accelerate.utils import set_seed
 
 from src import (
@@ -35,7 +37,6 @@ from src.tools.utils import (
     is_char_in_font,
     save_args_to_yaml,
 )
-
 from src.tools.filename_utils import (
     get_content_filename,
     get_target_filename,
@@ -43,90 +44,6 @@ from src.tools.filename_utils import (
 )
 
 logger = logging.getLogger("OptimizedSampler")
-
-
-def arg_parse() -> Namespace:
-    """Parse command line arguments"""
-    from src.configs.fontdiffuser import get_parser
-
-    parser: ArgumentParser = get_parser()
-
-    # Original arguments
-    parser.add_argument("--ckpt_dir", type=str, default=None)
-    parser.add_argument("--demo", action="store_true")
-    parser.add_argument(
-        "--controlnet",
-        type=bool,
-        default=False,
-        help="If in demo mode, the controlnet can be added.",
-    )
-    parser.add_argument("--character_input", action="store_true")
-    parser.add_argument(
-        "--content_character",
-        type=str,
-        default=None,
-        help="Single character, comma-separated list, or path to txt file",
-    )
-    parser.add_argument(
-        "--characters_file",
-        type=str,
-        default=None,
-        help="Path to text file with one character per line",
-    )
-    parser.add_argument("--content_image_path", type=str, default=None)
-    parser.add_argument("--style_image_path", type=str, default=None)
-    parser.add_argument("--save_image", action="store_true")
-    parser.add_argument(
-        "--save_image_dir", type=str, default=None, help="The saving directory."
-    )
-    parser.add_argument("--device", type=str, default="cuda:0")
-    parser.add_argument(
-        "--ttf_path",
-        type=str,
-        default="ttf/KaiXinSongA.ttf",
-        help="Path to single TTF file or directory with multiple fonts",
-    )
-
-    # SAFE optimization arguments
-    parser.add_argument(
-        "--fp16",
-        action="store_true",
-        default=False,
-        help="Use FP16 precision (SAFE - applied after loading weights)",
-    )
-    parser.add_argument(
-        "--batch_size",
-        type=int,
-        default=1,
-        help="Batch size for processing multiple characters",
-    )
-    parser.add_argument(
-        "--channels_last",
-        action="store_true",
-        default=False,
-        help="Use channels-last memory format (SAFE)",
-    )
-    parser.add_argument(
-        "--deterministic",
-        action="store_true",
-        default=False,
-        help="Use deterministic algorithms for reproducibility",
-    )
-    parser.add_argument(
-        "--compile",
-        action="store_true",
-        default=False,
-        help="Use torch.compile for optimization",
-    )
-
-    args: Namespace = parser.parse_args()
-
-    style_image_size: int = getattr(args, "style_image_size", 96)
-    content_image_size: int = getattr(args, "content_image_size", 96)
-    args.style_image_size = (style_image_size, style_image_size)
-    args.content_image_size = (content_image_size, content_image_size)
-
-    return args
 
 
 class FontManager:
@@ -140,18 +57,16 @@ class FontManager:
     def _load_fonts(self, ttf_path: str) -> None:
         """Load font(s) from path"""
         if os.path.isfile(ttf_path):
-            # Single font file
             self.font_paths = [ttf_path]
             font_name: str = os.path.splitext(os.path.basename(ttf_path))[0]
             self.fonts[font_name] = {
                 "path": ttf_path,
-                "font": None,  # Lazy load
+                "font": None,
                 "name": font_name,
             }
             logger.info(f"✓ Font loaded: {font_name}")
 
         elif os.path.isdir(ttf_path):
-            # Directory with multiple fonts
             font_extensions: set = {".ttf", ".otf", ".TTF", ".OTF"}
             font_files: list[str] = [
                 os.path.join(ttf_path, f)
@@ -172,7 +87,7 @@ class FontManager:
                 font_name: str = os.path.splitext(os.path.basename(font_path))[0]
                 self.fonts[font_name] = {
                     "path": font_path,
-                    "font": None,  # Lazy load
+                    "font": None,
                     "name": font_name,
                 }
                 logger.info(f"✓ {font_name}")
@@ -192,7 +107,6 @@ class FontManager:
         if font_name not in self.fonts:
             raise ValueError(f"Font not found: {font_name}")
 
-        # Lazy load font
         if self.fonts[font_name]["font"] is None:
             self.fonts[font_name]["font"] = load_ttf(self.fonts[font_name]["path"])
 
@@ -217,38 +131,11 @@ class FontManager:
         return [char for char in characters if self.is_char_in_font(font_name, char)]
 
 
-def parse_characters(
-    content_character: str = None, characters_file: str = None
-) -> list[str]:
-    """
-    Parse character input from multiple sources
-
-    Args:
-        content_character: Single character, comma-separated list, or path to txt file
-        characters_file: Path to text file with one character per line
-
-    Returns:
-        list of individual characters
-    """
+def parse_characters(content_character: str = None) -> list[str]:
+    """Parse character input from various sources"""
     chars: list[str] = []
 
-    # Priority 1: characters_file argument
-    if characters_file and os.path.isfile(characters_file):
-        logger.info(f"Loading characters from file: {characters_file}")
-        with open(characters_file, "r", encoding="utf-8") as f:
-            for line in f:
-                line_stripped: str = line.strip()
-                if line_stripped and not line_stripped.startswith("#"):
-                    if len(line_stripped) == 1:
-                        chars.append(line_stripped)
-                    else:
-                        chars.extend(list(line_stripped))
-        logger.info(f"  Loaded {len(chars)} characters")
-        return chars
-
-    # Priority 2: content_character argument
     if content_character:
-        # Check if it's a file path
         if os.path.isfile(content_character):
             logger.info(f"Loading characters from file: {content_character}")
             with open(content_character, "r", encoding="utf-8") as f:
@@ -262,11 +149,9 @@ def parse_characters(
             logger.info(f"  Loaded {len(chars)} characters")
             return chars
 
-        # Check if comma-separated
         if "," in content_character:
             chars = [c.strip() for c in content_character.split(",") if c.strip()]
         else:
-            # Single character
             stripped: str = content_character.strip()
             chars = [stripped] if len(stripped) == 1 else list(stripped)
 
@@ -274,7 +159,7 @@ def parse_characters(
 
 
 def get_content_transform(content_image_size: tuple[int, int]) -> transforms.Compose:
-    """Cached content transform"""
+    """Content transform"""
     return transforms.Compose(
         [
             transforms.Resize(
@@ -287,7 +172,7 @@ def get_content_transform(content_image_size: tuple[int, int]) -> transforms.Com
 
 
 def get_style_transform(style_image_size: tuple[int, int]) -> transforms.Compose:
-    """Cached style transform"""
+    """Style transform"""
     return transforms.Compose(
         [
             transforms.Resize(
@@ -300,18 +185,7 @@ def get_style_transform(style_image_size: tuple[int, int]) -> transforms.Compose
 
 
 def load_state_dict_auto(path: str):
-    """
-    Load state_dict from .pth or .safetensors automatically
-
-    Args:
-        path (str): Path to checkpoint file
-
-    Raises:
-        ImportError: safetensors not installed for .safetensors files
-
-    Returns:
-        _type_: Loaded state_dict
-    """
+    """Load state_dict from .pth or .safetensors"""
     if path.endswith(".safetensors"):
         try:
             from safetensors.torch import load_file as safe_load_file
@@ -322,96 +196,84 @@ def load_state_dict_auto(path: str):
         return torch.load(path, map_location="cpu")
 
 
-def load_fontdiffuser_pipeline(args: Namespace) -> FontDiffuserDPMPipeline:
-    """Load Font Diffuser pipeline with optimizations
-
-    Args:
-        args (Namespace): Arguments namespace
-
-    Returns:
-        FontDiffuserDPMPipeline: Loaded FontDiffuserDPMPipeline instance
-    """
+def load_fontdiffuser_pipeline(cfg: DictConfig) -> FontDiffuserDPMPipeline:
+    """Load FontDiffuser pipeline with optimizations"""
     logger.info("Loading FontDiffuser pipeline...")
 
-    # Load the model state_dict
-    unet: UNet = build_unet(args=args)
+    # Build components
+    unet: UNet = build_unet(cfg=cfg)
     unet_ckpt_path = (
-        f"{args.ckpt_dir}/unet.safetensors"
-        if os.path.exists(f"{args.ckpt_dir}/unet.safetensors")
-        else f"{args.ckpt_dir}/unet.pth"
+        f"{cfg.ckpt_dir}/unet.safetensors"
+        if os.path.exists(f"{cfg.ckpt_dir}/unet.safetensors")
+        else f"{cfg.ckpt_dir}/unet.pth"
     )
     unet.load_state_dict(load_state_dict_auto(unet_ckpt_path))
 
-    style_encoder: StyleEncoder = build_style_encoder(args=args)
+    style_encoder: StyleEncoder = build_style_encoder(cfg=cfg)
     style_encoder_ckpt_path = (
-        f"{args.ckpt_dir}/style_encoder.safetensors"
-        if os.path.exists(f"{args.ckpt_dir}/style_encoder.safetensors")
-        else f"{args.ckpt_dir}/style_encoder.pth"
+        f"{cfg.ckpt_dir}/style_encoder.safetensors"
+        if os.path.exists(f"{cfg.ckpt_dir}/style_encoder.safetensors")
+        else f"{cfg.ckpt_dir}/style_encoder.pth"
     )
     style_encoder.load_state_dict(load_state_dict_auto(style_encoder_ckpt_path))
 
-    content_encoder: ContentEncoder = build_content_encoder(args=args)
+    content_encoder: ContentEncoder = build_content_encoder(cfg=cfg)
     content_encoder_ckpt_path = (
-        f"{args.ckpt_dir}/content_encoder.safetensors"
-        if os.path.exists(f"{args.ckpt_dir}/content_encoder.safetensors")
-        else f"{args.ckpt_dir}/content_encoder.pth"
+        f"{cfg.ckpt_dir}/content_encoder.safetensors"
+        if os.path.exists(f"{cfg.ckpt_dir}/content_encoder.safetensors")
+        else f"{cfg.ckpt_dir}/content_encoder.pth"
     )
     content_encoder.load_state_dict(load_state_dict_auto(content_encoder_ckpt_path))
 
     logger.info("✓ Loaded model state_dict successfully")
 
-    if args.fp16:
+    if cfg.fp16:
         logger.info("Converting to FP16 precision...")
         unet = unet.half()
         style_encoder = style_encoder.half()
         content_encoder = content_encoder.half()
         logger.info("✓ Converted to FP16")
 
-    # SAFE: Apply channels-last memory format
-    if args.channels_last:
+    if cfg.channels_last:
         logger.info("Converting to channels-last memory format...")
         unet = unet.to(memory_format=torch.channels_last)
         style_encoder = style_encoder.to(memory_format=torch.channels_last)
         content_encoder = content_encoder.to(memory_format=torch.channels_last)
         logger.info("✓ Converted to channels-last")
 
-    if args.compile:
+    if cfg.compile:
         logger.info("Compiling model with torch.compile...")
         unet = torch.compile(unet)
         style_encoder = torch.compile(style_encoder)
         content_encoder = torch.compile(content_encoder)
         logger.info("✓ Model compiled")
 
-    # Create model
     model: FontDiffuserModelDPM = FontDiffuserModelDPM(
         unet=unet, style_encoder=style_encoder, content_encoder=content_encoder
     )
 
-    # Move to device with proper dtype
-    dtype: torch.dtype = torch.float16 if args.fp16 else torch.float32
-    model.to(args.device, dtype=dtype)
+    dtype: torch.dtype = torch.float16 if cfg.fp16 else torch.float32
+    model.to(cfg.device, dtype=dtype)
     model.eval()
 
     logger.info("✓ Model moved to device")
 
-    # Load the training ddpm_scheduler
-    train_scheduler: Any = build_ddpm_scheduler(args=args)
+    train_scheduler: Any = build_ddpm_scheduler(cfg=cfg)
     logger.info("✓ Loaded training DDPM scheduler successfully")
 
-    # Load the DPM_Solver to generate the sample
     pipe: FontDiffuserDPMPipeline = FontDiffuserDPMPipeline(
         model=model,
         ddpm_train_scheduler=train_scheduler,
-        model_type=getattr(args, "model_type", None),
-        guidance_type=getattr(args, "guidance_type", "classifier-free"),
-        guidance_scale=getattr(args, "guidance_scale", 7.5),
+        model_type=cfg.model_type,
+        guidance_type=cfg.guidance_type,
+        guidance_scale=cfg.guidance_scale,
     )
     logger.info("✓ Loaded DPM-Solver pipeline successfully")
     return pipe
 
 
 def sampling_batch(
-    args: Namespace,
+    cfg: DictConfig,
     pipe: FontDiffuserDPMPipeline,
     characters: list[str],
     font_manager: FontManager,
@@ -419,14 +281,10 @@ def sampling_batch(
     style_image_path: str,
     style_name: str = "style0",
     save_content_images: bool = True,
-) -> tuple[list[Image.Image] | list[str] | float]:
-    """
-    Batch sampling for multiple characters with single font and style
-    Uses hash-based file naming
-    """
-    # Process images in batch
+) -> tuple[list[Image.Image] | None, list[str] | None, float]:
+    """Batch sampling for multiple characters"""
     content_batch, style_batch, content_pils, valid_chars = image_process_batch(
-        args, characters, font_manager, font_name, style_image_path
+        cfg, characters, font_manager, font_name, style_image_path
     )
 
     if (
@@ -437,13 +295,11 @@ def sampling_batch(
     ):
         return None, None, 0.0
 
-    # set seed for reproducibility
-    if hasattr(args, "seed") and args.seed:
-        set_seed(seed=args.seed)
+    if cfg.seed:
+        set_seed(seed=cfg.seed)
 
-    # Save content images if requested
-    if save_content_images and getattr(args, "save_image", False):
-        content_dir: str = os.path.join(args.save_image_dir, "ContentImage")
+    if save_content_images and cfg.save_image:
+        content_dir: str = os.path.join(cfg.save_image_dir, "ContentImage")
         os.makedirs(content_dir, exist_ok=True)
 
         for char, pil_img in zip(valid_chars, content_pils):
@@ -452,21 +308,20 @@ def sampling_batch(
 
     with torch.no_grad():
         dtype: torch.dtype = (
-            torch.float16 if getattr(args, "fp16", False) else torch.float32
+            torch.float16 if cfg.fp16 else torch.float32
         )
-        content_batch = content_batch.to(args.device, dtype=dtype)
-        style_batch = style_batch.to(args.device, dtype=dtype)
+        content_batch = content_batch.to(cfg.device, dtype=dtype)
+        style_batch = style_batch.to(cfg.device, dtype=dtype)
 
-        if getattr(args, "channels_last", False):
+        if cfg.channels_last:
             content_batch = content_batch.to(memory_format=torch.channels_last)
             style_batch = style_batch.to(memory_format=torch.channels_last)
 
         logger.info(f"  Sampling {len(valid_chars)} characters with DPM-Solver++ ...")
         start: float = time.time()
 
-        # Process in batches
         all_images: list[Image.Image] = []
-        batch_size: int = getattr(args, "batch_size", 1)
+        batch_size: int = cfg.batch_size
 
         for i in range(0, len(content_batch), batch_size):
             batch_content: torch.Tensor = content_batch[i : i + batch_size]
@@ -476,18 +331,16 @@ def sampling_batch(
                 content_images=batch_content,
                 style_images=batch_style,
                 batch_size=len(batch_content),
-                order=getattr(args, "order", None),
-                num_inference_steps=getattr(args, "num_inference_steps", 20),
-                content_encoder_downsample_size=getattr(
-                    args, "content_encoder_downsample_size", None
-                ),
-                t_start=getattr(args, "t_start", None),
-                t_end=getattr(args, "t_end", None),
-                dm_size=getattr(args, "content_image_size", (96, 96)),
-                algorithm_type=getattr(args, "algorithm_type", None),
-                skip_type=getattr(args, "skip_type", None),
-                method=getattr(args, "method", None),
-                correcting_x0_fn=getattr(args, "correcting_x0_fn", None),
+                order=cfg.order,
+                num_inference_steps=cfg.num_inference_steps,
+                content_encoder_downsample_size=cfg.content_encoder_downsample_size,
+                t_start=cfg.t_start,
+                t_end=cfg.t_end,
+                dm_size=(cfg.content_image_size, cfg.content_image_size),
+                algorithm_type=cfg.algorithm_type,
+                skip_type=cfg.skip_type,
+                method=cfg.method,
+                correcting_x0_fn=cfg.correcting_x0_fn,
             )
 
             all_images.extend(images)
@@ -495,10 +348,9 @@ def sampling_batch(
         end: float = time.time()
         inference_time: float = end - start
 
-        # Save generated images with hash-based naming
-        if getattr(args, "save_image", False):
+        if cfg.save_image:
             target_dir: str = os.path.join(
-                args.save_image_dir, "TargetImage", style_name
+                cfg.save_image_dir, "TargetImage", style_name
             )
             os.makedirs(target_dir, exist_ok=True)
 
@@ -515,7 +367,7 @@ def sampling_batch(
 
 
 def image_process_batch(
-    args: Namespace,
+    cfg: DictConfig,
     characters: list[str],
     font_manager: FontManager,
     font_name: str,
@@ -527,17 +379,16 @@ def image_process_batch(
     list[str] | None,
 ]:
     """Process multiple characters in batch"""
-    # Load style image
     style_image: Image.Image = Image.open(style_image_path).convert("RGB")
-    style_transform: transforms.Compose = get_style_transform(args.style_image_size)
-
-    # Get font
-    font: Any = font_manager.get_font(font_name)
-    content_transform: transforms.Compose = get_content_transform(
-        args.content_image_size
+    style_transform: transforms.Compose = get_style_transform(
+        (cfg.style_image_size, cfg.style_image_size)
     )
 
-    # Get available characters
+    font: Any = font_manager.get_font(font_name)
+    content_transform: transforms.Compose = get_content_transform(
+        (cfg.content_image_size, cfg.content_image_size)
+    )
+
     available_chars: list[str] = font_manager.get_available_chars_for_font(
         font_name, characters
     )
@@ -546,7 +397,6 @@ def image_process_batch(
         logger.info(f"Warning: No characters available in font '{font_name}'")
         return None, None, None, None
 
-    # Generate content images
     content_images: list[torch.Tensor] = []
     content_images_pil: list[Image.Image] = []
 
@@ -564,7 +414,6 @@ def image_process_batch(
     if not content_images:
         return None, None, None, None
 
-    # Stack into batch
     content_batch: torch.Tensor = torch.stack(content_images)
     style_batch: torch.Tensor = style_transform(style_image)[None, :].repeat(
         len(content_images), 1, 1, 1
@@ -573,33 +422,24 @@ def image_process_batch(
     return content_batch, style_batch, content_images_pil, available_chars
 
 
-def main() -> None:
-    """Main function"""
-    args: Namespace = arg_parse()
-
+@hydra.main(version_base=None, config_path="configs/inference", config_name="optimized")
+def main(cfg: DictConfig) -> None:
+    """Main function for optimized sampling"""
     logger.info("\n" + "=" * 60)
     logger.info("FONTDIFFUSER - OPTIMIZED SAMPLING")
     logger.info("=" * 60)
-    logger.info(f"Model: {args.ckpt_dir}")
-    logger.info(f"Device: {args.device}")
-    logger.info(f"FP16: {getattr(args, 'fp16', False)}")
-    logger.info(f"Channels Last: {getattr(args, 'channels_last', False)}")
-    logger.info(f"Compile: {getattr(args, 'compile', False)}")
-    logger.info(f"Batch Size: {getattr(args, 'batch_size', 1)}")
+    logger.info(OmegaConf.to_yaml(cfg))
     logger.info("=" * 60 + "\n")
 
-    # Load pipeline
-    pipe: FontDiffuserDPMPipeline = load_fontdiffuser_pipeline(args=args)
+    if not cfg.ckpt_dir:
+        raise ValueError("ckpt_dir must be specified")
 
-    # Parse characters
-    characters: list[str] = parse_characters(
-        getattr(args, "content_character", None), getattr(args, "characters_file", None)
-    )
+    pipe: FontDiffuserDPMPipeline = load_fontdiffuser_pipeline(cfg=cfg)
 
-    # Check if multi-character or multi-font mode
-    if getattr(args, "character_input", False) and characters:
-        if len(characters) > 1 or os.path.isdir(args.ttf_path):
-            # Multi-character or multi-font mode
+    characters: list[str] = parse_characters(cfg.content_character)
+
+    if cfg.character_input and characters:
+        if len(characters) > 1 or os.path.isdir(cfg.ttf_path):
             logger.info(f"\n{'=' * 60}")
             logger.info("BATCH MODE ACTIVATED")
             logger.info(
@@ -607,29 +447,24 @@ def main() -> None:
             )
             logger.info("=" * 60)
 
-            # Load font manager
-            font_manager: FontManager = FontManager(args.ttf_path)
+            font_manager: FontManager = FontManager(cfg.ttf_path)
             font_names: list[str] = font_manager.get_font_names()
 
-            if not getattr(args, "demo", False):
-                os.makedirs(args.save_image_dir, exist_ok=True)
+            if not cfg.demo:
+                os.makedirs(cfg.save_image_dir, exist_ok=True)
                 save_args_to_yaml(
-                    args=args, output_file=f"{args.save_image_dir}/sampling_config.yaml"
+                    args=OmegaConf.to_container(cfg, resolve=True),
+                    output_file=f"{cfg.save_image_dir}/sampling_config.yaml"
                 )
 
-            # Determine style name from path
-            style_name: str = os.path.splitext(os.path.basename(args.style_image_path))[
-                0
-            ]
+            style_name: str = os.path.splitext(os.path.basename(cfg.style_image_path))[0]
 
-            # Process each font
             total_generated: int = 0
             for font_idx, font_name in enumerate(font_names):
                 logger.info(f"\n{'=' * 60}")
                 logger.info(f"[Font {font_idx + 1}/{len(font_names)}] {font_name}")
                 logger.info("=" * 60)
 
-                # Get available characters
                 available: list[str] = font_manager.get_available_chars_for_font(
                     font_name, characters
                 )
@@ -641,14 +476,13 @@ def main() -> None:
                     logger.info("  ⚠ Skipping font (no characters available)")
                     continue
 
-                # Sample in batch
                 images, valid_chars, inf_time = sampling_batch(
-                    args,
+                    cfg,
                     pipe,
                     characters,
                     font_manager,
                     font_name,
-                    args.style_image_path,
+                    cfg.style_image_path,
                     style_name,
                     save_content_images=True,
                 )
@@ -662,13 +496,6 @@ def main() -> None:
             logger.info("✓ BATCH PROCESSING COMPLETE")
             logger.info("=" * 60)
             logger.info(f"Total images generated: {total_generated}")
-            logger.info(f"\nOutput structure:")
-            logger.info(f"  {args.save_image_dir}/")
-            logger.info(f"    ├── ContentImage/")
-            logger.info(f"    │   └── U+XXXX_char_hash.png")
-            logger.info(f"    └── TargetImage/")
-            logger.info(f"        └── {style_name}/")
-            logger.info(f"            └── U+XXXX_char_{style_name}_hash.png")
             logger.info("=" * 60)
 
 

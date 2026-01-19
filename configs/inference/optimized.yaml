@@ -1,0 +1,18 @@
+# Single-image optimized inference configuration
+# Inherits from default
+
+defaults:
+  - default
+
+# Input/Output
+demo: false
+character_input: false
+content_character: null
+content_image_path: null
+style_image_path: null
+save_image: false
+save_image_dir: null
+ttf_path: "ttf/KaiXinSongA.ttf"
+
+# Single-image specific settings
+batch_size: 1

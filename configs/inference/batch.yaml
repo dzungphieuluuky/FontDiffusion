@@ -1,0 +1,35 @@
+# Batch inference configuration for multiple characters and styles
+# Inherits from default
+
+defaults:
+  - default
+
+# Input/Output
+characters: null
+characters_file: null
+start_line: 1
+end_line: null
+style_images: null
+output_dir: "my_dataset/train_original"
+ground_truth_dir: null
+ttf_path: null
+
+# Batch Processing
+batch_size: 4
+save_interval: 10
+
+# Font & Dataset
+dataset_split: "train_original"
+
+# Evaluation
+evaluate: true
+compute_fid: false
+enable_attention_slicing: false
+
+# Optimization (batch-specific)
+fast_sampling: false
+
+# Weights & Biases
+use_wandb: false
+wandb_project: "fontdiffuser-eval"
+wandb_run_name: null

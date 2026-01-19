@@ -1,0 +1,46 @@
+# Default inference configuration for FontDiffuser
+# Flat structure matching src/configs/fontdiffuser.py
+
+# Model & Checkpoint
+ckpt_dir: null
+device: "cuda:0"
+
+# Model Architecture
+resolution: 96
+unet_channels: [64, 128, 256, 512]
+style_image_size: 96
+content_image_size: 96
+content_encoder_downsample_size: 3
+channel_attn: true
+content_start_channel: 64
+style_start_channel: 64
+
+# Sampling Configuration
+algorithm_type: "dpmsolver++"
+guidance_type: "classifier-free"
+guidance_scale: 7.5
+num_inference_steps: 20
+model_type: "noise"
+order: 2
+skip_type: "time_uniform"
+method: "multistep"
+correcting_x0_fn: null
+t_start: null
+t_end: null
+
+# Seed & Reproducibility
+seed: 42
+
+# Optimization Flags
+fp16: false
+channels_last: false
+compile: false
+deterministic: false
+enable_xformers: false
+
+# Style Transformation
+enable_style_transform: false
+
+# Additional Features
+controlnet: false
+instructpix2pix: false
