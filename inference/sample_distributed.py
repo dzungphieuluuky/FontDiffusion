@@ -498,7 +498,7 @@ def evaluate_results_with_accelerator(
     ground_truth_dir: str | None,
     compute_fid: bool = False,
     accelerator: Accelerator | None = None,
-) -> dict[str, dict[str, dict[str, float]]]:
+) -> dict:
     """Evaluate generated images on main process."""
 
     if not accelerator or not accelerator.is_main_process:
