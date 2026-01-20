@@ -1,10 +1,13 @@
-from .model import (
+from .models.model import (
     FontDiffuserModel,
-    FontDiffuserModelDPM,
+    FontDiffuserModelDPM
+)
+from .models.fst_model import (
     FontDiffuserWithFST,
     FontDiffuserWithFSTWrapper,
     FontStyleTransformationModule,
 )
+
 from .losses.criterion import ContentPerceptualLoss
 from .dpm_solver.pipeline_dpm_solver import FontDiffuserDPMPipeline
 from .modules import ContentEncoder, StyleEncoder, UNet, SCR
