@@ -19,7 +19,7 @@ logging.basicConfig(
 logger = logging.getLogger("FontDiffuserTrainer")
 
 
-@hydra.main(version_base=None, config_path="configs/training", config_name="default")
+@hydra.main(version_base="1.3", config_path="configs/training", config_name="default")
 def main(cfg: DictConfig):
     """Main training entry point with Hydra."""
     

@@ -652,7 +652,7 @@ def log_to_wandb(results: dict, cfg: DictConfig) -> None:
         logger.warning(f"Error logging to wandb: {e}")
 
 
-@hydra.main(version_base=None, config_path="configs/inference", config_name="batch")
+@hydra.main(version_base="1.3", config_path="../configs/inference", config_name="batch")
 def main(cfg: DictConfig) -> None:
     """Main function"""
     logger.info("=" * 60)

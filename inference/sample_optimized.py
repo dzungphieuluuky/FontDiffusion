@@ -415,7 +415,7 @@ def image_process_batch(
     return content_batch, style_batch, content_images_pil, available_chars
 
 
-@hydra.main(version_base=None, config_path="configs/inference", config_name="optimized")
+@hydra.main(version_base="1.3", config_path="../configs/inference", config_name="optimized")
 def main(cfg: DictConfig) -> None:
     """Main function for optimized sampling"""
     logger.info("\n" + "=" * 60)

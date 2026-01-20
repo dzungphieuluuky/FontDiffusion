@@ -574,7 +574,7 @@ def evaluate_results_with_accelerator(
     return results
 
 
-@hydra.main(version_base=None, config_path="configs/inference", config_name="distributed")
+@hydra.main(version_base="1.3", config_path="../configs/inference", config_name="distributed")
 def main(cfg: DictConfig) -> None:
     """Main entry point for distributed inference."""
     
