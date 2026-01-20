@@ -17,7 +17,7 @@ class TestFontDiffuserWithFST:
         mock_original.style_encoder = Mock(spec=nn.Module)
 
         # Import and instantiate
-        from src.model import FontDiffuserWithFST
+        from src.models.fst_model import FontDiffuserWithFST
 
         model = FontDiffuserWithFST(
             original_fontdiffuser=mock_original,
@@ -43,7 +43,7 @@ class TestFontDiffuserWithFST:
         sample_style_images,
     ):
         """Test forward pass produces correct output shapes."""
-        from src.model import FontDiffuserWithFST
+        from src.models.fst_model import FontDiffuserWithFST
 
         # Create mock original FontDiffuser
         mock_original = Mock()
@@ -85,7 +85,7 @@ class TestFontDiffuserWithFST:
     @pytest.mark.unit
     def test_get_loss_dict(self, sample_latents):
         """Test loss computation."""
-        from src.model import FontDiffuserWithFST
+        from src.models.fst_model import FontDiffuserWithFST
 
         mock_original = Mock()
         model = FontDiffuserWithFST(mock_original)
@@ -111,7 +111,7 @@ class TestFontDiffuserModel:
     @pytest.mark.unit
     def test_fontdiffuser_model_forward(self):
         """Test FontDiffuserModel forward pass."""
-        from src.model import FontDiffuserModel
+        from src.models.model import FontDiffuserModel
 
         # Create mocks
         mock_unet = Mock(return_value=(torch.randn(2, 4, 12, 12), torch.tensor(0.0)))

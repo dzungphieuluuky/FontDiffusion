@@ -19,7 +19,7 @@ from src import (
     build_content_encoder,
     build_style_encoder,
 )
-from src.model import FontDiffuserWithFST
+from src.models.fst_model import FontDiffuserWithFST
 from src.tools.utils import (
     ttf2im,
     load_ttf,

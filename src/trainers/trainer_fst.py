@@ -26,7 +26,7 @@ from src import (
     build_style_encoder,
     build_unet,
 )
-from src.model import FontDiffuserWithFST
+from src.models.fst_model import FontDiffuserWithFST
 from src.modules.msse import MultiScaleStyleEncoder
 from src.modules.fst import FontStyleTransformationModule
 from src.tools.utilities import (

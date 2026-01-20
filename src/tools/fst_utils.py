@@ -120,7 +120,7 @@ class ModelCheckpointManager:
 
     def convert_baseline_to_fst(self, baseline_ckpt_dir: str, output_dir: str):
         """Convert baseline checkpoint to FST format (initializes FST modules randomly)."""
-        from src.model import FontDiffuserWithFST
+        from src.models.fst_model import FontDiffuserWithFST
         from src import (
             FontDiffuserModel,
             build_unet,
@@ -344,7 +344,7 @@ def visualize_fst_features(
 # Example usage
 if __name__ == "__main__":
     # Example: Print model summary
-    from src.model import FontDiffuserWithFST
+    from src.models.fst_model import FontDiffuserWithFST
     from src import (
         FontDiffuserModel,
         build_unet,
