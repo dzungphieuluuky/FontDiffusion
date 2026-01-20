@@ -539,20 +539,7 @@ class FontDiffuserTrainer:
         # Save SCR for phase 2
         if self.config.phase_2 and self.scr is not None:
             save_model_checkpoint(self.scr.state_dict(), save_dir / "scr.safetensors")
-
-        # Save optimizer and scheduler states
-        torch.save(
-            {
-                "global_step": self.global_step,
-                "epoch": self.current_epoch,
-                "model_state_dict": unwrapped_model.state_dict(),
-                "optimizer_state_dict": self.optimizer.state_dict(),
-                "lr_scheduler_state_dict": self.lr_scheduler.state_dict(),
-                "config": asdict(self.config),
-            },
-            save_dir / "training_state.pt",
-        )
-
+            
         logger.info(f"Saved checkpoint to {save_dir}")
         self.accelerator.log(
             {"checkpoint_saved": True, "checkpoint_step": self.global_step}
