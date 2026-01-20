@@ -539,7 +539,7 @@ class FontDiffuserTrainer:
         # Save SCR for phase 2
         if self.config.phase_2 and self.scr is not None:
             save_model_checkpoint(self.scr.state_dict(), save_dir / "scr.safetensors")
-            
+
         logger.info(f"Saved checkpoint to {save_dir}")
         self.accelerator.log(
             {"checkpoint_saved": True, "checkpoint_step": self.global_step}
