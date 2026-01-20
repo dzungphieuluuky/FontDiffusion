@@ -5,20 +5,20 @@ Supports single-image, batch, and distributed multi-GPU generation.
 
 Usage:
     # Single image inference
-    python run_inference.py --config-name optimized \
+    python run_inference.py --config-name=optimized \
         ckpt_dir=ckpt/ \
         content_character="A" \
         style_image_path=style.png \
         save_image=true
 
     # Batch inference
-    python run_inference.py --config-name batch \
+    python run_inference.py --config-name=batch \
         characters=chars.txt \
         style_images=styles/ \
         output_dir=results/
 
     # Multi-GPU distributed
-    accelerate launch run_inference.py --config-name distributed \
+    accelerate launch run_inference.py --config-name=distributed \
         characters=chars.txt \
         style_images=styles/ \
         output_dir=results/
