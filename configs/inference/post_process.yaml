@@ -1,0 +1,12 @@
+post_processing:
+  use_controlnet: true
+  use_instructpix2pix: false
+  
+  controlnet:
+    config_path: "lllyasviel/sd-controlnet-canny"
+    ckpt_path: "runwayml/stable-diffusion-v1-5"
+    text_prompt: "high quality font style enhancement"
+  
+  instructpix2pix:
+    ckpt_path: "timbrooks/instruct-pix2pix"
+    text_instruction: "enhance the font quality, improve clarity and sharpness"
