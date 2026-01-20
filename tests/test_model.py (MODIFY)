@@ -1,6 +1,0 @@
-class TestFontDiffuserWithFST:
-    def test_model_initialization(self):
-        mock_model = Mock()
-        mock_model.config = {'param1': 'value1', 'param2': 'value2'}
-        assert mock_model.config['param1'] == 'value1'
-        assert mock_model.config['param2'] == 'value2'
