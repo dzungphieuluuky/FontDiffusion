@@ -546,12 +546,6 @@ class FontDiffuserTrainer:
         num_train_epochs = math.ceil(
             self.cfg.max_train_steps / num_update_steps_per_epoch
         )
-
-        # Resume from checkpoint if specified (would need to add to config)
-        # if hasattr(self.cfg, 'resume_from_checkpoint') and self.cfg.resume_from_checkpoint:
-        #     if not self.load_checkpoint(self.cfg.resume_from_checkpoint):
-        #         logger.warning("Starting training from scratch")
-
         # Setup progress bar
         progress_bar = HFTqdm(
             range(self.cfg.max_train_steps),
