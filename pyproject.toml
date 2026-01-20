@@ -1,7 +1,7 @@
 [project]
-name = "fontdiffusion"
+name = "nom_synthesis"
 version = "0.1.0"
-description = "Add your description here"
+description = "Nom Synthesis: Ancient Nom Script Recognition based on Diffusion Models"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
