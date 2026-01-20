@@ -25,7 +25,7 @@ def main(cfg: DictConfig):
     
     # Log configuration
     logger.info("="*80)
-    logger.info("FONTDIFFUSER TRAINING")
+    logger.info("FontDiffusion Training Configuration")
     logger.info("="*80)
     logger.info(OmegaConf.to_yaml(cfg))
     logger.info("="*80)

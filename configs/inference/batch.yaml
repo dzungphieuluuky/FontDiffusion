@@ -9,7 +9,7 @@ characters: ???
 characters_file: null
 start_line: 1
 end_line: null
-style_images: ???l
+style_images: ???
 output_dir: "my_dataset/train_original"
 ground_truth_dir: null
 ttf_path: ???
@@ -23,7 +23,7 @@ dataset_split: "train_original"
 
 # Evaluation
 evaluate: true
-compute_fid: truee
+compute_fid: true
 enable_attention_slicing: false
 
 # Optimization (batch-specific)

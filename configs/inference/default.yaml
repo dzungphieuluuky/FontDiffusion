@@ -2,8 +2,11 @@
 # Flat structure matching src/configs/fontdiffuser.py
 
 # Model & Checkpoint
-ckpt_dir: null
-device: "cuda:0"
+defaults:
+  - __self__
+  
+ckpt_dir: ???
+device: "cuda"
 
 # Model Architecture
 resolution: 96
