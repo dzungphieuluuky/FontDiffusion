@@ -1,0 +1,22 @@
+import torch
+import pytest
+
+@pytest.mark.parametrize("input_shape", [(1, 128, 640), (2, 128, 640), (4, 128, 640)])
+def test_fst_output_shape(input_shape):
+    input_tensor = torch.randn(input_shape)
+    # Assuming model is defined and initialized
+    output = model(input_tensor)
+    assert output.shape == (input_shape[0], 128)  # Adjust expected output shape as necessary
+
+@pytest.mark.parametrize("input_shape", [(1, 256, 640), (2, 256, 640), (4, 256, 640)])
+def test_fst_gradient_flow(input_shape):
+    input_tensor = torch.randn(input_shape)
+    output = model(input_tensor)
+    output.backward(torch.ones_like(output))  # Ensure gradients can flow
+    assert input_tensor.grad is not None  # Check if gradients are computed
+
+@pytest.mark.parametrize("input_shape", [(1, 128, 640), (2, 128, 640), (4, 128, 640)])
+def test_fst_shape_mismatch(input_shape):
+    input_tensor = torch.randn(input_shape)
+    with pytest.raises(RuntimeError):
+        model(input_tensor)  # Expecting a shape mismatch error

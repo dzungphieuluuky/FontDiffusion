@@ -1,0 +1,62 @@
+import pytest
+import torch
+
+class TestFSTModuleIntegration:
+    def test_fst_forward_backward_flow(self):
+        input_tensor = torch.randn(2, 128, 640)
+        output = model(input_tensor)
+        assert output.shape == (2, 128, expected_output_shape)
+
+    @pytest.mark.parametrize("input_size", [(64, 64), (128, 128), (256, 128)])
+    def test_fst_variable_configs(self, input_size):
+        input_tensor = torch.randn(2, input_size[0], 320)
+        output = model(input_tensor)
+        assert output.shape == (2, input_size[1], expected_output_shape)
+
+class TestFSTWithMSSEPipeline:
+    def test_msse_to_fst_pipeline(self):
+        input_a = torch.randn(2, 128)
+        input_b = torch.randn(2, 64)
+        with pytest.raises(RuntimeError):
+            output = model(input_a, input_b)
+
+class TestFSTGradientFlow:
+    def test_fst_learnable_queries_gradients(self):
+        input_tensor = torch.randn(2, 128, 640)
+        output = model(input_tensor)
+        assert output.shape == (2, 128, expected_output_shape)
+
+    def test_fst_positional_encoding_gradients(self):
+        input_tensor = torch.randn(2, 128, 640)
+        output = model(input_tensor)
+        assert output.shape == (2, 128, expected_output_shape)
+
+    def test_fst_projection_layers_gradients(self):
+        input_tensor = torch.randn(2, 128, 640)
+        output = model(input_tensor)
+        assert output.shape == (2, 128, expected_output_shape)
+
+class TestFSTOverfitting:
+    def test_fst_batch_overfitting(self):
+        input_tensor = torch.randn(2, 128, 640)
+        output = model(input_tensor)
+        assert output.shape == (2, 128, expected_output_shape)
+
+class TestMSSEOverfitting:
+    def test_msse_can_memorize(self):
+        input_a = torch.randn(2, 24)
+        input_b = torch.randn(2, 48)
+        with pytest.raises(RuntimeError):
+            output = model(input_a, input_b)
+
+class TestFSTModuleShapes:
+    @pytest.mark.parametrize("input_size", [(1, 128), (2, 256), (4, 256)])
+    def test_fst_output_shape(self, input_size):
+        input_tensor = torch.randn(input_size[0], 128, 640)
+        output = model(input_tensor)
+        assert output.shape == (input_size[0], 128, expected_output_shape)
+
+    def test_fst_gradient_flow(self):
+        input_tensor = torch.randn(2, 128, 640)
+        output = model(input_tensor)
+        assert output.shape == (2, 128, expected_output_shape)
