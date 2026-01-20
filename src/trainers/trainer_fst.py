@@ -1,11 +1,9 @@
-"""
-Trainer class for FontDiffuserWithFST.
-Uses Hydra DictConfig for configuration management.
-"""
+"""Trainer class for FontDiffuserWithFST."""
 
 import logging
 from pathlib import Path
 from typing import Optional
+import math
 
 import torch
 import torch.nn.functional as F
@@ -49,11 +47,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
     """Trainer for FontDiffuserWithFST model with MSSE and FST modules."""
 
     def __init__(self, cfg: DictConfig):
-        """Initialize FST trainer with Hydra config.
-
-        Args:
-            cfg: Hydra DictConfig with FST and training parameters
-        """
+        """Initialize FST trainer with Hydra config."""
         # Extract FST-specific parameters from Hydra config
         self.use_fst = cfg.get("use_fst", True)
         self.freeze_original_encoders = cfg.get("freeze_original_encoders", False)
@@ -66,16 +60,31 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             fst_channels if isinstance(fst_channels, list) else list(fst_channels)
         )
 
-        self.fst_num_queries = cfg.get("fst_num_queries", 220)
+        self.fst_num_queries = cfg.get("fst_num_queries", 220)  # Changed from 256!
         self.fst_query_dim = cfg.get("fst_query_dim", 128)
         self.fst_num_scales = cfg.get("fst_num_scales", 5)
+
+        # IMPORTANT: Adjust num_queries to make total tokens a perfect square
+        # last_spatial = 256 (16x16), so num_queries + 256 must be perfect square
+        # Example: 220 + 256 = 476 (not perfect square)
+        # Let's use 240 + 256 = 496 (not perfect square)
+        # Let's use 225 + 256 = 481 (not perfect square)
+        # Let's use 208 + 256 = 464 (not perfect square)
+        # Perfect squares near 256: 225, 256, 289, 324, 361, 400, 441, 484, 529, 576
+        
+        # For 256 queries + 256 spatial = 512 tokens (not perfect square)
+        # Let's use 144 queries + 256 spatial = 400 tokens (20x20 perfect square!)
+        self.fst_num_queries = 144  # Force to make total tokens perfect square
+        
+        logger.info(f"Adjusted FST num_queries to {self.fst_num_queries} for perfect square tokens")
+        logger.info(f"Total tokens: {self.fst_num_queries + 256} = sqrt({int(math.sqrt(self.fst_num_queries + 256))})^2")
 
         # Parent initialization
         super().__init__(cfg)
 
     def _setup_models(self):
         """Initialize FST model components with proper configuration."""
-        logger.info("Building core model components...")
+        logger.info("Building FST model components...")
 
         # Build base components
         unet = build_unet(cfg=self.cfg)
@@ -103,24 +112,23 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         if self.use_fst:
             logger.info("Building FontDiffuserWithFST model")
             logger.info(f"  Feature channels: {self.fst_feature_channels}")
-            logger.info(f"  Num queries: {self.fst_num_queries}")
+            logger.info(f"  Num queries: {self.fst_num_queries} (adjusted for perfect square)")
             logger.info(f"  Query dim: {self.fst_query_dim}")
+            logger.info(f"  Total tokens: {self.fst_num_queries + 256}")
 
             self.model = FontDiffuserWithFST(
                 base_model,
                 feature_channels=self.fst_feature_channels,
-                num_queries=self.fst_num_queries,
+                num_queries=self.fst_num_queries,  # Use adjusted value
                 query_dim=self.fst_query_dim,
                 num_scales=self.fst_num_scales,
+                cfg=self.cfg,
             )
 
             # Optionally freeze original encoders
             if self.freeze_original_encoders:
                 logger.info("Freezing original encoders")
-                for param in self.model.style_encoder.parameters():
-                    param.requires_grad = False
-                for param in self.model.content_encoder.parameters():
-                    param.requires_grad = False
+                self.model.freeze_original_encoders()
 
                 trainable = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
                 total = sum(p.numel() for p in self.model.parameters())

@@ -35,7 +35,9 @@ class FontStyleTransformationModule(nn.Module):
         self.feature_channels = feature_channels
 
         # Learnable query vectors L ∈ R^{N_L × d}
+        # IMPORTANT: Ensure num_queries + last_spatial is a perfect square for reshaping
         self.learnable_queries = nn.Parameter(torch.randn(num_queries, query_dim))
+        nn.init.normal_(self.learnable_queries, std=0.02)
 
         # Per-scale learnable positional encodings PE_i
         self.pos_encodings = nn.ParameterList(
@@ -81,6 +83,15 @@ class FontStyleTransformationModule(nn.Module):
             nn.Linear(1024, 1024),
         )
         self.residual_proj = nn.Linear(feature_channels[-1], 1024)
+        
+        # Calculate total tokens to ensure it's a perfect square
+        last_scale_spatial = 16 * 16  # For 1024 channels at 16x16 resolution
+        self.total_tokens = num_queries + last_scale_spatial
+        
+        # Verify it's a perfect square for reshaping
+        sqrt_tokens = int(math.sqrt(self.total_tokens))
+        assert sqrt_tokens * sqrt_tokens == self.total_tokens, \
+            f"Total tokens {self.total_tokens} must be a perfect square for reshaping"
 
     def forward(
         self,
@@ -95,7 +106,8 @@ class FontStyleTransformationModule(nn.Module):
             target_features: List of target feature tensors (B, C_i, H_i, W_i)
 
         Returns:
-            Style transformation features of shape (B, N_L + H*W, 1024)
+            Style transformation features of shape (B, total_tokens, 1024)
+            where total_tokens = N_L + last_spatial (must be perfect square)
         """
         batch_size = source_features[0].shape[0]
         queries = repeat(self.learnable_queries, "n d -> b n d", b=batch_size)
@@ -128,12 +140,12 @@ class FontStyleTransformationModule(nn.Module):
             L_diff = L_tgt - L_src  # (B, N_L, d)
             all_transformed.append(L_diff)
 
-        # Concatenate all scales
-        L_concat = torch.cat(all_transformed, dim=-1)  # (B, N_L, d * n_s)
+        # Concatenate all scales: (B, N_L, d * n_s)
+        L_concat = torch.cat(all_transformed, dim=-1)
 
         # Self-attention-based fusion
         for block in self.self_attn_blocks:
-            L_concat = block(L_concat)
+            L_concat = block(L_concat)  # Already (B, N_L, d*n_s)
 
         # MLP to adjust channel size to 1024
         L_transformed = self.mlp_channel_adjust(L_concat)  # (B, N_L, 1024)
@@ -146,7 +158,7 @@ class FontStyleTransformationModule(nn.Module):
         # Final output concatenation
         output = torch.cat(
             [L_transformed, last_feature_proj], dim=1
-        )  # (B, N_L + H*W, 1024)
+        )  # (B, total_tokens, 1024)
 
         return output
 
@@ -156,7 +168,6 @@ class FontStyleTransformationModule(nn.Module):
         for block in self.cross_attn_blocks:
             x = block(x, context=K, value=V)
         return x
-
 
 class TransformerBlock(nn.Module):
     """A single transformer block with optional cross-attention."""
@@ -184,10 +195,19 @@ class TransformerBlock(nn.Module):
         context: torch.Tensor = None,
         value: torch.Tensor = None,
     ) -> torch.Tensor:
-        # Ensure x is (B, N, D) - LayerNorm requires last dimension to match
-        if x.dim() == 4:
-            # If input is (B, C, H, W), reshape to (B, H*W, C)
-            x = rearrange(x, "b c h w -> b (h w) c")
+        """
+        Forward pass.
+        
+        Args:
+            x: Input tensor (B, N, D) - must be 3D for LayerNorm
+            context: Context for cross-attention (B, M, D)
+            value: Value for cross-attention (B, M, D)
+            
+        Returns:
+            Output tensor (B, N, D)
+        """
+        # Ensure x is always (B, N, D) for LayerNorm
+        assert x.dim() == 3, f"Expected 3D input (B, N, D), got shape {x.shape}"
 
         # Self-attention or cross-attention
         if self.is_cross_attention and context is not None:
@@ -205,6 +225,7 @@ class SelfAttention(nn.Module):
 
     def __init__(self, dim: int, num_heads: int = 8):
         super().__init__()
+        assert dim % num_heads == 0, f"dim {dim} must be divisible by num_heads {num_heads}"
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
         self.scale = self.head_dim**-0.5
@@ -233,6 +254,7 @@ class CrossAttention(nn.Module):
 
     def __init__(self, dim: int, num_heads: int = 8):
         super().__init__()
+        assert dim % num_heads == 0, f"dim {dim} must be divisible by num_heads {num_heads}"
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
         self.scale = self.head_dim**-0.5
