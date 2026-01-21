@@ -8,6 +8,8 @@ my_dataset/
 *.zip
 *.pdf
 *.bat
+*.jpg
+*.png
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -558,14 +558,6 @@ class FontDiffuserTrainer:
             unwrapped_model = self.accelerator.unwrap_model(self.model)
             unwrapped_model.load_state_dict(checkpoint["model_state_dict"])
 
-            # Load optimizer and scheduler
-            self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-            self.lr_scheduler.load_state_dict(checkpoint["lr_scheduler_state_dict"])
-
-            # Restore training state
-            self.global_step = checkpoint["global_step"]
-            self.current_epoch = checkpoint["epoch"]
-
             logger.info(f"Loaded checkpoint from {checkpoint_path}")
             logger.info(
                 f"Resuming from step {self.global_step}, epoch {self.current_epoch}"
