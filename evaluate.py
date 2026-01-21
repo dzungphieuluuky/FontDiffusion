@@ -577,7 +577,7 @@ def plot_results(results: dict, output_dir: str) -> None:
 
         # Create bar plot
         fig, ax = plt.subplots(figsize=(12, 6))
-        ax.bar(range(len(styles)), metric_values, color="steelblue", alpha=0.8)
+        ax.bar(range(len(styles)), metric_values, color="blue", alpha=0.8)
         ax.set_xticks(range(len(styles)))
         ax.set_xticklabels(styles, rotation=45, ha="right")
         ax.set_ylabel(f"{metric_name.replace('_', ' ').title()} (mean)")
@@ -604,7 +604,7 @@ def plot_results(results: dict, output_dir: str) -> None:
                 results["metrics"]["lpips"]["mean"],
                 results["metrics"]["lpips"]["median"],
             ],
-            color="steelblue",
+            color="blue",
             alpha=0.8,
         )
         ax1.set_ylabel("LPIPS")
@@ -615,7 +615,7 @@ def plot_results(results: dict, output_dir: str) -> None:
         ax2.bar(
             ["Mean", "Median"],
             [results["metrics"]["ssim"]["mean"], results["metrics"]["ssim"]["median"]],
-            color="steelgreen",
+            color="green",
             alpha=0.8,
         )
         ax2.set_ylabel("SSIM")
