@@ -25,7 +25,6 @@ import json
 import logging
 import argparse
 from pathlib import Path
-from typing import dict, list, tuple
 from argparse import Namespace, ArgumentParser
 
 import numpy as np
