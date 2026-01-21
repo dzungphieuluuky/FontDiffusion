@@ -3,6 +3,7 @@ Create Hugging Face dataset from generated FontDiffusion images with streaming s
 
 This module builds datasets from FontDiffusion outputs using streaming to prevent
 RAM overflow, especially useful in constrained environments like Colab or Kaggle.
+Includes comparison image generation for visual inspection.
 """
 
 import json
@@ -31,6 +32,8 @@ class DatasetConfig:
     private: bool = False
     token: str = None
     batch_size: int = 100  # Process in batches to limit memory usage
+    resize_height: int = 256  # Height for comparison images
+    spacing: int = 10  # Spacing between images in comparison
 
     def __post_init__(self):
         """Convert data_dir to Path if it's a string."""
@@ -100,11 +103,75 @@ class DatasetBuilder:
 
         return data
 
+    def _resize_image(self, image: Image.Image, target_height: int) -> Image.Image:
+        """Resize image to target height while maintaining aspect ratio.
+
+        Args:
+            image: PIL Image to resize
+            target_height: Target height in pixels
+
+        Returns:
+            Resized PIL Image
+        """
+        aspect_ratio = image.width / image.height
+        new_width = int(target_height * aspect_ratio)
+        return image.resize((new_width, target_height), Image.Resampling.LANCZOS)
+
+    def _create_comparison_image(
+        self,
+        content_img: Image.Image,
+        style_img: Image.Image,
+        target_img: Image.Image,
+    ) -> Image.Image:
+        """Create side-by-side comparison image (content | style | target).
+
+        Args:
+            content_img: Content/character image
+            style_img: Style image
+            target_img: Target image
+
+        Returns:
+            Comparison PIL Image
+        """
+        try:
+            # Resize all images to same height
+            content_resized = self._resize_image(content_img, self.config.resize_height)
+            style_resized = self._resize_image(style_img, self.config.resize_height)
+            target_resized = self._resize_image(target_img, self.config.resize_height)
+
+            # Calculate total width
+            total_width = (
+                content_resized.width
+                + style_resized.width
+                + target_resized.width
+                + 2 * self.config.spacing
+            )
+            total_height = self.config.resize_height
+
+            # Create comparison image
+            comparison = Image.new(
+                "RGB", (total_width, total_height), color=(255, 255, 255)
+            )
+
+            # Paste images left to right
+            x_offset = 0
+            comparison.paste(content_resized, (x_offset, 0))
+            x_offset += content_resized.width + self.config.spacing
+            comparison.paste(style_resized, (x_offset, 0))
+            x_offset += style_resized.width + self.config.spacing
+            comparison.paste(target_resized, (x_offset, 0))
+
+            return comparison
+
+        except Exception as e:
+            logger.warning(f"Failed to create comparison image: {e}")
+            return None
+
     def _generate_samples(self) -> Generator[dict[str, Any], None, None]:
         """Generate dataset samples one at a time.
 
         Yields:
-            Dictionary containing sample data
+            Dictionary containing sample data with individual images and comparison
 
         This generator loads images one at a time to minimize memory usage.
         """
@@ -123,30 +190,54 @@ class DatasetBuilder:
             content_path: Path = self.data_dir / gen.get("content_image_path", "")
             target_path: Path = self.data_dir / gen.get("target_image_path", "")
 
+            # Try to find style image - search in style_images directory
+            style_path: Optional[Path] = self._find_style_image(style)
+
             # Validate paths exist
             if not content_path.exists() or not target_path.exists():
+                logger.debug(
+                    f"Missing images for {char}/{style}: content={content_path.exists()}, target={target_path.exists()}"
+                )
+                skipped += 1
+                continue
+
+            if style_path is None or not style_path.exists():
+                logger.debug(f"Style image not found for style={style}")
                 skipped += 1
                 continue
 
             # Load images
             try:
                 content_img: Image.Image = Image.open(content_path).convert("RGB")
+                style_img: Image.Image = Image.open(style_path).convert("RGB")
                 target_img: Image.Image = Image.open(target_path).convert("RGB")
             except Exception as e:
                 logger.warning(f"Failed to load images for {char}/{style}: {e}")
                 skipped += 1
                 continue
 
+            # Create comparison image
+            comparison_img = self._create_comparison_image(
+                content_img, style_img, target_img
+            )
+
             # Yield sample immediately to avoid holding in memory
-            yield {
+            sample_dict = {
                 "character": char,
                 "style": style,
                 "font": font,
                 "content_image": content_img,
+                "style_image": style_img,
                 "target_image": target_img,
                 "content_hash": compute_file_hash(char, "", font),
                 "target_hash": compute_file_hash(char, style, font),
             }
+
+            # Add comparison image if created successfully
+            if comparison_img is not None:
+                sample_dict["comparison_image"] = comparison_img
+
+            yield sample_dict
 
             processed += 1
 
@@ -161,6 +252,31 @@ class DatasetBuilder:
             logger.warning(f"Skipped {skipped} invalid samples")
 
         logger.info(f"Successfully processed {processed} samples")
+
+    def _find_style_image(self, style: str) -> Optional[Path]:
+        """Find style image in the data directory.
+
+        Args:
+            style: Style name
+
+        Returns:
+            Path to style image or None if not found
+        """
+        # Look in style_images directory if it exists
+        style_images_dir = self.data_dir / "style_images"
+        if style_images_dir.exists():
+            for ext in [".png", ".jpg", ".jpeg"]:
+                style_path = style_images_dir / f"{style}{ext}"
+                if style_path.exists():
+                    return style_path
+
+        # Fallback: look in root data directory
+        for ext in [".png", ".jpg", ".jpeg"]:
+            style_path = self.data_dir / f"{style}{ext}"
+            if style_path.exists():
+                return style_path
+
+        return None
 
     def build_streaming(self) -> Dataset:
         """Build dataset using streaming to minimize memory usage.
@@ -180,7 +296,9 @@ class DatasetBuilder:
                 "style": Value("string"),
                 "font": Value("string"),
                 "content_image": HFImage(),
+                "style_image": HFImage(),
                 "target_image": HFImage(),
+                "comparison_image": HFImage(),  # Side-by-side comparison
                 "content_hash": Value("string"),
                 "target_hash": Value("string"),
             }
@@ -211,7 +329,9 @@ class DatasetBuilder:
                 "style": Value("string"),
                 "font": Value("string"),
                 "content_image": HFImage(),
+                "style_image": HFImage(),
                 "target_image": HFImage(),
+                "comparison_image": HFImage(),
                 "content_hash": Value("string"),
                 "target_hash": Value("string"),
             }
@@ -223,7 +343,9 @@ class DatasetBuilder:
             "style": [],
             "font": [],
             "content_image": [],
+            "style_image": [],
             "target_image": [],
+            "comparison_image": [],
             "content_hash": [],
             "target_hash": [],
         }
@@ -316,6 +438,8 @@ def create_dataset(
     local_save_path: str | Path = None,
     batch_size: int = 100,
     use_streaming: bool = True,
+    resize_height: int = 256,
+    spacing: int = 10,
 ) -> Dataset:
     """Create and optionally push dataset to Hub with streaming support.
 
@@ -329,6 +453,8 @@ def create_dataset(
         local_save_path: Local path to save dataset (optional)
         batch_size: Number of samples per batch (default: 100)
         use_streaming: Use streaming mode (True) or batched mode (False)
+        resize_height: Height for comparison images (default: 256)
+        spacing: Spacing between images in comparison (default: 10)
 
     Returns:
         Created Dataset object
@@ -344,6 +470,8 @@ def create_dataset(
         private=private,
         token=token,
         batch_size=batch_size,
+        resize_height=resize_height,
+        spacing=spacing,
     )
 
     builder = DatasetBuilder(config)
@@ -420,6 +548,18 @@ def main():
         default=False,
         help="Use batched mode instead of streaming",
     )
+    parser.add_argument(
+        "--resize-height",
+        type=int,
+        default=256,
+        help="Height for comparison images (default: 256)",
+    )
+    parser.add_argument(
+        "--spacing",
+        type=int,
+        default=10,
+        help="Spacing between images in comparison (default: 10)",
+    )
 
     args = parser.parse_args()
 
@@ -434,6 +574,8 @@ def main():
             local_save_path=args.local_save,
             batch_size=args.batch_size,
             use_streaming=not args.use_batched,
+            resize_height=args.resize_height,
+            spacing=args.spacing,
         )
         logger.info("Dataset creation completed successfully")
 
