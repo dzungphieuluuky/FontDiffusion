@@ -4,11 +4,11 @@ Evaluate and compare generated images from two dataset folders.
 Each folder should have:
   folder/
     ├── ContentImage/
-    │   ├── U+XXXX_char_hash.png
+    │   ├── char.png
     │   └── ...
     └── TargetImage/
         ├── style0/
-        │   ├── U+XXXX_char_style0_hash.png
+        │   ├── style0+char.png
         │   └── ...
         └── ...
 
