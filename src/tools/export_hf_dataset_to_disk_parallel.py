@@ -471,8 +471,8 @@ Examples:
     parser.add_argument(
         "--workers",
         type=int,
-        default=8,
-        help="Number of parallel workers for image saving (default: 8)",
+        default=12,
+        help="Number of parallel workers for image saving (default: 12)",
     )
     parser.add_argument(
         "--batch-size",

@@ -26,19 +26,22 @@ class DatasetConfig:
     """Configuration for dataset creation."""
 
     data_dir: Path
+    style_images_dir: Path
     repo_id: str
     split: str = "train"
     push_to_hub: bool = True
     private: bool = False
-    token: str = None
-    batch_size: int = 100  # Process in batches to limit memory usage
-    resize_height: int = 256  # Height for comparison images
-    spacing: int = 10  # Spacing between images in comparison
+    token: Optional[str] = None
+    batch_size: int = 100
+    resize_height: int = 256
+    spacing: int = 10
 
     def __post_init__(self):
-        """Convert data_dir to Path if it's a string."""
+        """Convert paths to Path if they're strings."""
         if isinstance(self.data_dir, str):
             self.data_dir = Path(self.data_dir)
+        if isinstance(self.style_images_dir, str):
+            self.style_images_dir = Path(self.style_images_dir)
 
 
 class DatasetBuilder:
@@ -58,6 +61,7 @@ class DatasetBuilder:
         """
         self.config = config
         self.data_dir = config.data_dir
+        self.style_images_dir = config.style_images_dir
         self._validate_structure()
 
     def _validate_structure(self) -> None:
@@ -75,9 +79,12 @@ class DatasetBuilder:
         if not checkpoint_path.exists():
             raise ValueError(f"Checkpoint file not found: {checkpoint_path}")
 
+        if not self.style_images_dir.exists():
+            raise ValueError(f"Style images directory not found: {self.style_images_dir}")
+
         logger.info("Directory structure validated successfully")
 
-    def _load_checkpoint(self) -> dict[str, list[dict[str, str]]]:
+    def _load_checkpoint(self) -> dict:
         """Load and validate results checkpoint.
 
         Returns:
@@ -89,9 +96,9 @@ class DatasetBuilder:
         checkpoint_path = self.data_dir / self.CHECKPOINT_FILE
 
         with checkpoint_path.open("r", encoding="utf-8") as f:
-            data: dict[str, list[dict[str, str]]] = json.load(f)
+            data: dict = json.load(f)
 
-        generations = data.get("generations", [])
+        generations: list = data.get("generations", [])
         if not generations:
             raise ValueError("No generations found in checkpoint")
 
@@ -122,7 +129,7 @@ class DatasetBuilder:
         content_img: Image.Image,
         style_img: Image.Image,
         target_img: Image.Image,
-    ) -> Image.Image:
+    ) -> Optional[Image.Image]:
         """Create side-by-side comparison image (content | style | target).
 
         Args:
@@ -131,15 +138,13 @@ class DatasetBuilder:
             target_img: Target image
 
         Returns:
-            Comparison PIL Image
+            Comparison PIL Image or None if creation fails
         """
         try:
-            # Resize all images to same height
             content_resized = self._resize_image(content_img, self.config.resize_height)
             style_resized = self._resize_image(style_img, self.config.resize_height)
             target_resized = self._resize_image(target_img, self.config.resize_height)
 
-            # Calculate total width
             total_width = (
                 content_resized.width
                 + style_resized.width
@@ -148,12 +153,10 @@ class DatasetBuilder:
             )
             total_height = self.config.resize_height
 
-            # Create comparison image
             comparison = Image.new(
                 "RGB", (total_width, total_height), color=(255, 255, 255)
             )
 
-            # Paste images left to right
             x_offset = 0
             comparison.paste(content_resized, (x_offset, 0))
             x_offset += content_resized.width + self.config.spacing
@@ -167,6 +170,22 @@ class DatasetBuilder:
             logger.warning(f"Failed to create comparison image: {e}")
             return None
 
+    def _find_style_image(self, style: str) -> Optional[Path]:
+        """Find style image in the style images directory.
+
+        Args:
+            style: Style name
+
+        Returns:
+            Path to style image or None if not found
+        """
+        for ext in [".png", ".jpg", ".jpeg"]:
+            style_path = self.style_images_dir / f"{style}{ext}"
+            if style_path.exists():
+                return style_path
+
+        return None
+
     def _generate_samples(self) -> Generator[dict[str, Any], None, None]:
         """Generate dataset samples one at a time.
 
@@ -175,8 +194,8 @@ class DatasetBuilder:
 
         This generator loads images one at a time to minimize memory usage.
         """
-        checkpoint: dict[str, list[dict[str, str]]] = self._load_checkpoint()
-        generations: list[dict[str, str]] = checkpoint["generations"]
+        checkpoint: dict = self._load_checkpoint()
+        generations: list = checkpoint["generations"]
 
         skipped: int = 0
         processed: int = 0
@@ -186,14 +205,11 @@ class DatasetBuilder:
             style: str = gen.get("style", "")
             font: str = gen.get("font", "unknown")
 
-            # Construct paths
             content_path: Path = self.data_dir / gen.get("content_image_path", "")
             target_path: Path = self.data_dir / gen.get("target_image_path", "")
 
-            # Try to find style image - search in style_images directory
             style_path: Optional[Path] = self._find_style_image(style)
 
-            # Validate paths exist
             if not content_path.exists() or not target_path.exists():
                 logger.debug(
                     f"Missing images for {char}/{style}: content={content_path.exists()}, target={target_path.exists()}"
@@ -206,7 +222,6 @@ class DatasetBuilder:
                 skipped += 1
                 continue
 
-            # Load images
             try:
                 content_img: Image.Image = Image.open(content_path).convert("RGB")
                 style_img: Image.Image = Image.open(style_path).convert("RGB")
@@ -216,32 +231,37 @@ class DatasetBuilder:
                 skipped += 1
                 continue
 
-            # Create comparison image
-            comparison_img = self._create_comparison_image(
+            comparison_img: Optional[Image.Image] = self._create_comparison_image(
                 content_img, style_img, target_img
             )
 
-            # Yield sample immediately to avoid holding in memory
-            sample_dict = {
-                "character": char,
-                "style": style,
-                "font": font,
-                "content_image": content_img,
-                "style_image": style_img,
-                "target_image": target_img,
-                "content_hash": compute_file_hash(char, "", font),
-                "target_hash": compute_file_hash(char, style, font),
-            }
-
-            # Add comparison image if created successfully
             if comparison_img is not None:
-                sample_dict["comparison_image"] = comparison_img
+                sample_dict = {
+                    "character": char,
+                    "style": style,
+                    "font": font,
+                    "content_image": content_img,
+                    "style_image": style_img,
+                    "target_image": target_img,
+                    "comparison_image": comparison_img,
+                    "content_hash": compute_file_hash(char, "", font),
+                    "target_hash": compute_file_hash(char, style, font),
+                }
+            else:
+                sample_dict = {
+                    "character": char,
+                    "style": style,
+                    "font": font,
+                    "content_image": content_img,
+                    "style_image": style_img,
+                    "target_image": target_img,
+                    "content_hash": compute_file_hash(char, "", font),
+                    "target_hash": compute_file_hash(char, style, font),
+                }
 
             yield sample_dict
-
             processed += 1
 
-            # Log progress periodically
             if processed % 100 == 0:
                 logger.info(f"Processed {processed} samples...")
 
@@ -252,31 +272,6 @@ class DatasetBuilder:
             logger.warning(f"Skipped {skipped} invalid samples")
 
         logger.info(f"Successfully processed {processed} samples")
-
-    def _find_style_image(self, style: str) -> Optional[Path]:
-        """Find style image in the data directory.
-
-        Args:
-            style: Style name
-
-        Returns:
-            Path to style image or None if not found
-        """
-        # Look in style_images directory if it exists
-        style_images_dir = self.data_dir / "style_images"
-        if style_images_dir.exists():
-            for ext in [".png", ".jpg", ".jpeg"]:
-                style_path = style_images_dir / f"{style}{ext}"
-                if style_path.exists():
-                    return style_path
-
-        # Fallback: look in root data directory
-        for ext in [".png", ".jpg", ".jpeg"]:
-            style_path = self.data_dir / f"{style}{ext}"
-            if style_path.exists():
-                return style_path
-
-        return None
 
     def build_streaming(self) -> Dataset:
         """Build dataset using streaming to minimize memory usage.
@@ -289,7 +284,6 @@ class DatasetBuilder:
         """
         logger.info("Building dataset with streaming...")
 
-        # Define explicit features for better type safety
         features = Features(
             {
                 "character": Value("string"),
@@ -298,13 +292,12 @@ class DatasetBuilder:
                 "content_image": HFImage(),
                 "style_image": HFImage(),
                 "target_image": HFImage(),
-                "comparison_image": HFImage(),  # Side-by-side comparison
+                "comparison_image": HFImage(),
                 "content_hash": Value("string"),
                 "target_hash": Value("string"),
             }
         )
 
-        # Create dataset from generator for memory efficiency
         dataset = Dataset.from_generator(
             self._generate_samples,
             features=features,
@@ -353,28 +346,21 @@ class DatasetBuilder:
         sample_count = 0
 
         for sample in self._generate_samples():
-            # Add to current batch
             for key, value in sample.items():
                 current_batch[key].append(value)
 
             sample_count += 1
 
-            # When batch is full, create dataset and clear batch
             if sample_count % self.config.batch_size == 0:
                 batch_ds = Dataset.from_dict(current_batch, features=features)
                 batch_datasets.append(batch_ds)
-
-                # Clear batch to free memory
                 current_batch = {key: [] for key in current_batch}
-
                 logger.info(f"Completed batch {len(batch_datasets)}")
 
-        # Handle remaining samples
         if current_batch["character"]:
             batch_ds = Dataset.from_dict(current_batch, features=features)
             batch_datasets.append(batch_ds)
 
-        # Concatenate all batches
         if not batch_datasets:
             raise ValueError("No valid samples found")
 
@@ -397,13 +383,12 @@ class DatasetBuilder:
 
         logger.info(f"Pushing dataset to {self.config.repo_id} with streaming...")
 
-        # Use max_shard_size to control memory usage during upload
         dataset.push_to_hub(
             repo_id=self.config.repo_id,
             split=self.config.split,
             private=self.config.private,
             token=self.config.token,
-            max_shard_size="500MB",  # Split into smaller shards
+            max_shard_size="500MB",
         )
 
         logger.info(
@@ -419,7 +404,6 @@ class DatasetBuilder:
         """
         logger.info(f"Saving dataset to {output_path} with streaming...")
 
-        # Use max_shard_size to split into smaller files
         dataset.save_to_disk(
             str(output_path),
             max_shard_size="500MB",
@@ -430,12 +414,13 @@ class DatasetBuilder:
 
 def create_dataset(
     data_dir: str | Path,
+    style_images_dir: str | Path,
     repo_id: str,
     split: str = "train",
     push_to_hub: bool = True,
     private: bool = False,
-    token: str = None,
-    local_save_path: str | Path = None,
+    token: Optional[str] = None,
+    local_save_path: Optional[str | Path] = None,
     batch_size: int = 100,
     use_streaming: bool = True,
     resize_height: int = 256,
@@ -445,6 +430,7 @@ def create_dataset(
 
     Args:
         data_dir: Path to data directory containing ContentImage/ and TargetImage/
+        style_images_dir: Path to directory containing style images
         repo_id: HuggingFace repository ID (e.g., 'username/dataset-name')
         split: Dataset split name (default: 'train')
         push_to_hub: Whether to push to HuggingFace Hub (default: True)
@@ -464,6 +450,7 @@ def create_dataset(
     """
     config = DatasetConfig(
         data_dir=Path(data_dir),
+        style_images_dir=Path(style_images_dir),
         repo_id=repo_id,
         split=split,
         push_to_hub=push_to_hub,
@@ -476,7 +463,6 @@ def create_dataset(
 
     builder = DatasetBuilder(config)
 
-    # Choose streaming or batched approach
     if use_streaming:
         dataset = builder.build_streaming()
     else:
@@ -503,6 +489,12 @@ def main():
         type=str,
         required=True,
         help="Path to data directory (with ContentImage/ and TargetImage/)",
+    )
+    parser.add_argument(
+        "--style-images-dir",
+        type=str,
+        required=True,
+        help="Path to directory containing style images",
     )
     parser.add_argument(
         "--repo-id",
@@ -566,6 +558,7 @@ def main():
     try:
         create_dataset(
             data_dir=args.data_dir,
+            style_images_dir=args.style_images_dir,
             repo_id=args.repo_id,
             split=args.split,
             push_to_hub=not args.no_push,

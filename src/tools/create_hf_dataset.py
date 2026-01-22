@@ -2,23 +2,19 @@
 Create Hugging Face dataset from generated FontDiffusion images.
 
 This module builds datasets from FontDiffusion outputs, using results_checkpoint.json
-as the single source of truth for generation metadata.
+as the single source of truth for generation metadata. Includes comparison image generation.
 """
 
 import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from datasets import Dataset, Features, Image as HFImage, Value
 from PIL import Image
-from huggingface_hub.utils import tqdm
 
-from utilities import (
-    HFTqdm,
-)
-
+from utilities import HFTqdm
 from filename_utils import compute_file_hash
 
 logger = logging.getLogger("DatasetCreator")
@@ -29,16 +25,21 @@ class DatasetConfig:
     """Configuration for dataset creation."""
 
     data_dir: Path
+    style_images_dir: Path
     repo_id: str
     split: str = "train"
     push_to_hub: bool = True
     private: bool = False
     token: Optional[str] = None
+    resize_height: int = 256
+    spacing: int = 10
 
     def __post_init__(self):
-        """Convert data_dir to Path if it's a string."""
+        """Convert paths to Path if they're strings."""
         if isinstance(self.data_dir, str):
             self.data_dir = Path(self.data_dir)
+        if isinstance(self.style_images_dir, str):
+            self.style_images_dir = Path(self.style_images_dir)
 
 
 class DatasetBuilder:
@@ -58,6 +59,7 @@ class DatasetBuilder:
         """
         self.config = config
         self.data_dir = config.data_dir
+        self.style_images_dir = config.style_images_dir
         self._validate_structure()
 
     def _validate_structure(self) -> None:
@@ -75,9 +77,12 @@ class DatasetBuilder:
         if not checkpoint_path.exists():
             raise ValueError(f"Checkpoint file not found: {checkpoint_path}")
 
+        if not self.style_images_dir.exists():
+            raise ValueError(f"Style images directory not found: {self.style_images_dir}")
+
         logger.info("Directory structure validated successfully")
 
-    def _load_checkpoint(self) -> dict[str, list[dict[str, str]]]:
+    def _load_checkpoint(self) -> dict:
         """Load and validate results checkpoint.
 
         Returns:
@@ -89,9 +94,9 @@ class DatasetBuilder:
         checkpoint_path = self.data_dir / self.CHECKPOINT_FILE
 
         with checkpoint_path.open("r", encoding="utf-8") as f:
-            data: dict[str, list[dict[str, str]]] = json.load(f)
+            data: dict = json.load(f)
 
-        generations: list[dict[str, str]] = data.get("generations", [])
+        generations: list = data.get("generations", [])
         if not generations:
             raise ValueError("No generations found in checkpoint")
 
@@ -103,59 +108,155 @@ class DatasetBuilder:
 
         return data
 
-    def build(self) -> Dataset:
-        """Build the dataset from checkpoint data.
+    def _resize_image(self, image: Image.Image, target_height: int) -> Image.Image:
+        """Resize image to target height while maintaining aspect ratio.
+
+        Args:
+            image: PIL Image to resize
+            target_height: Target height in pixels
 
         Returns:
-            HuggingFace Dataset with image pairs and metadata
+            Resized PIL Image
+        """
+        aspect_ratio = image.width / image.height
+        new_width = int(target_height * aspect_ratio)
+        return image.resize((new_width, target_height), Image.Resampling.LANCZOS)
+
+    def _create_comparison_image(
+        self,
+        content_img: Image.Image,
+        style_img: Image.Image,
+        target_img: Image.Image,
+    ) -> Optional[Image.Image]:
+        """Create side-by-side comparison image (content | style | target).
+
+        Args:
+            content_img: Content/character image
+            style_img: Style image
+            target_img: Target image
+
+        Returns:
+            Comparison PIL Image or None if creation fails
+        """
+        try:
+            content_resized = self._resize_image(content_img, self.config.resize_height)
+            style_resized = self._resize_image(style_img, self.config.resize_height)
+            target_resized = self._resize_image(target_img, self.config.resize_height)
+
+            total_width = (
+                content_resized.width
+                + style_resized.width
+                + target_resized.width
+                + 2 * self.config.spacing
+            )
+            total_height = self.config.resize_height
+
+            comparison = Image.new(
+                "RGB", (total_width, total_height), color=(255, 255, 255)
+            )
+
+            x_offset = 0
+            comparison.paste(content_resized, (x_offset, 0))
+            x_offset += content_resized.width + self.config.spacing
+            comparison.paste(style_resized, (x_offset, 0))
+            x_offset += style_resized.width + self.config.spacing
+            comparison.paste(target_resized, (x_offset, 0))
+
+            return comparison
+
+        except Exception as e:
+            logger.warning(f"Failed to create comparison image: {e}")
+            return None
+
+    def _find_style_image(self, style: str) -> Optional[Path]:
+        """Find style image in the style images directory.
+
+        Args:
+            style: Style name
+
+        Returns:
+            Path to style image or None if not found
+        """
+        for ext in [".png", ".jpg", ".jpeg"]:
+            style_path = self.style_images_dir / f"{style}{ext}"
+            if style_path.exists():
+                return style_path
+
+        return None
+
+    def build(self) -> Dataset:
+        """Build the dataset from checkpoint data with comparison images.
+
+        Returns:
+            HuggingFace Dataset with image pairs, comparison, and metadata
 
         Raises:
             ValueError: If no valid samples are found
         """
         logger.info("Building dataset...")
 
-        checkpoint: dict[str, list[dict[str, str]]] = self._load_checkpoint()
-        generations: list[dict[str, str]] = checkpoint["generations"]
+        checkpoint: dict = self._load_checkpoint()
+        generations: list = checkpoint["generations"]
 
-        # Pre-allocate lists for better performance
         characters: list[str] = []
         styles: list[str] = []
         fonts: list[str] = []
         content_images: list[Image.Image] = []
+        style_images: list[Image.Image] = []
         target_images: list[Image.Image] = []
+        comparison_images: list[Image.Image] = []
         content_hashes: list[str] = []
         target_hashes: list[str] = []
 
         skipped: int = 0
 
         for gen in HFTqdm(generations, desc="Loading image pairs", unit="pair"):
-            char: str = gen.get("character", "")
-            style: str = gen.get("style", "")
+            char: str = gen.get("character")
+            style: str = gen.get("style")
             font: str = gen.get("font", "unknown")
 
-            # Construct paths
             content_path: Path = self.data_dir / gen.get("content_image_path", "")
             target_path: Path = self.data_dir / gen.get("target_image_path", "")
-            # Validate paths exist
+
+            style_path: Optional[Path] = self._find_style_image(style)
+
             if not content_path.exists() or not target_path.exists():
+                logger.debug(
+                    f"Missing images for {char}/{style}: content={content_path.exists()}, target={target_path.exists()}"
+                )
                 skipped += 1
                 continue
 
-            # Load images
+            if style_path is None or not style_path.exists():
+                logger.debug(f"Style image not found for style={style}")
+                skipped += 1
+                continue
+
             try:
                 content_img: Image.Image = Image.open(content_path).convert("RGB")
+                style_img: Image.Image = Image.open(style_path).convert("RGB")
                 target_img: Image.Image = Image.open(target_path).convert("RGB")
             except Exception as e:
                 logger.warning(f"Failed to load images for {char}/{style}: {e}")
                 skipped += 1
                 continue
 
-            # Append to lists
+            comparison_img: Optional[Image.Image] = self._create_comparison_image(
+                content_img, style_img, target_img
+            )
+
+            if comparison_img is None:
+                logger.debug(f"Skipping {char}/{style} - comparison image failed")
+                skipped += 1
+                continue
+
             characters.append(char)
             styles.append(style)
             fonts.append(font)
             content_images.append(content_img)
+            style_images.append(style_img)
             target_images.append(target_img)
+            comparison_images.append(comparison_img)
             content_hashes.append(compute_file_hash(char, "", font))
             target_hashes.append(compute_file_hash(char, style, font))
 
@@ -173,20 +274,23 @@ class DatasetBuilder:
                 "style": Value("string"),
                 "font": Value("string"),
                 "content_image": HFImage(),
+                "style_image": HFImage(),
                 "target_image": HFImage(),
+                "comparison_image": HFImage(),
                 "content_hash": Value("string"),
                 "target_hash": Value("string"),
             }
         )
 
-        # Create dataset
         dataset = Dataset.from_dict(
             {
                 "character": characters,
                 "style": styles,
                 "font": fonts,
                 "content_image": content_images,
+                "style_image": style_images,
                 "target_image": target_images,
+                "comparison_image": comparison_images,
                 "content_hash": content_hashes,
                 "target_hash": target_hashes,
             },
@@ -232,23 +336,29 @@ class DatasetBuilder:
 
 def create_dataset(
     data_dir: str | Path,
+    style_images_dir: str | Path,
     repo_id: str,
     split: str = "train",
     push_to_hub: bool = True,
     private: bool = False,
     token: Optional[str] = None,
     local_save_path: Optional[str | Path] = None,
+    resize_height: int = 256,
+    spacing: int = 10,
 ) -> Dataset:
-    """Create and optionally push dataset to Hub.
+    """Create and optionally push dataset to Hub with comparison images.
 
     Args:
         data_dir: Path to data directory containing ContentImage/ and TargetImage/
+        style_images_dir: Path to directory containing style images
         repo_id: HuggingFace repository ID (e.g., 'username/dataset-name')
         split: Dataset split name (default: 'train')
         push_to_hub: Whether to push to HuggingFace Hub (default: True)
         private: Whether to make the repository private (default: False)
         token: HuggingFace API token (optional)
         local_save_path: Local path to save dataset (optional)
+        resize_height: Height for comparison images (default: 256)
+        spacing: Spacing between images in comparison (default: 10)
 
     Returns:
         Created Dataset object
@@ -258,11 +368,14 @@ def create_dataset(
     """
     config = DatasetConfig(
         data_dir=Path(data_dir),
+        style_images_dir=Path(style_images_dir),
         repo_id=repo_id,
         split=split,
         push_to_hub=push_to_hub,
         private=private,
         token=token,
+        resize_height=resize_height,
+        spacing=spacing,
     )
 
     builder = DatasetBuilder(config)
@@ -289,6 +402,12 @@ def main():
         type=str,
         required=True,
         help="Path to data directory (with ContentImage/ and TargetImage/)",
+    )
+    parser.add_argument(
+        "--style-images-dir",
+        type=str,
+        required=True,
+        help="Path to directory containing style images",
     )
     parser.add_argument(
         "--repo-id",
@@ -322,18 +441,33 @@ def main():
         type=str,
         help="HuggingFace API token",
     )
+    parser.add_argument(
+        "--resize-height",
+        type=int,
+        default=256,
+        help="Height for comparison images (default: 256)",
+    )
+    parser.add_argument(
+        "--spacing",
+        type=int,
+        default=10,
+        help="Spacing between images in comparison (default: 10)",
+    )
 
     args = parser.parse_args()
 
     try:
         create_dataset(
             data_dir=args.data_dir,
+            style_images_dir=args.style_images_dir,
             repo_id=args.repo_id,
             split=args.split,
             push_to_hub=not args.no_push,
             private=args.private,
             token=args.token,
             local_save_path=args.local_save,
+            resize_height=args.resize_height,
+            spacing=args.spacing,
         )
         logger.info("Dataset creation completed successfully")
 
