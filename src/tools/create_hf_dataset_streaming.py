@@ -4,6 +4,8 @@ Create Hugging Face dataset from generated FontDiffusion images with streaming s
 This module builds datasets from FontDiffusion outputs using streaming to prevent
 RAM overflow, especially useful in constrained environments like Colab or Kaggle.
 Includes comparison image generation for visual inspection.
+
+Enhanced with multiprocessing for faster image processing.
 """
 
 import json
@@ -11,6 +13,8 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Generator, Optional
+from multiprocessing import Pool, cpu_count
+from functools import partial
 
 from datasets import Dataset, Features, Image as HFImage, Value
 from PIL import Image
@@ -35,6 +39,7 @@ class DatasetConfig:
     batch_size: int = 100
     resize_height: int = 256
     spacing: int = 10
+    num_workers: int = None  # None = auto-detect
 
     def __post_init__(self):
         """Convert paths to Path if they're strings."""
@@ -42,6 +47,158 @@ class DatasetConfig:
             self.data_dir = Path(self.data_dir)
         if isinstance(self.style_images_dir, str):
             self.style_images_dir = Path(self.style_images_dir)
+        if self.num_workers is None:
+            self.num_workers = max(1, cpu_count() - 1)
+
+
+def _resize_image(image: Image.Image, target_height: int) -> Image.Image:
+    """Resize image to target height while maintaining aspect ratio.
+
+    Args:
+        image: PIL Image to resize
+        target_height: Target height in pixels
+
+    Returns:
+        Resized PIL Image
+    """
+    aspect_ratio = image.width / image.height
+    new_width = int(target_height * aspect_ratio)
+    return image.resize((new_width, target_height), Image.Resampling.LANCZOS)
+
+
+def _create_comparison_image(
+    content_img: Image.Image,
+    style_img: Image.Image,
+    target_img: Image.Image,
+    resize_height: int,
+    spacing: int,
+) -> Optional[Image.Image]:
+    """Create side-by-side comparison image (content | style | target).
+
+    Args:
+        content_img: Content/character image
+        style_img: Style image
+        target_img: Target image
+        resize_height: Target height for resizing
+        spacing: Spacing between images
+
+    Returns:
+        Comparison PIL Image or None if creation fails
+    """
+    try:
+        content_resized = _resize_image(content_img, resize_height)
+        style_resized = _resize_image(style_img, resize_height)
+        target_resized = _resize_image(target_img, resize_height)
+
+        total_width = (
+            content_resized.width
+            + style_resized.width
+            + target_resized.width
+            + 2 * spacing
+        )
+        total_height = resize_height
+
+        comparison = Image.new(
+            "RGB", (total_width, total_height), color=(255, 255, 255)
+        )
+
+        x_offset = 0
+        comparison.paste(content_resized, (x_offset, 0))
+        x_offset += content_resized.width + spacing
+        comparison.paste(style_resized, (x_offset, 0))
+        x_offset += style_resized.width + spacing
+        comparison.paste(target_resized, (x_offset, 0))
+
+        return comparison
+
+    except Exception as e:
+        logger.warning(f"Failed to create comparison image: {e}")
+        return None
+
+
+def _find_style_image(style_images_dir: Path, style: str) -> Optional[Path]:
+    """Find style image in the style images directory.
+
+    Args:
+        style_images_dir: Directory containing style images
+        style: Style name
+
+    Returns:
+        Path to style image or None if not found
+    """
+    for ext in [".png", ".jpg", ".jpeg"]:
+        style_path = style_images_dir / f"{style}{ext}"
+        if style_path.exists():
+            return style_path
+    return None
+
+
+def _process_single_sample(
+    gen: dict,
+    data_dir: Path,
+    style_images_dir: Path,
+    resize_height: int,
+    spacing: int,
+) -> Optional[dict[str, Any]]:
+    """Process a single sample (load images, create comparison).
+
+    This function is designed to be called in parallel via multiprocessing.
+
+    Args:
+        gen: Generation metadata dictionary
+        data_dir: Data directory path
+        style_images_dir: Style images directory path
+        resize_height: Height for comparison images
+        spacing: Spacing between images
+
+    Returns:
+        Sample dictionary or None if processing fails
+    """
+    char: str = gen.get("character", "")
+    style: str = gen.get("style", "")
+    font: str = gen.get("font", "unknown")
+
+    content_path: Path = data_dir / gen.get("content_image_path", "")
+    target_path: Path = data_dir / gen.get("target_image_path", "")
+    style_path: Optional[Path] = _find_style_image(style_images_dir, style)
+
+    # Validate paths
+    if not content_path.exists() or not target_path.exists():
+        return None
+    if style_path is None or not style_path.exists():
+        return None
+
+    try:
+        # Load images
+        content_img: Image.Image = Image.open(content_path).convert("RGB")
+        style_img: Image.Image = Image.open(style_path).convert("RGB")
+        target_img: Image.Image = Image.open(target_path).convert("RGB")
+
+        # Create comparison
+        comparison_img: Optional[Image.Image] = _create_comparison_image(
+            content_img, style_img, target_img, resize_height, spacing
+        )
+
+        # Build sample dict
+        sample_dict = {
+            "character": char,
+            "style": style,
+            "font": font,
+            "content_image": content_img,
+            "style_image": style_img,
+            "target_image": target_img,
+            "content_hash": compute_file_hash(char, "", font),
+            "target_hash": compute_file_hash(char, style, font),
+        }
+
+        if comparison_img is not None:
+            sample_dict["comparison_image"] = comparison_img
+
+        return sample_dict
+
+    except Exception as e:
+        logger.warning(f"Failed to process sample {char}/{style}: {e}")
+        return None
 
 
 class DatasetBuilder:
@@ -110,89 +267,65 @@ class DatasetBuilder:
 
         return data
 
-    def _resize_image(self, image: Image.Image, target_height: int) -> Image.Image:
-        """Resize image to target height while maintaining aspect ratio.
-
-        Args:
-            image: PIL Image to resize
-            target_height: Target height in pixels
-
-        Returns:
-            Resized PIL Image
-        """
-        aspect_ratio = image.width / image.height
-        new_width = int(target_height * aspect_ratio)
-        return image.resize((new_width, target_height), Image.Resampling.LANCZOS)
-
-    def _create_comparison_image(
-        self,
-        content_img: Image.Image,
-        style_img: Image.Image,
-        target_img: Image.Image,
-    ) -> Optional[Image.Image]:
-        """Create side-by-side comparison image (content | style | target).
-
-        Args:
-            content_img: Content/character image
-            style_img: Style image
-            target_img: Target image
-
-        Returns:
-            Comparison PIL Image or None if creation fails
-        """
-        try:
-            content_resized = self._resize_image(content_img, self.config.resize_height)
-            style_resized = self._resize_image(style_img, self.config.resize_height)
-            target_resized = self._resize_image(target_img, self.config.resize_height)
-
-            total_width = (
-                content_resized.width
-                + style_resized.width
-                + target_resized.width
-                + 2 * self.config.spacing
-            )
-            total_height = self.config.resize_height
-
-            comparison = Image.new(
-                "RGB", (total_width, total_height), color=(255, 255, 255)
-            )
-
-            x_offset = 0
-            comparison.paste(content_resized, (x_offset, 0))
-            x_offset += content_resized.width + self.config.spacing
-            comparison.paste(style_resized, (x_offset, 0))
-            x_offset += style_resized.width + self.config.spacing
-            comparison.paste(target_resized, (x_offset, 0))
-
-            return comparison
-
-        except Exception as e:
-            logger.warning(f"Failed to create comparison image: {e}")
-            return None
-
-    def _find_style_image(self, style: str) -> Optional[Path]:
-        """Find style image in the style images directory.
-
-        Args:
-            style: Style name
-
-        Returns:
-            Path to style image or None if not found
-        """
-        for ext in [".png", ".jpg", ".jpeg"]:
-            style_path = self.style_images_dir / f"{style}{ext}"
-            if style_path.exists():
-                return style_path
-
-        return None
-
-    def _generate_samples(self) -> Generator[dict[str, Any], None, None]:
-        """Generate dataset samples one at a time.
+    def _generate_samples_parallel(self) -> Generator[dict[str, Any], None, None]:
+        """Generate dataset samples using multiprocessing.
 
         Yields:
             Dictionary containing sample data with individual images and comparison
 
-        This generator loads images one at a time to minimize memory usage.
+        This generator uses multiprocessing to parallelize image loading and processing.
+        """
+        checkpoint: dict = self._load_checkpoint()
+        generations: list = checkpoint["generations"]
+
+        logger.info(f"Processing {len(generations)} samples with {self.config.num_workers} workers...")
+
+        # Create partial function with fixed parameters
+        process_func = partial(
+            _process_single_sample,
+            data_dir=self.data_dir,
+            style_images_dir=self.style_images_dir,
+            resize_height=self.config.resize_height,
+            spacing=self.config.spacing,
+        )
+
+        skipped: int = 0
+        processed: int = 0
+
+        # Process in batches using multiprocessing
+        batch_size = self.config.batch_size
+        
+        with Pool(processes=self.config.num_workers) as pool:
+            for i in range(0, len(generations), batch_size):
+                batch = generations[i:i + batch_size]
+                
+                # Process batch in parallel
+                results = pool.map(process_func, batch)
+                
+                # Yield valid results
+                for sample in results:
+                    if sample is not None:
+                        yield sample
+                        processed += 1
+                    else:
+                        skipped += 1
+
+                if processed % 100 == 0 and processed > 0:
+                    logger.info(f"Processed {processed} samples...")
+
+        if processed == 0:
+            raise ValueError("No valid samples found")
+
+        if skipped > 0:
+            logger.warning(f"Skipped {skipped} invalid samples")
+
+        logger.info(f"Successfully processed {processed} samples")
+
+    def _generate_samples(self) -> Generator[dict[str, Any], None, None]:
+        """Generate dataset samples one at a time (single-threaded fallback).
+
+        Yields:
+            Dictionary containing sample data with individual images and comparison
         """
         checkpoint: dict = self._load_checkpoint()
         generations: list = checkpoint["generations"]
@@ -201,68 +334,21 @@ class DatasetBuilder:
         processed: int = 0
 
         for gen in generations:
-            char: str = gen.get("character", "")
-            style: str = gen.get("style", "")
-            font: str = gen.get("font", "unknown")
-
-            content_path: Path = self.data_dir / gen.get("content_image_path", "")
-            target_path: Path = self.data_dir / gen.get("target_image_path", "")
-
-            style_path: Optional[Path] = self._find_style_image(style)
-
-            if not content_path.exists() or not target_path.exists():
-                logger.debug(
-                    f"Missing images for {char}/{style}: content={content_path.exists()}, target={target_path.exists()}"
-                )
-                skipped += 1
-                continue
-
-            if style_path is None or not style_path.exists():
-                logger.debug(f"Style image not found for style={style}")
-                skipped += 1
-                continue
-
-            try:
-                content_img: Image.Image = Image.open(content_path).convert("RGB")
-                style_img: Image.Image = Image.open(style_path).convert("RGB")
-                target_img: Image.Image = Image.open(target_path).convert("RGB")
-            except Exception as e:
-                logger.warning(f"Failed to load images for {char}/{style}: {e}")
-                skipped += 1
-                continue
-
-            comparison_img: Optional[Image.Image] = self._create_comparison_image(
-                content_img, style_img, target_img
+            sample = _process_single_sample(
+                gen,
+                self.data_dir,
+                self.style_images_dir,
+                self.config.resize_height,
+                self.config.spacing,
             )
 
-            if comparison_img is not None:
-                sample_dict = {
-                    "character": char,
-                    "style": style,
-                    "font": font,
-                    "content_image": content_img,
-                    "style_image": style_img,
-                    "target_image": target_img,
-                    "comparison_image": comparison_img,
-                    "content_hash": compute_file_hash(char, "", font),
-                    "target_hash": compute_file_hash(char, style, font),
-                }
+            if sample is not None:
+                yield sample
+                processed += 1
             else:
-                sample_dict = {
-                    "character": char,
-                    "style": style,
-                    "font": font,
-                    "content_image": content_img,
-                    "style_image": style_img,
-                    "target_image": target_img,
-                    "content_hash": compute_file_hash(char, "", font),
-                    "target_hash": compute_file_hash(char, style, font),
-                }
+                skipped += 1
 
-            yield sample_dict
-            processed += 1
-
-            if processed % 100 == 0:
+            if processed % 100 == 0 and processed > 0:
                 logger.info(f"Processed {processed} samples...")
 
         if processed == 0:
@@ -273,8 +359,11 @@ class DatasetBuilder:
 
         logger.info(f"Successfully processed {processed} samples")
 
-    def build_streaming(self) -> Dataset:
+    def build_streaming(self, use_multiprocessing: bool = True) -> Dataset:
         """Build dataset using streaming to minimize memory usage.
+
+        Args:
+            use_multiprocessing: Whether to use multiprocessing for speed
 
         Returns:
             HuggingFace Dataset created from generator
@@ -282,7 +371,7 @@ class DatasetBuilder:
         Raises:
             ValueError: If no valid samples are found
         """
-        logger.info("Building dataset with streaming...")
+        logger.info(f"Building dataset with streaming (multiprocessing={use_multiprocessing})...")
 
         features = Features(
             {
@@ -298,15 +387,20 @@ class DatasetBuilder:
             }
         )
 
+        generator_func = self._generate_samples_parallel if use_multiprocessing else self._generate_samples
+
         dataset = Dataset.from_generator(
-            self._generate_samples,
+            generator_func,
             features=features,
         )
 
         return dataset
 
-    def build_batched(self) -> Dataset:
+    def build_batched(self, use_multiprocessing: bool = True) -> Dataset:
         """Build dataset in batches for better control over memory usage.
+
+        Args:
+            use_multiprocessing: Whether to use multiprocessing for speed
 
         Returns:
             HuggingFace Dataset created from batched processing
@@ -314,7 +408,7 @@ class DatasetBuilder:
         Raises:
             ValueError: If no valid samples are found
         """
-        logger.info("Building dataset with batching...")
+        logger.info(f"Building dataset with batching (multiprocessing={use_multiprocessing})...")
 
         features = Features(
             {
@@ -344,8 +438,9 @@ class DatasetBuilder:
         }
 
         sample_count = 0
+        generator_func = self._generate_samples_parallel if use_multiprocessing else self._generate_samples
 
-        for sample in self._generate_samples():
+        for sample in generator_func():
             for key, value in sample.items():
                 current_batch[key].append(value)
 
@@ -425,6 +520,8 @@ def create_dataset(
     use_streaming: bool = True,
     resize_height: int = 256,
     spacing: int = 10,
+    num_workers: Optional[int] = None,
+    use_multiprocessing: bool = True,
 ) -> Dataset:
     """Create and optionally push dataset to Hub with streaming support.
 
@@ -441,6 +538,8 @@ def create_dataset(
         use_streaming: Use streaming mode (True) or batched mode (False)
         resize_height: Height for comparison images (default: 256)
         spacing: Spacing between images in comparison (default: 10)
+        num_workers: Number of worker processes (default: CPU count - 1)
+        use_multiprocessing: Whether to use multiprocessing (default: True)
 
     Returns:
         Created Dataset object
@@ -459,14 +558,15 @@ def create_dataset(
         batch_size=batch_size,
         resize_height=resize_height,
         spacing=spacing,
+        num_workers=num_workers,
     )
 
     builder = DatasetBuilder(config)
 
     if use_streaming:
-        dataset = builder.build_streaming()
+        dataset = builder.build_streaming(use_multiprocessing=use_multiprocessing)
     else:
-        dataset = builder.build_batched()
+        dataset = builder.build_batched(use_multiprocessing=use_multiprocessing)
 
     if local_save_path:
         builder.save_local_streaming(dataset, Path(local_save_path))
@@ -552,6 +652,17 @@ def main():
         default=10,
         help="Spacing between images in comparison (default: 10)",
     )
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=None,
+        help="Number of worker processes (default: CPU count - 1)",
+    )
+    parser.add_argument(
+        "--no-multiprocessing",
+        action="store_true",
+        help="Disable multiprocessing (use single-threaded processing)",
+    )
 
     args = parser.parse_args()
 
@@ -569,6 +680,8 @@ def main():
             use_streaming=not args.use_batched,
             resize_height=args.resize_height,
             spacing=args.spacing,
+            num_workers=args.num_workers,
+            use_multiprocessing=not args.no_multiprocessing,
         )
         logger.info("Dataset creation completed successfully")
 
