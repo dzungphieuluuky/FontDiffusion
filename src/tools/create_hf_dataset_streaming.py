@@ -40,7 +40,7 @@ class DatasetConfig:
     resize_height: int = 256
     spacing: int = 10
     num_workers: int = None  # None = auto-detect
-
+    config_name: str = "streaming"
     def __post_init__(self):
         """Convert paths to Path if they're strings."""
         if isinstance(self.data_dir, str):
@@ -481,6 +481,7 @@ class DatasetBuilder:
         dataset.push_to_hub(
             repo_id=self.config.repo_id,
             split=self.config.split,
+            config_name=self.config.config_name,
             private=self.config.private,
             token=self.config.token,
             max_shard_size="500MB",
@@ -513,6 +514,7 @@ def create_dataset(
     repo_id: str,
     split: str = "train",
     push_to_hub: bool = True,
+    config_name: str = "streaming",
     private: bool = False,
     token: Optional[str] = None,
     local_save_path: Optional[str | Path] = None,
@@ -559,6 +561,7 @@ def create_dataset(
         resize_height=resize_height,
         spacing=spacing,
         num_workers=num_workers,
+        config_name=config_name,
     )
 
     builder = DatasetBuilder(config)
@@ -665,6 +668,12 @@ def main():
         default=False,
         help="Disable multiprocessing (use single-threaded processing)",
     )
+    parser.add_argument(
+        "--config-name",
+        type=str,
+        default="streaming",
+        help="Dataset config name (default: streaming)",
+    )
 
     args = parser.parse_args()
 
@@ -675,6 +684,7 @@ def main():
             repo_id=args.repo_id,
             split=args.split,
             push_to_hub=not args.no_push,
+            config_name=args.config_name,
             private=args.private,
             token=args.token,
             local_save_path=args.local_save,
