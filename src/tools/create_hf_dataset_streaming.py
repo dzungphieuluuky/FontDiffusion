@@ -616,6 +616,7 @@ def main():
     parser.add_argument(
         "--no-push",
         action="store_true",
+        default=False,
         help="Skip pushing to Hub",
     )
     parser.add_argument(
@@ -661,6 +662,7 @@ def main():
     parser.add_argument(
         "--no-multiprocessing",
         action="store_true",
+        default=False,
         help="Disable multiprocessing (use single-threaded processing)",
     )
 
