@@ -14,6 +14,8 @@ from typing import Optional, Dict, List, Tuple
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing as mp
 
+mp.set_start_method("spawn", force=True)  # <-- Add this line
+
 import numpy as np
 import torch
 import torchvision.transforms as transforms
