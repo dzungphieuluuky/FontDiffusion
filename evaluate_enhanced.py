@@ -10,12 +10,12 @@ import json
 import logging
 import argparse
 from pathlib import Path
-from typing import Optional, Dict, List, Tuple
+from typing import Optional
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing as mp
 
 mp.set_start_method("spawn", force=True)  # <-- Add this line
-
+_METRICS_COMPUTER = None
 import numpy as np
 import torch
 import torchvision.transforms as transforms
@@ -173,7 +173,7 @@ class MetricsComputer:
             logger.warning(f"Error computing MSE: {e}")
             return -1.0
 
-    def compute_histogram_distance(self, img1: Image.Image, img2: Image.Image) -> Dict[str, float]:
+    def compute_histogram_distance(self, img1: Image.Image, img2: Image.Image) -> dict[str, float]:
         """Compute various histogram-based distances."""
         if not CV2_AVAILABLE:
             return {}
@@ -203,7 +203,7 @@ class MetricsComputer:
             logger.warning(f"Error computing histogram distance: {e}")
             return {}
 
-    def compute_color_statistics(self, img1: Image.Image, img2: Image.Image) -> Dict[str, float]:
+    def compute_color_statistics(self, img1: Image.Image, img2: Image.Image) -> dict[str, float]:
         """Compute color distribution statistics."""
         try:
             img1_arr = np.array(img1).astype(np.float32)
@@ -261,7 +261,7 @@ class MetricsComputer:
             logger.warning(f"Error extracting features: {e}")
             return None
 
-    def compute_all_metrics(self, img1: Image.Image, img2: Image.Image) -> Dict:
+    def compute_all_metrics(self, img1: Image.Image, img2: Image.Image) -> dict:
         """Compute all available metrics."""
         metrics = {}
         
@@ -301,7 +301,7 @@ class DatasetFolder:
         self.styles = sorted([d.name for d in self.target_base_dir.iterdir() if d.is_dir()])
         self.content_images = self._load_content_images()
 
-    def _load_content_images(self) -> Dict[str, Path]:
+    def _load_content_images(self) -> dict[str, Path]:
         content_images = {}
         for img_path in self.content_dir.glob("*.png"):
             content_images[img_path.stem] = img_path
@@ -311,35 +311,30 @@ class DatasetFolder:
         target_path = self.target_base_dir / style / filename
         return target_path if target_path.exists() else None
 
-    def get_all_target_images(self, style: str) -> List[Tuple[str, Path]]:
+    def get_all_target_images(self, style: str) -> list[tuple[str, Path]]:
         style_dir = self.target_base_dir / style
         if not style_dir.exists():
             return []
         images = [(img_path.stem, img_path) for img_path in style_dir.glob("*.png")]
         return images
 
+def _init_metrics_computer(device):
+    global _METRICS_COMPUTER
+    _METRICS_COMPUTER = MetricsComputer(device=device)
 
 def compute_image_pair_metrics(args_tuple):
-    """Worker function for parallel metric computation."""
     img_path_1, img_path_2, img_stem, style, device = args_tuple
-    
     try:
-        # Load images
         img1 = Image.open(img_path_1).convert("RGB")
         img2 = Image.open(img_path_2).convert("RGB")
-        
-        # Verify same size
         if img1.size != img2.size:
             return None
-        
-        # Compute metrics
-        computer = MetricsComputer(device=device)
+        # Use global instance
+        global _METRICS_COMPUTER
+        computer = _METRICS_COMPUTER
         metrics = computer.compute_all_metrics(img1, img2)
-        
-        # Extract features for later analysis
         features1 = computer.extract_features(img1)
         features2 = computer.extract_features(img2)
-        
         result = {
             'stem': img_stem,
             'style': style,
@@ -348,9 +343,7 @@ def compute_image_pair_metrics(args_tuple):
             'features1': features1,
             'features2': features2,
         }
-        
         return result
-        
     except Exception as e:
         logger.error(f"Error processing {img_stem}: {e}")
         return None
@@ -360,7 +353,7 @@ class StatisticalAnalyzer:
     """Performs statistical analysis on metrics."""
     
     @staticmethod
-    def compute_summary_stats(values: List[float]) -> Dict:
+    def compute_summary_stats(values: list[float]) -> dict:
         """Compute comprehensive summary statistics."""
         if not values:
             return {}
@@ -381,7 +374,7 @@ class StatisticalAnalyzer:
         }
     
     @staticmethod
-    def compare_distributions(values1: List[float], values2: List[float]) -> Dict:
+    def compare_distributions(values1: list[float], values2: list[float]) -> dict:
         """Compare two distributions statistically."""
         if not values1 or not values2:
             return {}
@@ -443,7 +436,7 @@ class Visualizer:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
-    def plot_metric_distributions(self, results: Dict, metric_name: str):
+    def plot_metric_distributions(self, results: dict, metric_name: str):
         """Plot distribution comparison for a metric."""
         styles = list(results['per_style_metrics'].keys())
         
@@ -505,7 +498,7 @@ class Visualizer:
         plt.savefig(self.output_dir / f'{metric_name}_distribution.png')
         plt.close()
         
-    def plot_violin_comparison(self, results: Dict, metrics: List[str]):
+    def plot_violin_comparison(self, results: dict, metrics: list[str]):
         """Create violin plots for multiple metrics."""
         n_metrics = len(metrics)
         fig, axes = plt.subplots(1, n_metrics, figsize=(6*n_metrics, 6))
@@ -532,7 +525,7 @@ class Visualizer:
         plt.savefig(self.output_dir / 'violin_plots.png')
         plt.close()
     
-    def plot_correlation_heatmap(self, results: Dict, metrics: List[str]):
+    def plot_correlation_heatmap(self, results: dict, metrics: list[str]):
         """Plot correlation heatmap between metrics."""
         # Collect data
         data_dict = {metric: [] for metric in metrics}
@@ -580,7 +573,7 @@ class Visualizer:
         plt.savefig(self.output_dir / 'correlation_heatmap.png')
         plt.close()
     
-    def plot_radar_chart(self, results: Dict, styles: List[str], metrics: List[str]):
+    def plot_radar_chart(self, results: dict, styles: list[str], metrics: list[str]):
         """Create radar chart comparing styles across metrics."""
         if not PLOTLY_AVAILABLE:
             logger.warning("Plotly not available for radar charts")
@@ -630,7 +623,7 @@ class Visualizer:
         
         fig.write_html(str(self.output_dir / 'radar_chart.html'))
     
-    def plot_tsne_embeddings(self, results: Dict):
+    def plot_tsne_embeddings(self, results: dict):
         """Plot t-SNE visualization of image embeddings."""
         if not SKLEARN_AVAILABLE:
             logger.warning("scikit-learn not available for t-SNE")
@@ -694,7 +687,7 @@ class Visualizer:
         plt.savefig(self.output_dir / 'tsne_embeddings.png', bbox_inches='tight')
         plt.close()
     
-    def create_summary_report(self, results: Dict):
+    def create_summary_report(self, results: dict):
         """Create an HTML summary report."""
         html_content = f"""
         <!DOCTYPE html>
@@ -833,10 +826,10 @@ def evaluate_folders_enhanced(
     folder2: DatasetFolder,
     folder1_name: str = "Folder1",
     folder2_name: str = "Folder2",
-    styles: Optional[List[str]] = None,
+    styles: Optional[list[str]] = None,
     device: str = "cuda:0",
     n_workers: int = 4,
-) -> Dict:
+) -> dict:
     """Enhanced evaluation with parallel processing and comprehensive metrics."""
     
     results = {
@@ -881,7 +874,11 @@ def evaluate_folders_enhanced(
     
     # Process in parallel
     all_results = []
-    with ProcessPoolExecutor(max_workers=n_workers) as executor:
+    with ProcessPoolExecutor(
+            max_workers=n_workers,
+            initializer=_init_metrics_computer,
+            initargs=(device,)
+        ) as executor:
         futures = {executor.submit(compute_image_pair_metrics, item): item for item in work_items}
         
         for future in HFTqdm(as_completed(futures), total=len(work_items), 
