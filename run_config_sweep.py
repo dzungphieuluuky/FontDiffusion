@@ -527,20 +527,20 @@ def parse_args() -> argparse.Namespace:
         epilog="""
 Examples:
   # Run sweep with predefined configs
-  python scripts/run_config_sweep.py \\
+  python FontDiffusion/run_config_sweep.py \\
     --steps 10 20 30 \\
     --guidance_scales 1.0 1.5 2.0 \\
     --output sweep_results/ \\
     --num_processes 4
 
   # Dry run to test commands
-  python scripts/run_config_sweep.py \\
+  python FontDiffusion/run_config_sweep.py \\
     --steps 10 20 \\
     --guidance_scales 1.0 \\
     --dry_run
 
   # Run with custom base arguments
-  python scripts/run_config_sweep.py \\
+  python FontDiffusion/run_config_sweep.py \\
     --steps 15 20 25 \\
     --guidance_scales 0.5 1.0 1.5 \\
     --output sweep_results/ \\
