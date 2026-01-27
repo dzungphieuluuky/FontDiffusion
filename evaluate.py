@@ -1,24 +1,3 @@
-"""
-Evaluate and compare generated images from two dataset folders.
-
-Each folder should have:
-  folder/
-    ├── ContentImage/
-    │   ├── char.png
-    │   └── ...
-    └── TargetImage/
-        ├── style0/
-        │   ├── style0+char.png
-        │   └── ...
-        └── ...
-
-Supports metrics:
-  - LPIPS: Perceptual similarity
-  - SSIM: Structural similarity
-  - FID: Fréchet Inception Distance (per-style)
-  - Histogram matching
-"""
-
 import os
 import sys
 import json
