@@ -60,8 +60,7 @@ class FontDiffuserWithFST(nn.Module):
         self.fst_projection = nn.Linear(feature_channels[-1], cross_attn_dim)
         
         # Project original style features for combination
-        self.original_style_projection = nn.Linear(768, cross_attn_dim)
-
+        self.original_style_projection = nn.Linear(1024, cross_attn_dim)
     def forward(
         self,
         noisy_latents: torch.Tensor,
