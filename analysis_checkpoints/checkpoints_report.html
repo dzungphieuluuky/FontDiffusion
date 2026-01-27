@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FontDiffuser Checkpoint Analysis Report</title>
+    <style>
+        :root {
+            --primary: #2c3e50;
+            --secondary: #3498db;
+            --accent: #e74c3c;
+            --bg-color: #f5f7fa;
+            --card-bg: #ffffff;
+            --text: #333333;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: var(--text);
+            background-color: var(--bg-color);
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: var(--card-bg);
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        header {
+            border-bottom: 3px solid var(--secondary);
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            color: var(--primary);
+            margin-bottom: 5px;
+            font-size: 2.2rem;
+        }
+
+        h2 {
+            color: var(--secondary);
+            margin-top: 40px;
+            border-left: 5px solid var(--primary);
+            padding-left: 15px;
+        }
+
+        h3 {
+            color: var(--primary);
+            margin-top: 25px;
+        }
+
+        .meta-info {
+            color: #666;
+            font-style: italic;
+            font-size: 0.9rem;
+        }
+
+        /* Executive Summary Box */
+        .exec-summary {
+            background: linear-gradient(135deg, #e0f7fa 0%, #ffffff 100%);
+            border: 1px solid #b2ebf2;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+
+        .exec-summary h3 { margin-top: 0; }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        }
+
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        th {
+            background-color: var(--primary);
+            color: white;
+            font-weight: 600;
+        }
+
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        
+        /* Metric Badges */
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: bold;
+        }
+        .good { background-color: #d4edda; color: #155724; }
+        .neutral { background-color: #fff3cd; color: #856404; }
+        .bad { background-color: #f8d7da; color: #721c24; }
+
+        /* Key Findings Box */
+        .key-finding {
+            background-color: #f8f9fa;
+            border-left: 4px solid var(--accent);
+            padding: 15px;
+            margin-top: 10px;
+            font-style: italic;
+        }
+
+        /* Model Definition Grid */
+        .model-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .model-card {
+            background: #ecf0f1;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            border: 1px solid #bdc3c7;
+        }
+
+        .model-card strong { display: block; font-size: 1.1rem; margin-bottom: 5px; color: var(--secondary); }
+
+        footer {
+            margin-top: 50px;
+            text-align: center;
+            font-size: 0.85rem;
+            color: #7f8c8d;
+            border-top: 1px solid #eee;
+            padding-top: 20px;
+        }
+
+        @media print {
+            body { background: white; }
+            .container { box-shadow: none; padding: 0; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>FontDiffuser Checkpoint Performance Report</h1>
+        <div class="meta-info">
+            Comparing Finetuned (5k+5k) vs. Scratch (15k) vs. Scratch (15k+15k) <br>
+            Analysis based on LPIPS, SSIM, and Histogram Distances
+        </div>
+    </header>
+
+    <section class="exec-summary">
+        <h3>🚀 Executive Summary</h3>
+        <p>The analysis reveals that <strong>Phase 1 (Content Construction) is the dominant factor</strong> in determining the visual output of the FontDiffuser model.</p>
+        <ul>
+            <li><strong>Most Similar Pair:</strong> The two "Trained from Scratch" models (Phase 1 only vs. Phase 1+2) are statistically the most similar (<span class="badge good">LPIPS 0.07</span>), indicating that adding 15,000 steps of Phase 2 results in subtle detail refinement rather than radical structural changes.</li>
+            <li><strong>Most Distinct Model:</strong> The <strong>Finetuned Model</strong> (5k steps) is structurally distinct from the "Scratch" models. It has not converged to the same visual state, likely retaining significant biases from the author's original pretrained weights.</li>
+            <li><strong>Stability Concern:</strong> The "Scratch" training pipeline exhibits high stability generally, but the Phase 2 process introduces significant outlier instability in histogram/contrast distribution for specific complex characters.</li>
+        </ul>
+    </section>
+
+    <h2>1. Methodology & Definitions</h2>
+    <p>Three model checkpoints were analyzed by comparing their generated outputs against one another:</p>
+    
+    <div class="model-grid">
+        <div class="model-card">
+            <strong>Model A (Finetuned)</strong>
+            <code>finetuned-5P1-5P2</code><br>
+            Author's Pretrained + 5k (P1) + 5k (P2)
+        </div>
+        <div class="model-card">
+            <strong>Model B (Scratch-P1)</strong>
+            <code>pretrained-15P1</code><br>
+            Trained from Scratch (15k P1 only)
+        </div>
+        <div class="model-card">
+            <strong>Model C (Scratch-Full)</strong>
+            <code>15P1-15P2</code><br>
+            Trained from Scratch (15k P1 + 15k P2)
+        </div>
+    </div>
+
+    <p><strong>Metrics Key:</strong></p>
+    <ul>
+        <li><strong>LPIPS (Perceptual):</strong> Lower is better. Measures how "visually similar" images look.</li>
+        <li><strong>SSIM (Structural):</strong> Higher is better. Measures similarity in shape and structure.</li>
+        <li><strong>Histogram Distance:</strong> Lower is better. Measures color and intensity distribution.</li>
+    </ul>
+
+    <h2>2. Comparative Analysis</h2>
+
+    <h3>Comparison 1: The Impact of Phase 2 Training</h3>
+    <p><em>Comparing Model B (Scratch-P1) vs. Model C (Scratch-Full)</em></p>
+    <table>
+        <thead>
+            <tr>
+                <th>Metric</th>
+                <th>Value</th>
+                <th>Interpretation</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>LPIPS</td>
+                <td><strong>0.0725</strong></td>
+                <td><span class="badge good">High Similarity</span> Perceptual difference is very low.</td>
+            </tr>
+            <tr>
+                <td>SSIM</td>
+                <td><strong>0.7228</strong></td>
+                <td><span class="badge good">High Consistency</span> Structure remains largely unchanged.</td>
+            </tr>
+            <tr>
+                <td>Hist. Dist.</td>
+                <td>4.6415</td>
+                <td><span class="badge bad">High Variance</span> Driven by extreme outliers (see Deep Dive).</td>
+            </tr>
+        </tbody>
+    </table>
+    <div class="key-finding">
+        <strong>Key Finding:</strong> Phase 1 determines the glyph shape. Phase 2 (Texture Refinement) does not drastically alter the structure but refines edges or noise.
+    </div>
+
+    <h3>Comparison 2: Finetuning vs. Training from Scratch</h3>
+    <p><em>Comparing Model A (Finetuned) vs. Model C (Scratch-Full)</em></p>
+    <table>
+        <thead>
+            <tr>
+                <th>Metric</th>
+                <th>Value</th>
+                <th>Interpretation</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>LPIPS</td>
+                <td>0.0953</td>
+                <td><span class="badge neutral">Moderate Divergence</span> Distinctly more different than Comp 1.</td>
+            </tr>
+            <tr>
+                <td>SSIM</td>
+                <td>0.6774</td>
+                <td><span class="badge neutral">Lower Structure Match</span> Letter shapes differ significantly.</td>
+            </tr>
+            <tr>
+                <td>Hist. Dist.</td>
+                <td>3.0296</td>
+                <td><span class="badge good">Moderate</span> Color distributions are fairly aligned.</td>
+            </tr>
+        </tbody>
+    </table>
+    <div class="key-finding">
+        <strong>Key Finding:</strong> The models are <strong>not equivalent</strong>. The Finetuned model retains a "sticky" effect from the author's weights; 5,000 steps were insufficient to overwrite the base structure to match the "From Scratch" trajectory.
+    </div>
+
+    <h2>3. Deep Dive: Stability & Outliers</h2>
+
+    <h3>📉 Histogram Instability (The "Exploding" Outliers)</h3>
+    <p>A critical anomaly was observed in the <strong>Scratch-P1 vs. Scratch-Full</strong> comparison:</p>
+    <ul>
+        <li><strong>Median Distance:</strong> 0.11 (Extremely Low/Good)</li>
+        <li><strong>Mean Distance:</strong> 4.64 (High)</li>
+        <li><strong>Standard Deviation:</strong> <span class="badge bad">52.05</span></li>
+        <li><strong>Max Value:</strong> 2302.75</li>
+    </ul>
+    <p><strong>Analysis:</strong> For 90% of images, Phase 2 changes almost nothing regarding color. However, the extreme standard deviation proves that <strong>Phase 2 training occasionally collapses or explodes the contrast</strong> for specific difficult characters (approx 11.3% of the dataset).</p>
+
+    <h3>🎨 Style-Specific Analysis</h3>
+    <p>Using <em>Scratch-Full</em> as the reference, we analyzed how the <em>Finetuned</em> model behaves across styles:</p>
+    <ul>
+        <li><strong>✅ Best Alignment (Thanh8):</strong> <code>LPIPS: 0.0778</code> / <code>SSIM: 0.7361</code><br>
+        The Finetuned and Scratch models are most similar here. This style is likely structurally simple or well-represented in base weights.</li>
+        
+        <li><strong>❌ Worst Alignment (Thanh4):</strong> <code>LPIPS: 0.1132</code> / <code>SSIM: 0.6456</code><br>
+        The Finetuned model failed to converge to the Scratch model's representation.</li>
+        
+        <li><strong>⚠️ Most Volatile (Thanh6):</strong> <br>
+        In the Scratch pipeline, this style showed a Histogram Distance of <strong>7.17</strong>, confirming it is the most unstable during Phase 2 refinement.</li>
+    </ul>
+
+    <h2>4. Conclusion & Recommendations</h2>
+    
+    <ol>
+        <li>
+            <strong>Training Efficiency:</strong> If computational resources are limited, <strong>stop after Phase 1</strong>. The difference between 15k Phase 1 and the Full training is minimal (LPIPS 0.07). You achieve ~90% of the visual structure from Phase 1 alone.
+        </li>
+        <li>
+            <strong>Model Selection Strategy:</strong>
+            <ul>
+                <li>If your dataset is similar to the author's: <strong>Use Finetuned (5P1-5P2)</strong>.</li>
+                <li>If you need precise structural control based <em>only</em> on your data: <strong>Train from Scratch</strong>. The Finetuned model retains "ghosts" of the original weights.</li>
+            </ul>
+        </li>
+        <li>
+            <strong>Fixing Phase 2 Instability:</strong> The extreme histogram outliers suggest Phase 2 (15,000 steps) is too aggressive for certain styles. 
+            <br><em>Action:</em> Consider <strong>reducing the learning rate</strong> for Phase 2 or implementing gradient clipping to prevent the contrast explosions observed in the analysis.
+        </li>
+    </ol>
+
+    <footer>
+        Generated for FontDiffuser Performance Analysis | 2026
+    </footer>
+</div>
+
+</body>
+</html>
