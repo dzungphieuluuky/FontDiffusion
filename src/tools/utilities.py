@@ -15,7 +15,51 @@ from safetensors.torch import save_file
 from datasets.utils import tqdm as hf_tqdm, enable_progress_bar
 
 enable_progress_bar()
+"""Utility functions for model inspection and logging."""
 
+import logging
+import torch.nn as nn
+
+logger = logging.getLogger(__name__)
+
+
+def count_parameters(model: nn.Module) -> tuple[int, int]:
+    """
+    Count total and trainable parameters in a model.
+    
+    Args:
+        model: PyTorch model
+        
+    Returns:
+        tuple of (total_params, trainable_params)
+    """
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    return total_params, trainable_params
+
+
+def log_model_info(model: nn.Module, model_name: str = "Model") -> None:
+    """
+    Log parameter counts and architecture info for a model.
+    
+    Args:
+        model: PyTorch model to analyze
+        model_name: Name for logging
+    """
+    # Use the model's built-in logging if available
+    if hasattr(model, 'log_model_info'):
+        model.log_model_info()
+    else:
+        # Fallback to basic parameter counting
+        total, trainable = count_parameters(model)
+        logger.info(f"\n{'='*80}")
+        logger.info(f"{model_name} Parameter Summary")
+        logger.info(f"{'='*80}")
+        logger.info(f"Total parameters: {total:,}")
+        logger.info(f"Trainable parameters: {trainable:,}")
+        logger.info(f"Non-trainable parameters: {total - trainable:,}")
+        logger.info(f"{'='*80}\n")
+        
 HF_BLUE = "#1055C9"
 HF_GREEN = "#41A67E"
 HF_ORANGE = "#FF8C00"

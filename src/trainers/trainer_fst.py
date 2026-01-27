@@ -115,11 +115,6 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         # Wrap with FSTDiff enhancement
         if self.use_fst:
             logger.info("Creating FontDiffuserWithFST model...")
-            logger.info(f"FST feature channels: {self.fst_feature_channels}")
-            logger.info(f"FST num queries: {self.fst_num_queries}")
-            logger.info(f"FST query dim: {self.fst_query_dim}")
-            logger.info(f"FST num scales: {self.fst_num_scales}")
-            
             self.model = FontDiffuserWithFST(
                 original_fontdiffuser=base_model,
                 feature_channels=self.fst_feature_channels,
@@ -127,8 +122,13 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 query_dim=self.fst_query_dim,
                 num_scales=self.fst_num_scales,
             )
+            
+            # Log model architecture and parameters
+            self.model.log_model_info()
         else:
             self.model = base_model
+            # Log base model parameters
+            self.model.log_model_info()
 
         # Apply freezing if specified
         if self.use_fst and self.freeze_original_encoders:
@@ -140,6 +140,10 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             for param in self.model.diffusion_unet.parameters():
                 param.requires_grad = False
             logger.info("✓ Original encoders frozen")
+            
+            # Log updated trainable parameters after freezing
+            logger.info("\nAfter freezing original encoders:")
+            self.model.log_model_info()
 
         # Perceptual loss (always used)
         self.perceptual_loss = ContentPerceptualLoss()

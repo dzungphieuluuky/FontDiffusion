@@ -5,10 +5,7 @@ from torch.nn import functional as F
 from typing import Optional
 from diffusers import ModelMixin
 from diffusers.configuration_utils import ConfigMixin, register_to_config
-
-import torch
-import torch.nn as nn
-from typing import Dict
+import logging
 
 from src.modules.msse import MultiScaleStyleEncoder
 from src.modules.fst import FontStyleTransformationModule
@@ -16,16 +13,54 @@ from src.modules.content_encoder import ContentEncoder
 from src.modules.style_encoder import StyleEncoder
 from src.modules.unet import UNet
 
+logger = logging.getLogger(__name__)
 
-import torch
-import torch.nn as nn
-from typing import Optional
 
-from src.modules.msse import MultiScaleStyleEncoder
-from src.modules.fst import FontStyleTransformationModule
-from src.modules.content_encoder import ContentEncoder
-from src.modules.style_encoder import StyleEncoder
-from src.modules.unet import UNet
+def count_parameters(model: nn.Module) -> tuple[int, int]:
+    """
+    Count total and trainable parameters in a model.
+    
+    Args:
+        model: PyTorch model
+        
+    Returns:
+        tuple of (total_params, trainable_params)
+    """
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    return total_params, trainable_params
+
+
+def log_model_parameters(model: nn.Module, model_name: str = "Model") -> None:
+    """
+    Log parameter counts for a model and its submodules.
+    
+    Args:
+        model: PyTorch model to analyze
+        model_name: Name for logging
+    """
+    total, trainable = count_parameters(model)
+    logger.info(f"\n{'='*80}")
+    logger.info(f"{model_name} Parameter Summary")
+    logger.info(f"{'='*80}")
+    logger.info(f"Total parameters: {total:,}")
+    logger.info(f"Trainable parameters: {trainable:,}")
+    logger.info(f"Non-trainable parameters: {total - trainable:,}")
+    
+    # Log submodule details
+    if hasattr(model, 'named_children'):
+        logger.info(f"\nSubmodule breakdown:")
+        logger.info(f"{'-'*80}")
+        logger.info(f"{'Module Name':<40} {'Total Params':>15} {'Trainable':>15}")
+        logger.info(f"{'-'*80}")
+        
+        for name, module in model.named_children():
+            mod_total, mod_trainable = count_parameters(module)
+            logger.info(f"{name:<40} {mod_total:>15,} {mod_trainable:>15,}")
+        
+        logger.info(f"{'-'*80}")
+    
+    logger.info(f"{'='*80}\n")
 
 
 class FontDiffuserWithFST(nn.Module):
@@ -63,8 +98,6 @@ class FontDiffuserWithFST(nn.Module):
         )
         
         # Determine U-Net's cross-attention dimension
-        # Check the actual cross_attention_dim from the U-Net config
-        # Typical FontDiffuser uses 1024, not 768
         cross_attn_dim = self._get_unet_cross_attention_dim()
         
         # Project FST output to U-Net cross-attention dimension
@@ -92,6 +125,53 @@ class FontDiffuserWithFST(nn.Module):
         
         # Default fallback to 1024 (standard for FontDiffuser)
         return 1024
+
+    def log_model_info(self) -> None:
+        """Log detailed parameter information for the FST model and its components."""
+        logger.info("\n" + "="*80)
+        logger.info("FontDiffuserWithFST Model Architecture")
+        logger.info("="*80)
+        
+        # Log individual component parameters
+        components = [
+            ("Content Encoder", self.content_encoder),
+            ("Style Encoder", self.style_encoder),
+            ("Diffusion U-Net", self.diffusion_unet),
+            ("Multi-Scale Style Encoder (MSSE)", self.mss_encoder),
+            ("Font Style Transformation (FST)", self.fst_module),
+            ("FST Projection", self.fst_projection),
+            ("Original Style Projection", self.original_style_projection),
+        ]
+        
+        logger.info("\nComponent Parameters:")
+        logger.info("-"*80)
+        logger.info(f"{'Component':<45} {'Total':>15} {'Trainable':>15}")
+        logger.info("-"*80)
+        
+        total_all = 0
+        trainable_all = 0
+        
+        for name, component in components:
+            total, trainable = count_parameters(component)
+            total_all += total
+            trainable_all += trainable
+            frozen_marker = " [FROZEN]" if trainable == 0 and total > 0 else ""
+            logger.info(f"{name:<45} {total:>15,} {trainable:>15,}{frozen_marker}")
+        
+        logger.info("-"*80)
+        logger.info(f"{'TOTAL':<45} {total_all:>15,} {trainable_all:>15,}")
+        logger.info(f"{'Non-trainable':<45} {'':<15} {total_all - trainable_all:>15,}")
+        logger.info("="*80 + "\n")
+        
+        # Log FST-specific details
+        logger.info("FST Module Details:")
+        logger.info("-"*80)
+        logger.info(f"  Feature channels: {self.fst_module.feature_channels}")
+        logger.info(f"  Num queries: {self.fst_module.num_queries}")
+        logger.info(f"  Query dim: {self.fst_module.query_dim}")
+        logger.info(f"  Num scales: {self.fst_module.num_scale_features}")
+        logger.info(f"  Cross-attention dim: {self._get_unet_cross_attention_dim()}")
+        logger.info("="*80 + "\n")
 
     def forward(
         self,
@@ -240,6 +320,7 @@ class FontDiffuserWithFST(nn.Module):
 
         return losses
 
+
 class FontDiffuserWithFSTWrapper(nn.Module):
     """
     Wrapper to maintain API compatibility with original FontDiffuserModel
@@ -264,13 +345,11 @@ class FontDiffuserWithFSTWrapper(nn.Module):
         Note: This assumes style_images contains both source and target.
         You may need to modify based on your data pipeline.
         """
-        # Split style_images if they contain both source and target
-        # Or pass the same image twice if you only have target style
         outputs = self.model(
             noisy_latents=x_t,
             timestep=timesteps,
             content_img=content_images,
-            style_source_img=style_images,  # May need adjustment
+            style_source_img=style_images,
             style_target_img=style_images,
             content_encoder_downsample_size=content_encoder_downsample_size,
             return_dict=True,
@@ -295,6 +374,10 @@ class FontDiffuserModel(ModelMixin, ConfigMixin):
         self.unet = unet
         self.style_encoder = style_encoder
         self.content_encoder = content_encoder
+
+    def log_model_info(self) -> None:
+        """Log parameter information for the base FontDiffuser model."""
+        log_model_parameters(self, "FontDiffuserModel")
 
     def forward(
         self,
@@ -357,6 +440,10 @@ class FontDiffuserModelDPM(ModelMixin, ConfigMixin):
         self.unet = unet
         self.style_encoder = style_encoder
         self.content_encoder = content_encoder
+
+    def log_model_info(self) -> None:
+        """Log parameter information for the DPM FontDiffuser model."""
+        log_model_parameters(self, "FontDiffuserModelDPM")
 
     def forward(
         self,
