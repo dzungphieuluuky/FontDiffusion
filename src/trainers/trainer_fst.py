@@ -18,6 +18,7 @@ from torchvision import transforms
 
 from src.dataset.font_dataset_fst import FontDataset as FontDatasetFST
 from src.dataset.collate_fn_fst import CollateFN as CollateFNFST
+from src.losses.criterion import CombinedFSTLoss
 from src import (
     ContentPerceptualLoss,
     FontDiffuserModel,
@@ -57,19 +58,32 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         """
         # Store FST-specific args before calling super
         self.use_fst = getattr(args, "use_fst", True)
-        self.freeze_original_encoders = getattr(args, "freeze_original_encoders", False)
-        self.style_source_same_prob = getattr(args, "style_source_same_prob", 0.5)
-
-        # Parse FST configuration
         self.fst_feature_channels = self._parse_feature_channels(
             getattr(args, "fst_feature_channels", "64,128,256,512,1024")
         )
-        self.fst_num_queries = getattr(args, "fst_num_queries", 220)
+        self.fst_num_queries = getattr(args, "fst_num_queries", 256)
         self.fst_query_dim = getattr(args, "fst_query_dim", 128)
         self.fst_num_scales = getattr(args, "fst_num_scales", 5)
-
-        # Call parent constructor
+        self.freeze_original_encoders = getattr(args, "freeze_original_encoders", True)
+        
+        # Consistency loss parameters
+        self.use_consistency_loss = getattr(args, "use_consistency_loss", True)
+        self.consistency_weight = getattr(args, "consistency_weight", 0.1)
+        self.consistency_loss_type = getattr(args, "consistency_loss_type", "mse")
+        self.consistency_num_pairs = getattr(args, "consistency_num_pairs", 2)
+        
+        # Call parent init
         super().__init__(args)
+        
+        # Setup consistency loss after model is created
+        if self.use_fst and self.use_consistency_loss:
+            self.combined_loss = CombinedFSTLoss(
+                consistency_weight=self.consistency_weight,
+                consistency_loss_type=self.consistency_loss_type,
+                use_query_only=True,
+                num_queries=self.fst_num_queries,
+            )
+            logger.info(f"Consistency loss enabled (weight={self.consistency_weight}, type={self.consistency_loss_type})")
 
     def _parse_feature_channels(self, channels_str: str) -> list[int]:
         """Parse feature channels from comma-separated string."""
@@ -370,87 +384,117 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         self,
         samples: dict[str, torch.Tensor],
     ) -> tuple[torch.Tensor, dict[str, float]]:
-        """Perform a single training step with FST model."""
+        """
+        Single training step with FST-specific handling.
+        
+        For consistency loss, we need multiple reference characters with the same
+        source→target style pair but different content.
+        """
         self.model.train()
-
-        # Extract and prepare inputs
-        content_images = samples["content_image"]
-        style_images = samples["style_image"]
-        target_images = samples["target_image"]
-        nonorm_target_images = samples["nonorm_target_image"]
-
-        # Generate noise and timesteps
-        noise = torch.randn_like(target_images)
-        bsz = target_images.shape[0]
+        
+        # Extract data from batch
+        target_img = samples["target_img"]
+        style_img = samples["style_img"]
+        content_img = samples["content_img"]
+        
+        # Additional reference images for consistency (if available)
+        # These should have different content but same source/target styles
+        ref_content_imgs = samples.get("ref_content_imgs", [])
+        
+        batch_size = target_img.shape[0]
+        device = target_img.device
+        
+        # Sample random timesteps
         timesteps = torch.randint(
             0,
             self.noise_scheduler.config.num_train_timesteps,
-            (bsz,),
-            device=target_images.device,
+            (batch_size,),
+            device=device,
         ).long()
-
-        # Add noise to targets
-        noisy_target_images = self.noise_scheduler.add_noise(
-            target_images, noise, timesteps
-        )
-
-        # Apply classifier-free guidance
-        content_images, style_images = self.apply_classifier_free_guidance(
-            content_images,
-            style_images,
-            self.config.drop_prob,
-            samples=samples,
-        )
-
-        # Forward pass - different for FST model
+        
+        # Generate random noise
+        noise = torch.randn_like(target_img)
+        
+        # Add noise to target image
+        noisy_latents = self.noise_scheduler.add_noise(target_img, noise, timesteps)
+        
+        # Apply classifier-free guidance dropout if enabled
+        if self.cfg_drop_prob > 0:
+            content_img, style_img = self.apply_classifier_free_guidance(
+                content_img, style_img, self.cfg_drop_prob
+            )
+        
+        # Forward pass
         if self.use_fst:
-            # Get style source images from the batch
-            style_source_images = samples.get("style_source_image", style_images)
-
+            # For FST model, we need source and target style images
+            # Assuming style_img is the target and we have a source style reference
+            style_source_img = samples.get("style_source_img", style_img)
+            
             outputs = self.model(
-                noisy_latents=noisy_target_images,
+                noisy_latents=noisy_latents,
                 timestep=timesteps,
-                content_img=content_images,
-                style_source_img=style_source_images,
-                style_target_img=style_images,
-                content_encoder_downsample_size=self.args.content_encoder_downsample_size,
+                content_img=content_img,
+                style_source_img=style_source_img,
+                style_target_img=style_img,
+                content_encoder_downsample_size=self.content_encoder_downsample_size,
                 return_dict=True,
             )
-            noise_pred = outputs["noise_pred"]
-            offset_out_sum = outputs["offset_out_sum"]
-        else:
-            # Original model forward
-            noise_pred, offset_out_sum = self.model(
-                x_t=noisy_target_images,
-                timesteps=timesteps,
-                style_images=style_images,
-                content_images=content_images,
-                content_encoder_downsample_size=self.args.content_encoder_downsample_size,
-            )
-
-        # Compute losses
-        total_loss, loss_dict, pred_original_sample_norm = self.compute_losses(
-            noise_pred=noise_pred,
-            noise=noise,
-            offset_out_sum=offset_out_sum,
-            noisy_target_images=noisy_target_images,
-            nonorm_target_images=nonorm_target_images,
-            timesteps=timesteps,
-        )
-
-        # SCR loss for phase 2
-        if self.config.phase_2 and self.scr is not None:
-            neg_images = samples.get("neg_images")
-            if neg_images is not None:
-                sc_loss = self.compute_phase2_loss(
-                    pred_original_sample_norm=pred_original_sample_norm,
-                    target_images=target_images,
-                    neg_images=neg_images,
+            
+            # Collect transformation features for consistency loss
+            transformation_features_list = [outputs["transformation_features"]]
+            
+            # Process additional reference images if available
+            if len(ref_content_imgs) > 0 and self.use_consistency_loss:
+                num_refs = min(len(ref_content_imgs), self.consistency_num_pairs - 1)
+                
+                for ref_content in ref_content_imgs[:num_refs]:
+                    # Use same style pair but different content
+                    ref_outputs = self.model(
+                        noisy_latents=noisy_latents,  # Same noise
+                        timestep=timesteps,
+                        content_img=ref_content,
+                        style_source_img=style_source_img,
+                        style_target_img=style_img,
+                        content_encoder_downsample_size=self.content_encoder_downsample_size,
+                        return_dict=True,
+                    )
+                    transformation_features_list.append(
+                        ref_outputs["transformation_features"]
+                    )
+            
+            # Compute loss with consistency
+            if self.use_consistency_loss and len(transformation_features_list) >= 2:
+                loss_dict = self.combined_loss(
+                    noise_pred=outputs["noise_pred"],
+                    target_noise=noise,
+                    transformation_features_list=transformation_features_list,
+                    offset_out_sum=outputs.get("offset_out_sum"),
                 )
-                total_loss += self.config.sc_coefficient * sc_loss
-                loss_dict["sc_loss"] = sc_loss.item()
-
-        return total_loss, loss_dict
+            else:
+                # Fallback to basic loss
+                loss_dict = self.model.get_loss_dict(outputs, noise)
+        else:
+            # Standard FontDiffuser forward
+            noise_pred, offset_out_sum = self.model(
+                noisy_latents,
+                timesteps,
+                style_img,
+                content_img,
+                self.content_encoder_downsample_size,
+            )
+            
+            loss_dict = {
+                "noise_loss": torch.nn.functional.mse_loss(noise_pred, noise),
+                "offset_loss": offset_out_sum.mean() if isinstance(offset_out_sum, torch.Tensor) else torch.tensor(0.0, device=device),
+            }
+            loss_dict["total_loss"] = loss_dict["noise_loss"] + 0.01 * loss_dict["offset_loss"]
+        
+        loss = loss_dict["total_loss"]
+        
+        # Convert to float for logging
+        loss_dict_float = {k: v.item() if isinstance(v, torch.Tensor) else v for k, v in loss_dict.items()}
+        
+        return loss, loss_dict_float
 
     def save_checkpoint(self, is_final: bool = False):
         """Save FST training checkpoint."""

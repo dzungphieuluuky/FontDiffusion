@@ -19,39 +19,64 @@ class CollateFN(object):
     - Variable-sized tensors with automatic resizing
     """
 
-    def __init__(self, verbose: bool = False):
+    def __init__(
+        self,
+        return_tensors: str = "pt",
+        num_consistency_refs: int = 0,
+    ):
         """
         Args:
-            verbose: If True, log detailed information about batching
+            return_tensors: Format for return ("pt" for PyTorch)
+            num_consistency_refs: Number of additional content refs for consistency
         """
-        self.verbose = verbose
-
-    def __call__(self, batch: list[dict[str, any]]) -> dict[str, any]:
+        self.return_tensors = return_tensors
+        self.num_consistency_refs = num_consistency_refs
+    
+    def __call__(self, batch: list[dict]) -> dict[str, torch.Tensor]:
         """
-        Collate a list of samples into a batch.
-
-        Args:
-            batch: List of dictionaries from dataset __getitem__
-
-        Returns:
-            Dictionary with batched tensors
+        Collate batch items.
+        
+        Each batch item should contain:
+        - target_img: Generated character
+        - content_img: Content reference
+        - style_source_img: Source style reference
+        - style_target_img: Target style reference
+        - (optional) ref_content_imgs: List of additional content refs
         """
-        if not batch:
-            return {}
-
-        batched_data = {}
-
-        for key in batch[0].keys():
-            batch_key_data = [sample[key] for sample in batch]
-
-            if isinstance(batch_key_data[0], torch.Tensor):
-                batched_data[key] = self._collate_tensors(key, batch_key_data)
-            else:
-                # Non-tensor data (e.g., paths, metadata)
-                batched_data[key] = batch_key_data
-
-        return batched_data
-
+        # Stack main tensors
+        target_imgs = torch.stack([item["target_img"] for item in batch])
+        content_imgs = torch.stack([item["content_img"] for item in batch])
+        style_source_imgs = torch.stack([item["style_source_img"] for item in batch])
+        style_target_imgs = torch.stack([item["style_target_img"] for item in batch])
+        
+        result = {
+            "target_img": target_imgs,
+            "content_img": content_imgs,
+            "style_source_img": style_source_imgs,
+            "style_target_img": style_target_imgs,
+            "style_img": style_target_imgs,  # Alias for compatibility
+        }
+        
+        # Collect consistency references if available
+        if self.num_consistency_refs > 0:
+            ref_content_imgs = []
+            for item in batch:
+                refs = item.get("ref_content_imgs", [])
+                if len(refs) > 0:
+                    # Take up to num_consistency_refs
+                    item_refs = refs[:self.num_consistency_refs]
+                    ref_content_imgs.append(torch.stack(item_refs))
+            
+            if len(ref_content_imgs) > 0:
+                # Stack across batch: (B, num_refs, C, H, W)
+                ref_content_imgs = torch.stack(ref_content_imgs)
+                # Reshape to list of (B, C, H, W) tensors
+                result["ref_content_imgs"] = [
+                    ref_content_imgs[:, i] for i in range(ref_content_imgs.shape[1])
+                ]
+        
+        return result
+    
     def _collate_tensors(self, key: str, tensors: list[torch.Tensor]) -> torch.Tensor:
         """
         Collate a list of tensors, handling variable shapes.
