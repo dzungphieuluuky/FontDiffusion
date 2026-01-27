@@ -17,6 +17,17 @@ from src.modules.style_encoder import StyleEncoder
 from src.modules.unet import UNet
 
 
+import torch
+import torch.nn as nn
+from typing import Optional
+
+from src.modules.msse import MultiScaleStyleEncoder
+from src.modules.fst import FontStyleTransformationModule
+from src.modules.content_encoder import ContentEncoder
+from src.modules.style_encoder import StyleEncoder
+from src.modules.unet import UNet
+
+
 class FontDiffuserWithFST(nn.Module):
     """Enhanced FontDiffuser with FSTDiff modules."""
 
@@ -51,16 +62,37 @@ class FontDiffuserWithFST(nn.Module):
             num_scale_features=num_scales,
         )
         
-        # Project FST output to U-Net cross-attention dimension
-        # Calculate total output dimension: N_L + last_scale_spatial_size
-        last_scale_spatial = 6 * 6  # 48 // (2^4) = 3, but let's use 6x6 for safety
-        total_fst_dim = num_queries + last_scale_spatial
-        cross_attn_dim = 768  # Standard U-Net cross-attention dimension
+        # Determine U-Net's cross-attention dimension
+        # Check the actual cross_attention_dim from the U-Net config
+        # Typical FontDiffuser uses 1024, not 768
+        cross_attn_dim = self._get_unet_cross_attention_dim()
         
+        # Project FST output to U-Net cross-attention dimension
         self.fst_projection = nn.Linear(feature_channels[-1], cross_attn_dim)
         
-        # Project original style features for combination
+        # Project original style vector (1024-dim) to cross-attention dimension
         self.original_style_projection = nn.Linear(1024, cross_attn_dim)
+
+    def _get_unet_cross_attention_dim(self) -> int:
+        """
+        Infer the cross-attention dimension from the U-Net architecture.
+        
+        Returns:
+            int: Cross-attention dimension (typically 1024 for FontDiffuser)
+        """
+        # Try to get from config if available
+        if hasattr(self.diffusion_unet, 'config') and hasattr(self.diffusion_unet.config, 'cross_attention_dim'):
+            return self.diffusion_unet.config.cross_attention_dim
+        
+        # Otherwise, inspect the first cross-attention layer
+        for module in self.diffusion_unet.modules():
+            if hasattr(module, 'to_k') and isinstance(module.to_k, nn.Linear):
+                # The input features of to_k is the cross_attention_dim
+                return module.to_k.in_features
+        
+        # Default fallback to 1024 (standard for FontDiffuser)
+        return 1024
+
     def forward(
         self,
         noisy_latents: torch.Tensor,
@@ -73,6 +105,15 @@ class FontDiffuserWithFST(nn.Module):
     ) -> dict[str, torch.Tensor]:
         """
         Forward pass with tensor shape tracking.
+
+        Tensor Shape Flow:
+        1. content_img: (B, 1, 96, 96) → content_encoder → content_img_feature: (B, C, H, W)
+        2. style_target_img: (B, 1, 96, 96) → style_encoder → orig_style_vec: (B, 1024)
+        3. style_source/target_img → mss_encoder → [(B, 64, 48, 48), ..., (B, 1024, 6, 6)]
+        4. FST module → transformation_features: (B, N_L + H*W, 1024) = (B, 292, 1024)
+        5. Projection → fst_condition: (B, 292, cross_attn_dim)
+        6. orig_style_vec → projection → (B, 1, cross_attn_dim)
+        7. Combined → (B, 293, cross_attn_dim) for U-Net cross-attention
 
         Args:
             noisy_latents: (B, 4, H, W) - noisy latent representations
@@ -89,67 +130,62 @@ class FontDiffuserWithFST(nn.Module):
         batch_size = noisy_latents.shape[0]
 
         # ========== 1. CONTENT ENCODING ==========
-        # Extract content features from the character to generate
         content_img_feature, content_residual_features = self.content_encoder(
             content_img
         )
         content_residual_features.append(content_img_feature)
 
-        # Extract content features from style reference image
         style_content_feature, style_content_res_features = self.content_encoder(
             style_target_img
         )
         style_content_res_features.append(style_content_feature)
 
-        # ========== 2. ORIGINAL STYLE ENCODING (for compatibility) ==========
-        # Keep original style encoder output for SCR loss and baseline features
+        # ========== 2. ORIGINAL STYLE ENCODING ==========
         orig_style_feat, orig_style_vec, orig_style_residuals = self.style_encoder(
             style_target_img
         )
-        # Reshape for cross-attention: (B, C, H, W) → (B, H*W, C)
-        B, C, H, W = orig_style_feat.shape
-        orig_style_hidden = orig_style_feat.permute(0, 2, 3, 1).reshape(B, H * W, C)
+        # orig_style_feat: (B, C, H, W) spatial features
+        # orig_style_vec: (B, 1024) global style vector
 
         # ========== 3. MULTI-SCALE STYLE ENCODING (MSSE) ==========
         source_style_features = self.mss_encoder(style_source_img)
         target_style_features = self.mss_encoder(style_target_img)
-        # Each: List of 5 tensors with shapes:
-        # [(B, 64, 48, 48), (B, 128, 24, 24), (B, 256, 12, 12),
-        #  (B, 512, 6, 6), (B, 1024, 6, 6)]
+        # Each: List[(B, 64, 48, 48), (B, 128, 24, 24), (B, 256, 12, 12),
+        #            (B, 512, 6, 6), (B, 1024, 6, 6)]
 
         # ========== 4. FONT STYLE TRANSFORMATION (FST) ==========
         transformation_features = self.fst_module(
             source_style_features, target_style_features
         )
-        # Shape: (B, N_L + H*W, 1024) = (B, 256 + 36, 1024) = (B, 292, 1024)
+        # Shape: (B, N_L + H*W, 1024) where N_L=256, H*W=36
+        # Result: (B, 292, 1024)
 
         # ========== 5. PREPARE U-NET CONDITIONS ==========
         # Project FST features to U-Net cross-attention dimension
         fst_condition = self.fst_projection(transformation_features)
-        # Shape: (B, 292, cross_attn_dim)
+        # Shape: (B, 292, cross_attn_dim) e.g., (B, 292, 1024)
 
-        # Project original style features for compatibility
+        # Project original style vector for compatibility
         orig_style_projected = self.original_style_projection(orig_style_vec)
-        # Shape: (B, cross_attn_dim)
-        orig_style_projected = orig_style_projected.unsqueeze(
-            1
-        )  # (B, 1, cross_attn_dim)
+        # Shape: (B, cross_attn_dim) → (B, 1024)
+        orig_style_projected = orig_style_projected.unsqueeze(1)
+        # Shape: (B, 1, cross_attn_dim) e.g., (B, 1, 1024)
 
         # Combine FST and original style features
-        # You can choose to concatenate or use separately
         combined_style_condition = torch.cat(
             [fst_condition, orig_style_projected], dim=1
         )
-        # Shape: (B, 293, cross_attn_dim)
+        # Shape: (B, 293, cross_attn_dim) e.g., (B, 293, 1024)
 
-        # ========== 6. PREPARE ENCODER HIDDEN STATES (FontDiffuser format) ==========
-        # FontDiffuser expects: [style_img_feature, content_residual_features,
-        #                        style_hidden_states, style_content_res_features]
+        # ========== 6. PREPARE ENCODER HIDDEN STATES ==========
+        # FontDiffuser U-Net expects a list:
+        # [style_img_feature, content_residual_features, 
+        #  style_hidden_states, style_content_res_features]
         encoder_hidden_states = [
-            orig_style_feat,  # For U-Net feature injection
-            content_residual_features,  # Content skip connections
-            combined_style_condition,  # Enhanced style condition with FST
-            style_content_res_features,  # Style content skip connections
+            orig_style_feat,              # (B, C, H, W) spatial style features
+            content_residual_features,    # List of content skip connections
+            combined_style_condition,     # (B, 293, cross_attn_dim) for cross-attention
+            style_content_res_features,   # List of style-content skip connections
         ]
 
         # ========== 7. DIFFUSION U-NET FORWARD ==========
@@ -181,20 +217,9 @@ class FontDiffuserWithFST(nn.Module):
         target_noise: torch.Tensor,
         reduction: str = "mean",
     ) -> dict[str, torch.Tensor]:
-        """
-        Compute loss components for training.
-
-        Args:
-            outputs: Dictionary from forward pass
-            target_noise: Ground truth noise to predict
-            reduction: 'mean' or 'sum'
-
-        Returns:
-            Dictionary of loss components
-        """
+        """Compute loss components for training."""
         losses = {}
 
-        # Main denoising loss (MSE between predicted and target noise)
         noise_pred = outputs["noise_pred"]
         if reduction == "mean":
             losses["noise_loss"] = nn.functional.mse_loss(noise_pred, target_noise)
@@ -203,7 +228,6 @@ class FontDiffuserWithFST(nn.Module):
                 noise_pred, target_noise, reduction="sum"
             )
 
-        # Offset loss (if applicable)
         offset_out_sum = outputs.get("offset_out_sum", 0)
         if isinstance(offset_out_sum, torch.Tensor):
             losses["offset_loss"] = (
@@ -212,11 +236,9 @@ class FontDiffuserWithFST(nn.Module):
         else:
             losses["offset_loss"] = torch.tensor(0.0, device=noise_pred.device)
 
-        # Total loss
         losses["total_loss"] = losses["noise_loss"] + 0.01 * losses["offset_loss"]
 
         return losses
-
 
 class FontDiffuserWithFSTWrapper(nn.Module):
     """
