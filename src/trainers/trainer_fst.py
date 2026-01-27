@@ -44,7 +44,7 @@ from src.tools.utils import (
 from src.trainers.training_config import TrainingConfig
 from src.trainers.trainer import FontDiffuserTrainer
 
-logger = logging.getLogger("FontDiffuserFSTTrainer")
+logger = logging.getLogger(__name__)
 
 
 class FontDiffuserFSTTrainer(FontDiffuserTrainer):
@@ -276,7 +276,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             train_dataset,
             shuffle=True,
             batch_size=self.config.train_batch_size,
-            collate_fn=CollateFNFST(verbose=False),
+            collate_fn=CollateFNFST(verbose=True),
             num_workers=getattr(self.args, "num_workers", 4),
             pin_memory=True,
             persistent_workers=True,

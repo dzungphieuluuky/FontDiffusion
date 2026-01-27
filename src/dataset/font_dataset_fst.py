@@ -11,7 +11,9 @@ from typing import List, Dict, Optional
 import torch
 from torch.utils.data import Dataset
 import torchvision.transforms as transforms
+import logging
 
+logger = logging.getLogger(__name__)
 
 def get_nonorm_transform(resolution):
     """Get transform without normalization."""
@@ -70,9 +72,12 @@ class FontDataset(Dataset):
         self.transforms = transforms
         self.nonorm_transforms = get_nonorm_transform(args.resolution)
 
-        print(
-            f"Dataset initialized: phase={phase}, use_fst={use_fst}, "
-            f"scr={scr}, total_samples={len(self.target_images)}"
+        logger.info(
+            f"Dataset initialized:\n "
+            f"Phase: {phase}\n"
+            f"Use_FST: {use_fst}\n"
+            f"SCR: {scr}\n"
+            f"Total samples: {len(self.target_images)}"
         )
 
     def get_path(self):
@@ -100,7 +105,7 @@ class FontDataset(Dataset):
                 images_related_style.append(img_path)
 
                 # Extract content for FST
-                # Assuming filename format: style+content.jpg
+                # Assuming filename format: style+content.png
                 try:
                     img_name = img.split(".")[0]
                     if "+" in img_name:
@@ -113,11 +118,11 @@ class FontDataset(Dataset):
                             img_path
                         )
                 except Exception as e:
-                    print(f"Warning: Could not parse filename {img}: {e}")
+                    logger.warning(f"Could not parse filename {img}: {e}")
 
             self.style_to_images[style] = images_related_style
 
-        print(
+        logger.info(
             f"Found {len(self.target_images)} target images across "
             f"{len(self.style_to_images)} styles"
         )
@@ -206,11 +211,11 @@ class FontDataset(Dataset):
         except ValueError:
             raise ValueError(
                 f"Invalid filename format: {target_image_name}. "
-                f"Expected format: 'style+content.jpg'"
+                f"Expected format: 'style+content.png'"
             )
 
         # Read content image
-        content_image_path = f"{self.root}/{self.phase}/ContentImage/{content}.jpg"
+        content_image_path = f"{self.root}/{self.phase}/ContentImage/{content}.png"
         if not os.path.exists(content_image_path):
             # Try alternative extensions
             for ext in [".png", ".jpeg", ".JPG", ".PNG"]:
@@ -279,7 +284,7 @@ class FontDataset(Dataset):
                 choose_index = style_list.index(choose_style)
                 style_list.pop(choose_index)
 
-                neg_path = f"{self.root}/train/TargetImage/{choose_style}/{choose_style}+{content}.jpg"
+                neg_path = f"{self.root}/train/TargetImage/{choose_style}/{choose_style}+{content}.png"
 
                 # Check if negative sample exists
                 if os.path.exists(neg_path):
