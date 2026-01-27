@@ -6,6 +6,7 @@ from PIL import Image
 from fontTools.ttLib import TTFont
 from pathlib import Path
 
+
 def is_char_in_font(font_path, char):
     TTFont_font = TTFont(font_path)
     cmap = TTFont_font["cmap"]
@@ -45,6 +46,7 @@ def ttf2im(font, char, fsize=128):
 
     return pil_im
 
+
 def print_font_glyph_counts(fonts_dir: Path | str) -> None:
     """
     Print the number of glyphs (supported Unicode characters) for each font in a directory.
@@ -55,6 +57,7 @@ def print_font_glyph_counts(fonts_dir: Path | str) -> None:
         Directory containing font files (.ttf, .otf).
     """
     from fontTools.ttLib import TTFont
+
     font_extensions = {".ttf", ".otf", ".ttf", ".otf"}
 
     font_files = [p for p in fonts_dir.iterdir() if p.suffix.lower() in font_extensions]

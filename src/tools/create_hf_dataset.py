@@ -78,7 +78,9 @@ class DatasetBuilder:
             raise ValueError(f"Checkpoint file not found: {checkpoint_path}")
 
         if not self.style_images_dir.exists():
-            raise ValueError(f"Style images directory not found: {self.style_images_dir}")
+            raise ValueError(
+                f"Style images directory not found: {self.style_images_dir}"
+            )
 
         logger.info("Directory structure validated successfully")
 

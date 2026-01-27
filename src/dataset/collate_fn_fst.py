@@ -31,11 +31,11 @@ class CollateFN(object):
         """
         self.return_tensors = return_tensors
         self.num_consistency_refs = num_consistency_refs
-    
+
     def __call__(self, batch: list[dict]) -> dict[str, torch.Tensor]:
         """
         Collate batch items.
-        
+
         Each batch item should contain:
         - target_img: Generated character
         - content_img: Content reference
@@ -48,7 +48,7 @@ class CollateFN(object):
         content_imgs = torch.stack([item["content_img"] for item in batch])
         style_source_imgs = torch.stack([item["style_source_img"] for item in batch])
         style_target_imgs = torch.stack([item["style_target_img"] for item in batch])
-        
+
         result = {
             "target_img": target_imgs,
             "content_img": content_imgs,
@@ -56,7 +56,7 @@ class CollateFN(object):
             "style_target_img": style_target_imgs,
             "style_img": style_target_imgs,  # Alias for compatibility
         }
-        
+
         # Collect consistency references if available
         if self.num_consistency_refs > 0:
             ref_content_imgs = []
@@ -64,9 +64,9 @@ class CollateFN(object):
                 refs = item.get("ref_content_imgs", [])
                 if len(refs) > 0:
                     # Take up to num_consistency_refs
-                    item_refs = refs[:self.num_consistency_refs]
+                    item_refs = refs[: self.num_consistency_refs]
                     ref_content_imgs.append(torch.stack(item_refs))
-            
+
             if len(ref_content_imgs) > 0:
                 # Stack across batch: (B, num_refs, C, H, W)
                 ref_content_imgs = torch.stack(ref_content_imgs)
@@ -74,9 +74,9 @@ class CollateFN(object):
                 result["ref_content_imgs"] = [
                     ref_content_imgs[:, i] for i in range(ref_content_imgs.shape[1])
                 ]
-        
+
         return result
-    
+
     def _collate_tensors(self, key: str, tensors: list[torch.Tensor]) -> torch.Tensor:
         """
         Collate a list of tensors, handling variable shapes.

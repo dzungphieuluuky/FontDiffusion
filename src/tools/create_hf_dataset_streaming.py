@@ -41,6 +41,7 @@ class DatasetConfig:
     spacing: int = 10
     num_workers: int = None  # None = auto-detect
     config_name: str = "streaming"
+
     def __post_init__(self):
         """Convert paths to Path if they're strings."""
         if isinstance(self.data_dir, str):
@@ -237,7 +238,9 @@ class DatasetBuilder:
             raise ValueError(f"Checkpoint file not found: {checkpoint_path}")
 
         if not self.style_images_dir.exists():
-            raise ValueError(f"Style images directory not found: {self.style_images_dir}")
+            raise ValueError(
+                f"Style images directory not found: {self.style_images_dir}"
+            )
 
         logger.info("Directory structure validated successfully")
 
@@ -278,7 +281,9 @@ class DatasetBuilder:
         checkpoint: dict = self._load_checkpoint()
         generations: list = checkpoint["generations"]
 
-        logger.info(f"Processing {len(generations)} samples with {self.config.num_workers} workers...")
+        logger.info(
+            f"Processing {len(generations)} samples with {self.config.num_workers} workers..."
+        )
 
         # Create partial function with fixed parameters
         process_func = partial(
@@ -294,14 +299,14 @@ class DatasetBuilder:
 
         # Process in batches using multiprocessing
         batch_size = self.config.batch_size
-        
+
         with Pool(processes=self.config.num_workers) as pool:
             for i in range(0, len(generations), batch_size):
-                batch = generations[i:i + batch_size]
-                
+                batch = generations[i : i + batch_size]
+
                 # Process batch in parallel
                 results = pool.map(process_func, batch)
-                
+
                 # Yield valid results
                 for sample in results:
                     if sample is not None:
@@ -371,7 +376,9 @@ class DatasetBuilder:
         Raises:
             ValueError: If no valid samples are found
         """
-        logger.info(f"Building dataset with streaming (multiprocessing={use_multiprocessing})...")
+        logger.info(
+            f"Building dataset with streaming (multiprocessing={use_multiprocessing})..."
+        )
 
         features = Features(
             {
@@ -387,7 +394,11 @@ class DatasetBuilder:
             }
         )
 
-        generator_func = self._generate_samples_parallel if use_multiprocessing else self._generate_samples
+        generator_func = (
+            self._generate_samples_parallel
+            if use_multiprocessing
+            else self._generate_samples
+        )
 
         dataset = Dataset.from_generator(
             generator_func,
@@ -408,7 +419,9 @@ class DatasetBuilder:
         Raises:
             ValueError: If no valid samples are found
         """
-        logger.info(f"Building dataset with batching (multiprocessing={use_multiprocessing})...")
+        logger.info(
+            f"Building dataset with batching (multiprocessing={use_multiprocessing})..."
+        )
 
         features = Features(
             {
@@ -438,7 +451,11 @@ class DatasetBuilder:
         }
 
         sample_count = 0
-        generator_func = self._generate_samples_parallel if use_multiprocessing else self._generate_samples
+        generator_func = (
+            self._generate_samples_parallel
+            if use_multiprocessing
+            else self._generate_samples
+        )
 
         for sample in generator_func():
             for key, value in sample.items():

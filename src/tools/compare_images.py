@@ -86,7 +86,7 @@ def resize_image(image: Image.Image, target_height: int) -> Image.Image:
 def get_image_files(directory: Path) -> list[Path]:
     """Get all image files from directory, sorted by name."""
     extensions = {".png", ".jpg", ".jpeg", ".bmp", ".tiff"}
-    
+
     files = [
         f for f in directory.iterdir() if f.is_file() and f.suffix.lower() in extensions
     ]
@@ -113,9 +113,7 @@ def match_images_by_name(
         for style_stem, style_path in style_dict.items():
             target_stem = f"{style_stem}+{char_stem}"
             if target_stem in target_dict:
-                matched.append(
-                    (content_path, style_path, target_dict[target_stem])
-                )
+                matched.append((content_path, style_path, target_dict[target_stem]))
     return matched
 
 
@@ -126,22 +124,26 @@ def match_images_by_index(
 ) -> list[tuple[Path, Path, Path]]:
     """Match images by index in sorted lists."""
     min_len = min(len(content_files), len(style_files), len(target_files))
-    return list(zip(content_files[:min_len], style_files[:min_len], target_files[:min_len]))
+    return list(
+        zip(content_files[:min_len], style_files[:min_len], target_files[:min_len])
+    )
 
 
 def create_comparison_worker(args_tuple):
     """
     Worker function for creating a comparison image.
     Designed to be used with multiprocessing.
-    
+
     Args:
         args_tuple: Tuple of (content_path, style_path, target_path, output_path, resize_height, spacing)
-    
+
     Returns:
         Tuple of (success: bool, output_path: Path, error_msg: Optional[str])
     """
-    content_path, style_path, target_path, output_path, resize_height, spacing = args_tuple
-    
+    content_path, style_path, target_path, output_path, resize_height, spacing = (
+        args_tuple
+    )
+
     try:
         # Load images
         content_img = Image.open(content_path).convert("RGB")
@@ -160,7 +162,9 @@ def create_comparison_worker(args_tuple):
         total_height = resize_height
 
         # Create output image
-        comparison = Image.new("RGB", (total_width, total_height), color=(255, 255, 255))
+        comparison = Image.new(
+            "RGB", (total_width, total_height), color=(255, 255, 255)
+        )
 
         # Paste images
         x_offset = 0
@@ -206,9 +210,16 @@ def main():
     style_files = get_image_files(style_dir)
     target_files = []
 
-    style_images_list = ["thanh1", "thanh2", "thanh3", "thanh4",
-                         "thanh5", "thanh6", "thanh7", "thanh8",
-                        ]
+    style_images_list = [
+        "thanh1",
+        "thanh2",
+        "thanh3",
+        "thanh4",
+        "thanh5",
+        "thanh6",
+        "thanh7",
+        "thanh8",
+    ]
     for style_image in style_images_list:
         style_subdir = target_dir / style_image
         if not style_subdir.exists():
@@ -237,14 +248,16 @@ def main():
     for content_path, style_path, target_path in matched:
         output_name = f"comp_{target_path.stem}.png"
         output_path = output_dir / output_name
-        work_items.append((
-            content_path,
-            style_path,
-            target_path,
-            output_path,
-            args.resize_height,
-            args.spacing,
-        ))
+        work_items.append(
+            (
+                content_path,
+                style_path,
+                target_path,
+                output_path,
+                args.resize_height,
+                args.spacing,
+            )
+        )
 
     # Determine number of workers
     n_workers = args.workers if args.workers else mp.cpu_count()
@@ -253,11 +266,13 @@ def main():
     # Process with multiprocessing
     success_count = 0
     error_count = 0
-    
+
     with ProcessPoolExecutor(max_workers=n_workers) as executor:
         # Submit all tasks
-        futures = {executor.submit(create_comparison_worker, item): item for item in work_items}
-        
+        futures = {
+            executor.submit(create_comparison_worker, item): item for item in work_items
+        }
+
         # Process results as they complete
         for future in as_completed(futures):
             success, output_path, error_msg = future.result()
@@ -265,7 +280,9 @@ def main():
                 logger.info(f"Created comparison: {output_path.name}")
                 success_count += 1
             else:
-                logger.error(f"Failed to create comparison for {output_path.name}: {error_msg}")
+                logger.error(
+                    f"Failed to create comparison for {output_path.name}: {error_msg}"
+                )
                 error_count += 1
 
     logger.info(f"Done! Created {success_count} comparison images in {output_dir}")

@@ -6,18 +6,20 @@ import torch.nn.functional as F
 class MultiScaleStyleEncoder(nn.Module):
     """Multi-Scale Style Encoder (MSSE) for extracting style features at different scales."""
 
-    def __init__(self, in_channels: int = 3, base_channels: int = 64, num_scales: int = 5):
+    def __init__(
+        self, in_channels: int = 3, base_channels: int = 64, num_scales: int = 5
+    ):
         super().__init__()
         self.num_scales = num_scales
-        
+
         # Store the actual output channels for each scale
         self.output_channels = []
-        
+
         self.encoders = nn.ModuleList()
         for i in range(num_scales):
             out_channels = base_channels * (2**i)  # 64, 128, 256, 512, 1024
             self.output_channels.append(out_channels)
-            
+
             encoder = nn.Sequential(
                 nn.Conv2d(in_channels, out_channels // 2, 3, 1, 1),
                 nn.ReLU(),

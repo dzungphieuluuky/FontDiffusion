@@ -17,6 +17,7 @@ from src.tools.utilities import HFTqdm
 # Optional dependencies
 try:
     import lpips
+
     LPIPS_AVAILABLE = True
 except ImportError:
     LPIPS_AVAILABLE = False
@@ -24,6 +25,7 @@ except ImportError:
 
 try:
     from pytorch_fid import fid_score
+
     FID_AVAILABLE = True
 except ImportError:
     FID_AVAILABLE = False
@@ -31,6 +33,7 @@ except ImportError:
 
 try:
     from skimage.metrics import structural_similarity as ssim
+
     SSIM_AVAILABLE = True
 except ImportError:
     SSIM_AVAILABLE = False
@@ -38,6 +41,7 @@ except ImportError:
 
 try:
     import cv2
+
     CV2_AVAILABLE = True
 except ImportError:
     CV2_AVAILABLE = False
@@ -45,8 +49,7 @@ except ImportError:
 
 
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger("FolderEvaluator")
 
@@ -169,7 +172,9 @@ class DatasetFolder:
         if not self.target_base_dir.exists():
             raise ValueError(f"TargetImage directory not found: {self.target_base_dir}")
 
-        self.styles: list[str] = sorted([d.name for d in self.target_base_dir.iterdir() if d.is_dir()])
+        self.styles: list[str] = sorted(
+            [d.name for d in self.target_base_dir.iterdir() if d.is_dir()]
+        )
         self.content_images: dict[str, Path] = self._load_content_images()
 
     def _load_content_images(self) -> dict[str, Path]:
@@ -318,7 +323,7 @@ def evaluate_folders(
     else:
         common_styles = styles
 
-    logger.info(f"\n{'='*60}")
+    logger.info(f"\n{'=' * 60}")
     logger.info(f"{'Evaluation Results':^60}")
     logger.info("=" * 60)
     logger.info(f"Folder1: {folder1_name} ({folder1.root_dir})")
@@ -468,7 +473,9 @@ def evaluate_folders(
 
             if style_dir_1.exists() and style_dir_2.exists():
                 logger.info(f"  Computing FID for {style}...")
-                fid_value: float = evaluator.compute_fid(str(style_dir_1), str(style_dir_2))
+                fid_value: float = evaluator.compute_fid(
+                    str(style_dir_1), str(style_dir_2)
+                )
                 if fid_value >= 0:
                     style_results["fid"] = fid_value
                     logger.info(f"  FID: {fid_value:.4f}")
@@ -476,7 +483,7 @@ def evaluate_folders(
         results["per_style_metrics"][style] = style_results
 
     # Aggregate global metrics
-    logger.info(f"\n{'='*60}")
+    logger.info(f"\n{'=' * 60}")
     logger.info(f"{'AGGREGATE METRICS':^60}")
     logger.info("=" * 60)
 
@@ -511,7 +518,9 @@ def evaluate_folders(
             "median": float(np.median(all_histogram)),
             "samples": len(all_histogram),
         }
-        logger.info(f"Histogram Distance: mean={results['metrics']['histogram_distance']['mean']:.4f}")
+        logger.info(
+            f"Histogram Distance: mean={results['metrics']['histogram_distance']['mean']:.4f}"
+        )
 
     logger.info("=" * 60)
 
@@ -622,8 +631,12 @@ def main() -> None:
         folder1 = DatasetFolder(args.folder1)
         folder2 = DatasetFolder(args.folder2)
 
-        logger.info(f"  Folder1: {len(folder1.content_images)} content images, {len(folder1.styles)} styles")
-        logger.info(f"  Folder2: {len(folder2.content_images)} content images, {len(folder2.styles)} styles")
+        logger.info(
+            f"  Folder1: {len(folder1.content_images)} content images, {len(folder1.styles)} styles"
+        )
+        logger.info(
+            f"  Folder2: {len(folder2.content_images)} content images, {len(folder2.styles)} styles"
+        )
 
         # Initialize evaluator
         logger.info(f"\n🔧 Initializing evaluator on {args.device}...")
@@ -657,7 +670,7 @@ def main() -> None:
             logger.info(f"📊 Generating plots...")
             plot_results(results, args.output_dir)
 
-        logger.info(f"\n{'='*60}")
+        logger.info(f"\n{'=' * 60}")
         logger.info(f"✅ Evaluation complete!")
         logger.info(f"Results saved to: {args.output_dir}")
         logger.info("=" * 60)

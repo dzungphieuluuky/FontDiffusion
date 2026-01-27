@@ -19,10 +19,10 @@ logger = logging.getLogger(__name__)
 def count_parameters(model: nn.Module) -> tuple[int, int]:
     """
     Count total and trainable parameters in a model.
-    
+
     Args:
         model: PyTorch model
-        
+
     Returns:
         tuple of (total_params, trainable_params)
     """
@@ -34,33 +34,33 @@ def count_parameters(model: nn.Module) -> tuple[int, int]:
 def log_model_parameters(model: nn.Module, model_name: str = "Model") -> None:
     """
     Log parameter counts for a model and its submodules.
-    
+
     Args:
         model: PyTorch model to analyze
         model_name: Name for logging
     """
     total, trainable = count_parameters(model)
-    logger.info(f"\n{'='*80}")
+    logger.info(f"\n{'=' * 80}")
     logger.info(f"{model_name} Parameter Summary")
-    logger.info(f"{'='*80}")
+    logger.info(f"{'=' * 80}")
     logger.info(f"Total parameters: {total:,}")
     logger.info(f"Trainable parameters: {trainable:,}")
     logger.info(f"Non-trainable parameters: {total - trainable:,}")
-    
+
     # Log submodule details
-    if hasattr(model, 'named_children'):
+    if hasattr(model, "named_children"):
         logger.info(f"\nSubmodule breakdown:")
-        logger.info(f"{'-'*80}")
+        logger.info(f"{'-' * 80}")
         logger.info(f"{'Module Name':<40} {'Total Params':>15} {'Trainable':>15}")
-        logger.info(f"{'-'*80}")
-        
+        logger.info(f"{'-' * 80}")
+
         for name, module in model.named_children():
             mod_total, mod_trainable = count_parameters(module)
             logger.info(f"{name:<40} {mod_total:>15,} {mod_trainable:>15,}")
-        
-        logger.info(f"{'-'*80}")
-    
-    logger.info(f"{'='*80}\n")
+
+        logger.info(f"{'-' * 80}")
+
+    logger.info(f"{'=' * 80}\n")
 
 
 class FontDiffuserWithFST(nn.Module):
@@ -96,42 +96,44 @@ class FontDiffuserWithFST(nn.Module):
             query_dim=query_dim,
             num_scale_features=num_scales,
         )
-        
+
         # Determine U-Net's cross-attention dimension
         cross_attn_dim = self._get_unet_cross_attention_dim()
-        
+
         # Project FST output to U-Net cross-attention dimension
         self.fst_projection = nn.Linear(feature_channels[-1], cross_attn_dim)
-        
+
         # Project original style vector (1024-dim) to cross-attention dimension
         self.original_style_projection = nn.Linear(1024, cross_attn_dim)
 
     def _get_unet_cross_attention_dim(self) -> int:
         """
         Infer the cross-attention dimension from the U-Net architecture.
-        
+
         Returns:
             int: Cross-attention dimension (typically 1024 for FontDiffuser)
         """
         # Try to get from config if available
-        if hasattr(self.diffusion_unet, 'config') and hasattr(self.diffusion_unet.config, 'cross_attention_dim'):
+        if hasattr(self.diffusion_unet, "config") and hasattr(
+            self.diffusion_unet.config, "cross_attention_dim"
+        ):
             return self.diffusion_unet.config.cross_attention_dim
-        
+
         # Otherwise, inspect the first cross-attention layer
         for module in self.diffusion_unet.modules():
-            if hasattr(module, 'to_k') and isinstance(module.to_k, nn.Linear):
+            if hasattr(module, "to_k") and isinstance(module.to_k, nn.Linear):
                 # The input features of to_k is the cross_attention_dim
                 return module.to_k.in_features
-        
+
         # Default fallback to 1024 (standard for FontDiffuser)
         return 1024
 
     def log_model_info(self) -> None:
         """Log detailed parameter information for the FST model and its components."""
-        logger.info("\n" + "="*80)
+        logger.info("\n" + "=" * 80)
         logger.info("FontDiffuserWithFST Model Architecture")
-        logger.info("="*80)
-        
+        logger.info("=" * 80)
+
         # Log individual component parameters
         components = [
             ("Content Encoder", self.content_encoder),
@@ -142,36 +144,36 @@ class FontDiffuserWithFST(nn.Module):
             ("FST Projection", self.fst_projection),
             ("Original Style Projection", self.original_style_projection),
         ]
-        
+
         logger.info("\nComponent Parameters:")
-        logger.info("-"*80)
+        logger.info("-" * 80)
         logger.info(f"{'Component':<45} {'Total':>15} {'Trainable':>15}")
-        logger.info("-"*80)
-        
+        logger.info("-" * 80)
+
         total_all = 0
         trainable_all = 0
-        
+
         for name, component in components:
             total, trainable = count_parameters(component)
             total_all += total
             trainable_all += trainable
             frozen_marker = " [FROZEN]" if trainable == 0 and total > 0 else ""
             logger.info(f"{name:<45} {total:>15,} {trainable:>15,}{frozen_marker}")
-        
-        logger.info("-"*80)
+
+        logger.info("-" * 80)
         logger.info(f"{'TOTAL':<45} {total_all:>15,} {trainable_all:>15,}")
         logger.info(f"{'Non-trainable':<45} {'':<15} {total_all - trainable_all:>15,}")
-        logger.info("="*80 + "\n")
-        
+        logger.info("=" * 80 + "\n")
+
         # Log FST-specific details
         logger.info("FST Module Details:")
-        logger.info("-"*80)
+        logger.info("-" * 80)
         logger.info(f"  Feature channels: {self.fst_module.feature_channels}")
         logger.info(f"  Num queries: {self.fst_module.num_queries}")
         logger.info(f"  Query dim: {self.fst_module.query_dim}")
         logger.info(f"  Num scales: {self.fst_module.num_scale_features}")
         logger.info(f"  Cross-attention dim: {self._get_unet_cross_attention_dim()}")
-        logger.info("="*80 + "\n")
+        logger.info("=" * 80 + "\n")
 
     def forward(
         self,
@@ -259,13 +261,13 @@ class FontDiffuserWithFST(nn.Module):
 
         # ========== 6. PREPARE ENCODER HIDDEN STATES ==========
         # FontDiffuser U-Net expects a list:
-        # [style_img_feature, content_residual_features, 
+        # [style_img_feature, content_residual_features,
         #  style_hidden_states, style_content_res_features]
         encoder_hidden_states = [
-            orig_style_feat,              # (B, C, H, W) spatial style features
-            content_residual_features,    # List of content skip connections
-            combined_style_condition,     # (B, 293, cross_attn_dim) for cross-attention
-            style_content_res_features,   # List of style-content skip connections
+            orig_style_feat,  # (B, C, H, W) spatial style features
+            content_residual_features,  # List of content skip connections
+            combined_style_condition,  # (B, 293, cross_attn_dim) for cross-attention
+            style_content_res_features,  # List of style-content skip connections
         ]
 
         # ========== 7. DIFFUSION U-NET FORWARD ==========

@@ -65,16 +65,16 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         self.fst_query_dim = getattr(args, "fst_query_dim", 128)
         self.fst_num_scales = getattr(args, "fst_num_scales", 5)
         self.freeze_original_encoders = getattr(args, "freeze_original_encoders", True)
-        
+
         # Consistency loss parameters
         self.use_consistency_loss = getattr(args, "use_consistency_loss", True)
         self.consistency_weight = getattr(args, "consistency_weight", 0.1)
         self.consistency_loss_type = getattr(args, "consistency_loss_type", "mse")
         self.consistency_num_pairs = getattr(args, "consistency_num_pairs", 2)
-        
+
         # Call parent init
         super().__init__(args)
-        
+
         # Setup consistency loss after model is created
         if self.use_fst and self.use_consistency_loss:
             self.combined_loss = CombinedFSTLoss(
@@ -83,7 +83,9 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 use_query_only=True,
                 num_queries=self.fst_num_queries,
             )
-            logger.info(f"Consistency loss enabled (weight={self.consistency_weight}, type={self.consistency_loss_type})")
+            logger.info(
+                f"Consistency loss enabled (weight={self.consistency_weight}, type={self.consistency_loss_type})"
+            )
 
     def _parse_feature_channels(self, channels_str: str) -> list[int]:
         """Parse feature channels from comma-separated string."""
@@ -136,7 +138,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 query_dim=self.fst_query_dim,
                 num_scales=self.fst_num_scales,
             )
-            
+
             # Log model architecture and parameters
             self.model.log_model_info()
         else:
@@ -154,7 +156,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             for param in self.model.diffusion_unet.parameters():
                 param.requires_grad = False
             logger.info("✓ Original encoders frozen")
-            
+
             # Log updated trainable parameters after freezing
             logger.info("\nAfter freezing original encoders:")
             self.model.log_model_info()
@@ -386,24 +388,24 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
     ) -> tuple[torch.Tensor, dict[str, float]]:
         """
         Single training step with FST-specific handling.
-        
+
         For consistency loss, we need multiple reference characters with the same
         source→target style pair but different content.
         """
         self.model.train()
-        
+
         # Extract data from batch
         target_img = samples["target_img"]
         style_img = samples["style_img"]
         content_img = samples["content_img"]
-        
+
         # Additional reference images for consistency (if available)
         # These should have different content but same source/target styles
         ref_content_imgs = samples.get("ref_content_imgs", [])
-        
+
         batch_size = target_img.shape[0]
         device = target_img.device
-        
+
         # Sample random timesteps
         timesteps = torch.randint(
             0,
@@ -411,25 +413,25 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             (batch_size,),
             device=device,
         ).long()
-        
+
         # Generate random noise
         noise = torch.randn_like(target_img)
-        
+
         # Add noise to target image
         noisy_latents = self.noise_scheduler.add_noise(target_img, noise, timesteps)
-        
+
         # Apply classifier-free guidance dropout if enabled
         if self.cfg_drop_prob > 0:
             content_img, style_img = self.apply_classifier_free_guidance(
                 content_img, style_img, self.cfg_drop_prob
             )
-        
+
         # Forward pass
         if self.use_fst:
             # For FST model, we need source and target style images
             # Assuming style_img is the target and we have a source style reference
             style_source_img = samples.get("style_source_img", style_img)
-            
+
             outputs = self.model(
                 noisy_latents=noisy_latents,
                 timestep=timesteps,
@@ -439,14 +441,14 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 content_encoder_downsample_size=self.content_encoder_downsample_size,
                 return_dict=True,
             )
-            
+
             # Collect transformation features for consistency loss
             transformation_features_list = [outputs["transformation_features"]]
-            
+
             # Process additional reference images if available
             if len(ref_content_imgs) > 0 and self.use_consistency_loss:
                 num_refs = min(len(ref_content_imgs), self.consistency_num_pairs - 1)
-                
+
                 for ref_content in ref_content_imgs[:num_refs]:
                     # Use same style pair but different content
                     ref_outputs = self.model(
@@ -461,7 +463,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                     transformation_features_list.append(
                         ref_outputs["transformation_features"]
                     )
-            
+
             # Compute loss with consistency
             if self.use_consistency_loss and len(transformation_features_list) >= 2:
                 loss_dict = self.combined_loss(
@@ -482,18 +484,25 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 content_img,
                 self.content_encoder_downsample_size,
             )
-            
+
             loss_dict = {
                 "noise_loss": torch.nn.functional.mse_loss(noise_pred, noise),
-                "offset_loss": offset_out_sum.mean() if isinstance(offset_out_sum, torch.Tensor) else torch.tensor(0.0, device=device),
+                "offset_loss": offset_out_sum.mean()
+                if isinstance(offset_out_sum, torch.Tensor)
+                else torch.tensor(0.0, device=device),
             }
-            loss_dict["total_loss"] = loss_dict["noise_loss"] + 0.01 * loss_dict["offset_loss"]
-        
+            loss_dict["total_loss"] = (
+                loss_dict["noise_loss"] + 0.01 * loss_dict["offset_loss"]
+            )
+
         loss = loss_dict["total_loss"]
-        
+
         # Convert to float for logging
-        loss_dict_float = {k: v.item() if isinstance(v, torch.Tensor) else v for k, v in loss_dict.items()}
-        
+        loss_dict_float = {
+            k: v.item() if isinstance(v, torch.Tensor) else v
+            for k, v in loss_dict.items()
+        }
+
         return loss, loss_dict_float
 
     def save_checkpoint(self, is_final: bool = False):

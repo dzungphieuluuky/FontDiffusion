@@ -7,7 +7,7 @@ import torch.nn as nn
 
 class CrossAttentionBlock(nn.Module):
     """Cross-attention block with projection layers for different dimensions."""
-    
+
     def __init__(
         self,
         query_dim: int,
@@ -19,25 +19,22 @@ class CrossAttentionBlock(nn.Module):
         super().__init__()
         self.num_heads = num_heads
         self.head_dim = query_dim // num_heads
-        self.scale = self.head_dim ** -0.5
-        
+        self.scale = self.head_dim**-0.5
+
         # Projections for queries, keys, and values
         self.to_q = nn.Linear(query_dim, query_dim)
         self.to_k = nn.Linear(key_dim, query_dim)  # Project to query_dim
         self.to_v = nn.Linear(value_dim, query_dim)  # Project to query_dim
-        
+
         self.proj_out = nn.Linear(query_dim, query_dim)
         self.dropout = nn.Dropout(dropout)
-        
+
         # Layer normalization
         self.norm_q = nn.LayerNorm(query_dim)
         self.norm_kv = nn.LayerNorm(key_dim)
-        
+
     def forward(
-        self, 
-        query: torch.Tensor,
-        key: torch.Tensor, 
-        value: torch.Tensor
+        self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
     ) -> torch.Tensor:
         """
         Args:
@@ -49,37 +46,49 @@ class CrossAttentionBlock(nn.Module):
         """
         B, N_q, _ = query.shape
         _, N_kv, _ = key.shape
-        
+
         # Normalize inputs
         query = self.norm_q(query)
         key = self.norm_kv(key)
-        
+
         # Project to q, k, v
-        q = self.to_q(query).reshape(B, N_q, self.num_heads, self.head_dim).transpose(1, 2)
-        k = self.to_k(key).reshape(B, N_kv, self.num_heads, self.head_dim).transpose(1, 2)
-        v = self.to_v(value).reshape(B, N_kv, self.num_heads, self.head_dim).transpose(1, 2)
-        
+        q = (
+            self.to_q(query)
+            .reshape(B, N_q, self.num_heads, self.head_dim)
+            .transpose(1, 2)
+        )
+        k = (
+            self.to_k(key)
+            .reshape(B, N_kv, self.num_heads, self.head_dim)
+            .transpose(1, 2)
+        )
+        v = (
+            self.to_v(value)
+            .reshape(B, N_kv, self.num_heads, self.head_dim)
+            .transpose(1, 2)
+        )
+
         # Attention: (B, num_heads, N_q, head_dim) @ (B, num_heads, head_dim, N_kv)
         attn = (q @ k.transpose(-2, -1)) * self.scale
         attn = attn.softmax(dim=-1)
         attn = self.dropout(attn)
-        
+
         # Apply attention to values
         out = (attn @ v).transpose(1, 2).reshape(B, N_q, -1)
         out = self.proj_out(out)
-        
+
         return out
 
 
 class SelfAttentionBlock(nn.Module):
     """Self-attention block for feature fusion."""
-    
+
     def __init__(self, dim: int, num_heads: int = 8, dropout: float = 0.0):
         super().__init__()
         self.norm = nn.LayerNorm(dim)
         self.attn = SelfAttention(dim, num_heads)
         self.dropout = nn.Dropout(dropout)
-        
+
         # Feed-forward network
         self.norm_ffn = nn.LayerNorm(dim)
         self.ffn = nn.Sequential(
@@ -89,7 +98,7 @@ class SelfAttentionBlock(nn.Module):
             nn.Linear(dim * 4, dim),
             nn.Dropout(dropout),
         )
-        
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
@@ -99,10 +108,10 @@ class SelfAttentionBlock(nn.Module):
         """
         # Self-attention with residual
         x = x + self.dropout(self.attn(self.norm(x)))
-        
+
         # FFN with residual
         x = x + self.ffn(self.norm_ffn(x))
-        
+
         return x
 
 
@@ -138,22 +147,16 @@ class FontStyleTransformationModule(nn.Module):
             blocks = nn.ModuleList()
             for _ in range(num_cross_attn_blocks):
                 blocks.append(
-                    CrossAttentionBlock(
-                        query_dim=query_dim, 
-                        key_dim=ch, 
-                        value_dim=ch
-                    )
+                    CrossAttentionBlock(query_dim=query_dim, key_dim=ch, value_dim=ch)
                 )
             self.cross_attn_blocks.append(blocks)
-        
+
         # Self-attention blocks for fusion (Eq. 7)
         self.self_attn_blocks = nn.ModuleList()
         concat_dim = query_dim * num_scale_features
         for _ in range(num_self_attn_blocks):
-            self.self_attn_blocks.append(
-                SelfAttentionBlock(dim=concat_dim)
-            )
-        
+            self.self_attn_blocks.append(SelfAttentionBlock(dim=concat_dim))
+
         # MLP to adjust concatenated features to final dimension
         final_dim = feature_channels[-1]  # Use last scale's channel count
         self.mlp_channel_adjust = nn.Sequential(
@@ -161,7 +164,7 @@ class FontStyleTransformationModule(nn.Module):
             nn.ReLU(),
             nn.Linear(final_dim * 2, final_dim),
         )
-        
+
         # Projection for residual connection (Eq. 9)
         self.residual_proj = nn.Linear(final_dim, final_dim)
 
@@ -179,7 +182,7 @@ class FontStyleTransformationModule(nn.Module):
         # Validate input dimensions
         assert len(source_features) == len(target_features) == self.num_scale_features
         assert len(source_features) == len(self.feature_channels)
-        
+
         batch_size = source_features[0].shape[0]
         queries = repeat(self.learnable_queries, "n d -> b n d", b=batch_size)
 
@@ -190,13 +193,13 @@ class FontStyleTransformationModule(nn.Module):
             # Validate feature dimensions match expected channels
             expected_channels = self.feature_channels[i]
             actual_channels = f_src.shape[1]
-            
+
             if actual_channels != expected_channels:
                 raise ValueError(
                     f"Scale {i}: Expected {expected_channels} channels, got {actual_channels}. "
                     f"Source shape: {f_src.shape}, Target shape: {f_tgt.shape}"
                 )
-            
+
             # Add learnable positional encoding (before Eq. 5)
             pe = self.pos_encodings[i]
             f_src = f_src + pe
@@ -246,7 +249,7 @@ class FontStyleTransformationModule(nn.Module):
     def _apply_cross_attention(self, scale_idx: int, Q, K, V):
         """Apply cross-attention blocks for the specified scale."""
         blocks = self.cross_attn_blocks[scale_idx]
-        
+
         result = Q
         for block in blocks:
             result = result + block(result, K, V)  # Residual connection
