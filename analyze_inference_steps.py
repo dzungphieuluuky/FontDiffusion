@@ -311,7 +311,7 @@ class InferenceStepsAnalyzer:
         output_dir.mkdir(parents=True, exist_ok=True)
         
         # Collect metrics per step
-        steps_metrics: Dict[int, Dict[str, List[float]]] = defaultdict(lambda: defaultdict(list))
+        steps_metrics: Dict[int, Dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
         
         for metric_name in self.metrics_data:
             for (steps1, steps2), value in self.metrics_data[metric_name].items():
@@ -322,6 +322,10 @@ class InferenceStepsAnalyzer:
         
         fig, axes = plt.subplots(2, 2, figsize=(14, 10))
         axes = axes.flatten()
+        
+        # Normalize steps for colormap (0-1 range)
+        steps_normalized = np.linspace(0, 1, len(steps_list))
+        step_to_color = {step: steps_normalized[i] for i, step in enumerate(steps_list)}
         
         # For each metric, plot quality vs speed (relative inference time)
         metric_info = {
@@ -336,10 +340,10 @@ class InferenceStepsAnalyzer:
             
             quality_scores = []
             relative_times = []
+            colors = []
             labels = []
             
             min_steps = min(steps_list)
-            max_steps = max(steps_list)
             
             for step in steps_list:
                 if metric_name in steps_metrics[step]:
@@ -347,14 +351,30 @@ class InferenceStepsAnalyzer:
                     quality_scores.append(np.mean(values))
                     # Relative inference time (normalized to min_steps)
                     relative_times.append(step / min_steps)
+                    colors.append(step_to_color[step])
                     labels.append(str(step))
             
             # Scatter plot with annotations
-            scatter = ax.scatter(relative_times, quality_scores, s=200, alpha=0.6, c=steps_list, cmap='viridis')
+            scatter = ax.scatter(
+                relative_times, 
+                quality_scores, 
+                s=200, 
+                alpha=0.6, 
+                c=colors,  # Normalized 0-1 values
+                cmap='viridis',
+                edgecolors='black',
+                linewidth=1
+            )
             
             for i, label in enumerate(labels):
-                ax.annotate(label, (relative_times[i], quality_scores[i]), 
-                           xytext=(5, 5), textcoords='offset points', fontsize=9)
+                ax.annotate(
+                    label, 
+                    (relative_times[i], quality_scores[i]), 
+                    xytext=(5, 5), 
+                    textcoords='offset points', 
+                    fontsize=9,
+                    fontweight='bold'
+                )
             
             ax.set_xlabel('Relative Inference Time (normalized to min steps)', fontweight='bold')
             ax.set_ylabel(info['display'], fontweight='bold')
@@ -371,7 +391,7 @@ class InferenceStepsAnalyzer:
         plt.close()
         
         print(f"✓ Saved: {output_file.name}\n")
-    
+            
     def export_to_csv(self, output_dir: Path) -> None:
         """Export all metrics to CSV."""
         print("💾 Exporting to CSV...\n")
