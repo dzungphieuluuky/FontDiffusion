@@ -13,7 +13,6 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
 
-
 warnings.filterwarnings("ignore")
 
 
@@ -1133,9 +1132,7 @@ class EvaluationAnalyzer:
             badge_class = (
                 "badge-success"
                 if stats.cv < 10
-                else "badge-warning"
-                if stats.cv < 25
-                else "badge-danger"
+                else "badge-warning" if stats.cv < 25 else "badge-danger"
             )
 
             html += f"""

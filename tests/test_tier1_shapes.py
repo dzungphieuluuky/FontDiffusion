@@ -44,9 +44,9 @@ class TestMultiScaleStyleEncoderShapes:
             features = msse(x)
 
         # Check number of scales
-        assert len(features) == num_scales, (
-            f"Expected {num_scales} scales, got {len(features)}"
-        )
+        assert (
+            len(features) == num_scales
+        ), f"Expected {num_scales} scales, got {len(features)}"
 
         # Check each feature scale
         current_spatial = resolution
@@ -125,9 +125,9 @@ class TestFSTModuleShapes:
         assert output.shape[2] == 1024, "Output channel should be 1024"
         # N_L + H*W where H=W=3 (96 -> 48 -> 24 -> 12 -> 6 -> 3)
         expected_seq_len = num_queries + 9  # 3*3 spatial at last scale
-        assert output.shape[1] == expected_seq_len, (
-            f"Sequence length mismatch: got {output.shape[1]}, expected {expected_seq_len}"
-        )
+        assert (
+            output.shape[1] == expected_seq_len
+        ), f"Sequence length mismatch: got {output.shape[1]}, expected {expected_seq_len}"
 
         assert_no_nan(output, "FST output")
 
@@ -207,9 +207,12 @@ class TestResidualBlockShapes:
             output = block(x)
 
         expected_spatial = 96 // 2 if downsample else 96
-        assert output.shape == (2, out_channels, expected_spatial, expected_spatial), (
-            f"Shape mismatch: got {output.shape}"
-        )
+        assert output.shape == (
+            2,
+            out_channels,
+            expected_spatial,
+            expected_spatial,
+        ), f"Shape mismatch: got {output.shape}"
         assert_no_nan(output, "ResidualBlock output")
 
 
@@ -299,9 +302,9 @@ class TestGradientExplosion:
 
         # Check that gradients are finite
         for param in model.parameters():
-            assert torch.isfinite(param.grad).all(), (
-                f"Gradient explosion detected: {param.grad}"
-            )
+            assert torch.isfinite(
+                param.grad
+            ).all(), f"Gradient explosion detected: {param.grad}"
 
 
 class TestBatchSizeVariability:

@@ -487,9 +487,11 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
 
             loss_dict = {
                 "noise_loss": torch.nn.functional.mse_loss(noise_pred, noise),
-                "offset_loss": offset_out_sum.mean()
-                if isinstance(offset_out_sum, torch.Tensor)
-                else torch.tensor(0.0, device=device),
+                "offset_loss": (
+                    offset_out_sum.mean()
+                    if isinstance(offset_out_sum, torch.Tensor)
+                    else torch.tensor(0.0, device=device)
+                ),
             }
             loss_dict["total_loss"] = (
                 loss_dict["noise_loss"] + 0.01 * loss_dict["offset_loss"]

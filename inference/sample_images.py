@@ -153,9 +153,9 @@ class FontDiffuserOptimized:
 
         # Load Content Image (File path OR Character generation)
         if args.character_input:
-            assert args.content_character is not None, (
-                "The content_character should not be None."
-            )
+            assert (
+                args.content_character is not None
+            ), "The content_character should not be None."
             if not is_char_in_font(
                 font_path=args.ttf_path, char=args.content_character
             ):

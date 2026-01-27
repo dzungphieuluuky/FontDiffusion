@@ -95,9 +95,9 @@ class TestOverfitSingleBatch:
         print(f"Initial loss: {initial_loss:.6f}, Final loss: {final_loss:.6f}")
 
         assert final_loss < initial_loss, "Loss did not decrease!"
-        assert loss_reduction > 0.5, (
-            f"Loss reduction ({loss_reduction:.2%}) should be > 50% for overfit test"
-        )
+        assert (
+            loss_reduction > 0.5
+        ), f"Loss reduction ({loss_reduction:.2%}) should be > 50% for overfit test"
 
     def test_encoder_overfits_batch(
         self, device, simple_encoder, optimizer_factory, loss_fn
@@ -129,9 +129,9 @@ class TestOverfitSingleBatch:
         print(f"\nEncoder loss reduction: {loss_reduction:.2%}")
 
         assert final_loss < initial_loss, "Encoder loss did not decrease!"
-        assert loss_reduction > 0.3, (
-            f"Encoder loss reduction ({loss_reduction:.2%}) should be > 30%"
-        )
+        assert (
+            loss_reduction > 0.3
+        ), f"Encoder loss reduction ({loss_reduction:.2%}) should be > 30%"
 
     def test_batch_norm_training_mode(self, device):
         """Verify batch norm behaves correctly in training mode."""
@@ -228,9 +228,9 @@ class TestLossDecreaseTrajectory:
             print(f"\nLR {lr}: loss reduction = {loss_reduction:.2%}")
 
         # Higher LR should generally lead to better convergence (with some allowance for randomness)
-        assert results[1e-2] > results[1e-4] * 0.8, (
-            "Higher learning rate should converge faster"
-        )
+        assert (
+            results[1e-2] > results[1e-4] * 0.8
+        ), "Higher learning rate should converge faster"
 
 
 class TestMultipleBackwardPasses:
@@ -290,9 +290,9 @@ class TestMultipleBackwardPasses:
         # Check all gradients are zero
         for param in encoder.parameters():
             if param.grad is not None:
-                assert (param.grad == 0).all(), (
-                    "Gradients should be zero after zero_grad()"
-                )
+                assert (
+                    param.grad == 0
+                ).all(), "Gradients should be zero after zero_grad()"
 
 
 class TestOptimizerStepping:
@@ -373,9 +373,9 @@ class TestCheckpointingSaving:
             out_orig = encoder(x)
             out_loaded = encoder_new(x)
 
-        assert torch.allclose(out_orig, out_loaded, atol=1e-5), (
-            "Loaded model should produce identical outputs"
-        )
+        assert torch.allclose(
+            out_orig, out_loaded, atol=1e-5
+        ), "Loaded model should produce identical outputs"
 
 
 if __name__ == "__main__":

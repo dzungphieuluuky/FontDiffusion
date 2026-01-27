@@ -401,15 +401,15 @@ class FontDiffuserTrainer:
             sc_loss: scalar tensor
         """
         # Validate input shapes
-        assert pred_original_sample_norm.dim() == 4, (
-            f"Expected pred shape [B, C, H, W], got {pred_original_sample_norm.shape}"
-        )
-        assert target_images.dim() == 4, (
-            f"Expected target shape [B, C, H, W], got {target_images.shape}"
-        )
-        assert neg_images.dim() == 5, (
-            f"Expected neg_images shape [B, num_neg, C, H, W], got {neg_images.shape}"
-        )
+        assert (
+            pred_original_sample_norm.dim() == 4
+        ), f"Expected pred shape [B, C, H, W], got {pred_original_sample_norm.shape}"
+        assert (
+            target_images.dim() == 4
+        ), f"Expected target shape [B, C, H, W], got {target_images.shape}"
+        assert (
+            neg_images.dim() == 5
+        ), f"Expected neg_images shape [B, num_neg, C, H, W], got {neg_images.shape}"
 
         sample_emb, pos_emb, neg_emb = self.scr(
             pred_original_sample_norm,  # [B, 3, resolution, resolution]

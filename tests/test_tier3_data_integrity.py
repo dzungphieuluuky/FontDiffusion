@@ -97,9 +97,9 @@ class TestDatasetShuffling:
 
         # Indices should be different (with high probability)
         # They should have same elements but different order
-        assert sorted(indices_no_shuffle) == sorted(indices_shuffle), (
-            "Shuffled and non-shuffled should have same elements"
-        )
+        assert sorted(indices_no_shuffle) == sorted(
+            indices_shuffle
+        ), "Shuffled and non-shuffled should have same elements"
 
         # It's very unlikely shuffle produces the same order
         # (not guaranteed but very improbable)
@@ -127,9 +127,9 @@ class TestDatasetShuffling:
         for batch in loader_2:
             indices_2.extend(batch["index"].tolist())
 
-        assert indices_1 == indices_2, (
-            "Shuffling with same seed should produce same order"
-        )
+        assert (
+            indices_1 == indices_2
+        ), "Shuffling with same seed should produce same order"
 
 
 class TestAugmentationRanges:
@@ -159,9 +159,9 @@ class TestAugmentationRanges:
 
         augmented_sample = dataset[0]
         for key in original_shapes.keys():
-            assert augmented_sample[key].shape == original_shapes[key], (
-                f"{key} shape changed after augmentation"
-            )
+            assert (
+                augmented_sample[key].shape == original_shapes[key]
+            ), f"{key} shape changed after augmentation"
 
     @pytest.mark.parametrize("num_augmentations", [1, 5, 10])
     def test_augmentation_consistency(self, num_augmentations: int):
@@ -201,9 +201,9 @@ class TestLabelLeakage:
             # But we can't assert strict inequality due to randomness
             # Instead, check they're different objects
             assert content is not style, "Content and style should be different objects"
-            assert content is not target, (
-                "Content and target should be different objects"
-            )
+            assert (
+                content is not target
+            ), "Content and target should be different objects"
 
     def test_target_not_in_inputs(self):
         """Verify target is not accidentally mixed with inputs."""
@@ -218,9 +218,9 @@ class TestLabelLeakage:
             # Targets should not be part of input concatenation
             # (Check by computing stats)
             content_style_cat = torch.cat([content, style], dim=1)
-            assert content_style_cat.shape[1] == 2, (
-                "Concatenated input should have 2 channels"
-            )
+            assert (
+                content_style_cat.shape[1] == 2
+            ), "Concatenated input should have 2 channels"
             assert target.shape[1] == 1, "Target should not be concatenated with inputs"
 
     def test_batch_indices_no_repetition(self):
@@ -235,9 +235,9 @@ class TestLabelLeakage:
             unique_indices = len(set(indices))
             batch_size = len(indices)
 
-            assert unique_indices == batch_size, (
-                f"Batch has {batch_size - unique_indices} repeated indices!"
-            )
+            assert (
+                unique_indices == batch_size
+            ), f"Batch has {batch_size - unique_indices} repeated indices!"
 
 
 class TestCollateFunction:
@@ -333,9 +333,9 @@ class TestValidRangeValues:
                 img = sample[key]
 
                 # Check range
-                assert (img >= 0).all() and (img <= 1).all(), (
-                    f"{key} not in [0, 1] range"
-                )
+                assert (img >= 0).all() and (
+                    img <= 1
+                ).all(), f"{key} not in [0, 1] range"
 
                 # Check not all zeros or ones (would indicate issue)
                 assert not (img == 0).all(), f"{key} is all zeros"
@@ -381,9 +381,9 @@ class TestBatchesAgainstLabelLeakage:
                 print(f"Batch {batch_idx}: avg correlation = {avg_corr:.3f}")
                 # For random data, correlation should be near 0
                 # Allow some deviation due to randomness
-                assert abs(avg_corr) < 0.5, (
-                    f"High correlation detected ({avg_corr:.3f}), possible leakage!"
-                )
+                assert (
+                    abs(avg_corr) < 0.5
+                ), f"High correlation detected ({avg_corr:.3f}), possible leakage!"
 
 
 if __name__ == "__main__":

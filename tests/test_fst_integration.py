@@ -333,9 +333,9 @@ class TestFSTOverfitting:
         print(f"\nFST overfitting loss: {initial_loss:.6f} -> {final_loss:.6f}")
 
         assert final_loss < initial_loss, "FST should be able to overfit"
-        assert (initial_loss - final_loss) / initial_loss > 0.3, (
-            "Loss reduction should be > 30%"
-        )
+        assert (
+            initial_loss - final_loss
+        ) / initial_loss > 0.3, "Loss reduction should be > 30%"
 
 
 class TestMSSEOverfitting:

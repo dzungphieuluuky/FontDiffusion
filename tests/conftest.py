@@ -298,9 +298,9 @@ def assert_shape():
     def _assert_shape(
         tensor: torch.Tensor, expected_shape: Tuple, name: str = "tensor"
     ):
-        assert tensor.shape == expected_shape, (
-            f"{name} shape mismatch: got {tensor.shape}, expected {expected_shape}"
-        )
+        assert (
+            tensor.shape == expected_shape
+        ), f"{name} shape mismatch: got {tensor.shape}, expected {expected_shape}"
 
     return _assert_shape
 
@@ -318,11 +318,11 @@ def assert_gradients_exist():
         for name, param in model.named_parameters():
             if require_grad_only and not param.requires_grad:
                 continue
-            assert param.grad is not None, (
-                f"Parameter '{name}' has no gradient after backward()"
-            )
-            assert not torch.isnan(param.grad).any(), (
-                f"Parameter '{name}' has NaN gradients"
-            )
+            assert (
+                param.grad is not None
+            ), f"Parameter '{name}' has no gradient after backward()"
+            assert not torch.isnan(
+                param.grad
+            ).any(), f"Parameter '{name}' has NaN gradients"
 
     return _assert_gradients_exist
