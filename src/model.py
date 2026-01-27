@@ -40,36 +40,27 @@ class FontDiffuserWithFST(nn.Module):
             in_channels=3, base_channels=64, num_scales=num_scales
         )
 
-        # Determine feature channels from MSSE output shapes if not provided
+        # Get actual feature channels from MSSE output if not provided
         if feature_channels is None:
-            feature_channels = [64, 128, 256, 512, 1024]
+            feature_channels = self.mss_encoder.get_output_channels()
 
         self.fst_module = FontStyleTransformationModule(
             feature_channels=feature_channels,
-            num_queries=num_queries,  # ← Use parameter instead of hardcoded
+            num_queries=num_queries,
             query_dim=query_dim,
             num_scale_features=num_scales,
-            num_cross_attn_blocks=2,
-            num_self_attn_blocks=2,
         )
-
-        # Projection layers to inject FST features into U-Net
-        # FST output: (B, N_L + 36, 1024) where N_L=256, spatial=6x6=36
-        cross_attn_dim = getattr(
-            self.diffusion_unet.config, "cross_attention_dim", 1280
-        )
-
-        self.fst_projection = nn.Sequential(
-            nn.Linear(1024, 768),
-            nn.LayerNorm(768),
-            nn.GELU(),
-            nn.Linear(768, cross_attn_dim),
-        )
-
-        # Optional: Project original style features to same dimension for concatenation
-        self.original_style_projection = nn.Sequential(
-            nn.Linear(1024, cross_attn_dim), nn.LayerNorm(cross_attn_dim)
-        )
+        
+        # Project FST output to U-Net cross-attention dimension
+        # Calculate total output dimension: N_L + last_scale_spatial_size
+        last_scale_spatial = 6 * 6  # 48 // (2^4) = 3, but let's use 6x6 for safety
+        total_fst_dim = num_queries + last_scale_spatial
+        cross_attn_dim = 768  # Standard U-Net cross-attention dimension
+        
+        self.fst_projection = nn.Linear(feature_channels[-1], cross_attn_dim)
+        
+        # Project original style features for combination
+        self.original_style_projection = nn.Linear(768, cross_attn_dim)
 
     def forward(
         self,

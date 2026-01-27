@@ -4,65 +4,38 @@ import torch.nn.functional as F
 
 
 class MultiScaleStyleEncoder(nn.Module):
-    """
-    CNN-based encoder to extract multi-scale style features from a glyph image.
-    Corresponds to the style encoder E_s in FSTDiff paper (Section 3.1).
+    """Multi-Scale Style Encoder (MSSE) for extracting style features at different scales."""
 
-    Args:
-        in_channels: Input channels (e.g., 1 for grayscale).
-        base_channels: Base number of channels.
-        num_scales: Number of feature scales (n_s in paper, default 5).
-    """
-
-    def __init__(
-        self, in_channels: int = 1, base_channels: int = 64, num_scales: int = 5
-    ) -> None:
+    def __init__(self, in_channels: int = 3, base_channels: int = 64, num_scales: int = 5):
         super().__init__()
         self.num_scales = num_scales
-
-        # Initial convolutional layer (not explicitly detailed, common practice)
-        self.initial_conv = nn.Conv2d(
-            in_channels, base_channels, kernel_size=7, stride=2, padding=3
-        )
-        self.initial_norm = nn.InstanceNorm2d(base_channels)
-
-        # Downsampling Residual Blocks (mimics "CNN-based backbone with multiple residual connection blocks")
-        self.down_blocks = nn.ModuleList()
-        current_channels = base_channels
-
+        
+        # Store the actual output channels for each scale
+        self.output_channels = []
+        
+        self.encoders = nn.ModuleList()
         for i in range(num_scales):
-            # Each block reduces spatial size and increases channels (except possibly the last)
-            use_stride = 2 if i < num_scales - 1 else 1
-            next_channels = (
-                current_channels * 2 if i < num_scales - 1 else current_channels
+            out_channels = base_channels * (2**i)  # 64, 128, 256, 512, 1024
+            self.output_channels.append(out_channels)
+            
+            encoder = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels // 2, 3, 1, 1),
+                nn.ReLU(),
+                nn.Conv2d(out_channels // 2, out_channels, 3, 1, 1),
+                nn.ReLU(),
+                nn.AdaptiveAvgPool2d((48 // (2**i), 48 // (2**i))),
             )
-
-            block = ResidualBlock(
-                current_channels, next_channels, downsample=(use_stride == 2)
-            )
-            self.down_blocks.append(block)
-            current_channels = next_channels
+            self.encoders.append(encoder)
 
     def forward(self, x: torch.Tensor) -> list[torch.Tensor]:
-        """
-        Args:
-            x: Input glyph image tensor (B, C, H, W).
-        Returns:
-            A list of multi-scale style features [f^{s,1}, f^{s,2}, ..., f^{s,n_s}].
-            Each feature shape: (B, C_i, H_i, W_i).
-        """
-        features: list[torch.Tensor] = []
-
-        x = self.initial_conv(x)
-        x = self.initial_norm(x)
-        x = F.leaky_relu(x, 0.2)
-
-        # Extract features at each scale
-        for down_block in self.down_blocks:
-            x = down_block(x)
-            features.append(x)
-
+        features = []
+        for encoder in self.encoders:
+            features.append(encoder(x))
         return features
+
+    def get_output_channels(self) -> list[int]:
+        """Return the actual output channels for each scale."""
+        return self.output_channels
 
 
 class ResidualBlock(nn.Module):

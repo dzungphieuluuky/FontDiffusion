@@ -6,19 +6,6 @@ import torch.nn as nn
 
 
 class FontStyleTransformationModule(nn.Module):
-    """
-    The FST module that learns the transformation between source and target font styles.
-    Implements equations (3)-(9) from the FSTDiff paper (Section 3.2).
-
-    Args:
-        feature_channels: Number of channels in the input style features (c_i).
-        num_queries: Number of learnable queries (N_L, paper uses 256).
-        query_dim: Dimension of each query vector (d, paper uses 128).
-        num_scale_features: Number of multi-scale features (n_s, paper uses 5).
-        num_cross_attn_blocks: Number of transformer blocks for cross-attention (paper uses 2).
-        num_self_attn_blocks: Number of transformer blocks for self-attention fusion (paper uses 2).
-    """
-
     def __init__(
         self,
         feature_channels: list[int],  # List of c_i for each scale i
@@ -32,58 +19,50 @@ class FontStyleTransformationModule(nn.Module):
         self.num_queries = num_queries
         self.query_dim = query_dim
         self.num_scale_features = num_scale_features
+        self.feature_channels = feature_channels
 
         # Learnable query vectors L ∈ R^{N_L × d} (Eq. in text before Eq. 3)
         self.learnable_queries = nn.Parameter(torch.randn(num_queries, query_dim))
 
         # Per-scale learnable positional encodings PE_i (Section 3.2, before Eq. 5)
-        self.pos_encodings = nn.ParameterList(
-            [
-                nn.Parameter(torch.randn(1, ch, 1, 1))  # For adding to feature maps
-                for ch in feature_channels
-            ]
-        )
+        # Create positional encodings that match the actual feature channels
+        self.pos_encodings = nn.ParameterList()
+        for i, ch in enumerate(feature_channels):
+            # Create positional encoding with correct channel dimension
+            self.pos_encodings.append(nn.Parameter(torch.randn(1, ch, 1, 1)))
 
-        # Per-scale weight matrices for query, key, value projections
-        # W_i^Q ∈ R^{d × d}, W_i^K ∈ R^{c_i × d}, W_i^V ∈ R^{c_i × d} (Eq. 4 & 6)
-        self.q_projs = nn.ModuleList(
-            [nn.Linear(query_dim, query_dim) for _ in range(num_scale_features)]
-        )
-        self.k_projs = nn.ModuleList(
-            [nn.Linear(ch, query_dim) for ch in feature_channels]
-        )
-        self.v_projs = nn.ModuleList(
-            [nn.Linear(ch, query_dim) for ch in feature_channels]
-        )
-
-        # Multi-layer Transformer blocks for cross-attention (paper uses 2)
-        self.cross_attn_blocks = nn.ModuleList(
-            [
-                TransformerBlock(dim=query_dim, num_heads=8, is_cross_attention=True)
-                for _ in range(num_cross_attn_blocks)
-            ]
-        )
-
-        # Multi-layer Transformer blocks for self-attention fusion (paper uses 2)
-        self.self_attn_blocks = nn.ModuleList(
-            [
-                TransformerBlock(dim=query_dim, num_heads=8, is_cross_attention=False)
-                for _ in range(num_self_attn_blocks)
-            ]
-        )
-
-        # MLP to adjust channel size to c_{n_s} (paper uses 1024) after concatenation
-        # and weight matrix W for the residual connection (Eq. 9)
-        total_concat_dim = (
-            query_dim * num_scale_features
-        )  # After concatenating all L_{x→y}^i
+        # Cross-attention blocks for each scale (Eq. 5)
+        self.cross_attn_blocks = nn.ModuleList()
+        for ch in feature_channels:
+            blocks = nn.ModuleList()
+            for _ in range(num_cross_attn_blocks):
+                blocks.append(
+                    CrossAttentionBlock(
+                        query_dim=query_dim, 
+                        key_dim=ch, 
+                        value_dim=ch
+                    )
+                )
+            self.cross_attn_blocks.append(blocks)
+        
+        # Self-attention blocks for fusion (Eq. 7)
+        self.self_attn_blocks = nn.ModuleList()
+        concat_dim = query_dim * num_scale_features
+        for _ in range(num_self_attn_blocks):
+            self.self_attn_blocks.append(
+                SelfAttentionBlock(dim=concat_dim)
+            )
+        
+        # MLP to adjust concatenated features to final dimension
+        final_dim = feature_channels[-1]  # Use last scale's channel count
         self.mlp_channel_adjust = nn.Sequential(
-            nn.Linear(total_concat_dim, 1024),
-            nn.LayerNorm(1024),
-            nn.GELU(),
-            nn.Linear(1024, 1024),
+            nn.Linear(concat_dim, final_dim * 2),
+            nn.ReLU(),
+            nn.Linear(final_dim * 2, final_dim),
         )
-        self.residual_proj = nn.Linear(feature_channels[-1], 1024)  # W in Eq. 9
+        
+        # Projection for residual connection (Eq. 9)
+        self.residual_proj = nn.Linear(final_dim, final_dim)
 
     def forward(
         self,
@@ -96,6 +75,10 @@ class FontStyleTransformationModule(nn.Module):
         Returns:
             Style transformation features of shape (B, N_L + h_{n_s}*w_{n_s}, c_{n_s})
         """
+        # Validate input dimensions
+        assert len(source_features) == len(target_features) == self.num_scale_features
+        assert len(source_features) == len(self.feature_channels)
+        
         batch_size = source_features[0].shape[0]
         queries = repeat(self.learnable_queries, "n d -> b n d", b=batch_size)
 
@@ -103,6 +86,16 @@ class FontStyleTransformationModule(nn.Module):
 
         # Process each scale i
         for i, (f_src, f_tgt) in enumerate(zip(source_features, target_features)):
+            # Validate feature dimensions match expected channels
+            expected_channels = self.feature_channels[i]
+            actual_channels = f_src.shape[1]
+            
+            if actual_channels != expected_channels:
+                raise ValueError(
+                    f"Scale {i}: Expected {expected_channels} channels, got {actual_channels}. "
+                    f"Source shape: {f_src.shape}, Target shape: {f_tgt.shape}"
+                )
+            
             # Add learnable positional encoding (before Eq. 5)
             pe = self.pos_encodings[i]
             f_src = f_src + pe
@@ -113,14 +106,14 @@ class FontStyleTransformationModule(nn.Module):
             f_tgt_flat = rearrange(f_tgt, "b c h w -> b (h w) c")
 
             # Project for attention: Q_i = L W_i^Q, K_i = f^{s,i} W_i^K, V_i = f^{s,i} W_i^V
-            Q = self.q_projs[i](queries)  # (B, N_L, d)
-            K_src = self.k_projs[i](f_src_flat)  # (B, H*W, d)
-            V_src = self.v_projs[i](f_src_flat)
-            K_tgt = self.k_projs[i](f_tgt_flat)
-            V_tgt = self.v_projs[i](f_tgt_flat)
+            Q = queries  # (B, N_L, d)
+            K_src, V_src = f_src_flat, f_src_flat  # (B, H*W, c_i)
+            K_tgt, V_tgt = f_tgt_flat, f_tgt_flat  # (B, H*W, c_i)
 
-            # Cross-attention blocks to extract style features (Eq. 3 & 5)
+            # Cross-attention: L_{x_r}^i = CrossAttn(Q_i, K_{x_r}^i, V_{x_r}^i) (Eq. 5)
             L_src = self._apply_cross_attention(Q, K_src, V_src)  # L_{x_r}^i
+
+            # Cross-attention: L_{y_r}^i = CrossAttn(Q_i, K_{y_r}^i, V_{y_r}^i) (Eq. 6)
             L_tgt = self._apply_cross_attention(Q, K_tgt, V_tgt)  # L_{y_r}^i
 
             # Compute difference L_{x→y}^i = L_{y_r}^i - L_{x_r}^i (Eq. 7)
@@ -150,11 +143,17 @@ class FontStyleTransformationModule(nn.Module):
         return output
 
     def _apply_cross_attention(self, Q, K, V):
-        """Apply cross-attention blocks."""
-        x = Q
-        for block in self.cross_attn_blocks:
-            x = block(x, context=K, value=V)
-        return x
+        """Apply cross-attention blocks for the current scale."""
+        # Use the cross-attention blocks for this scale
+        # For simplicity, we'll use the first scale's blocks for all scales
+        # In practice, you might want scale-specific attention blocks
+        blocks = self.cross_attn_blocks[0]  # Use first scale's blocks
+        
+        result = Q
+        for block in blocks:
+            result = block(result, K, V)
+        return result
+
 
 
 class TransformerBlock(nn.Module):

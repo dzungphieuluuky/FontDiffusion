@@ -114,35 +114,32 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
 
         # Wrap with FSTDiff enhancement
         if self.use_fst:
-            logger.info("Building FontDiffuserWithFST model")
+            logger.info("Creating FontDiffuserWithFST model...")
+            logger.info(f"FST feature channels: {self.fst_feature_channels}")
+            logger.info(f"FST num queries: {self.fst_num_queries}")
+            logger.info(f"FST query dim: {self.fst_query_dim}")
+            logger.info(f"FST num scales: {self.fst_num_scales}")
+            
             self.model = FontDiffuserWithFST(
-                base_model,
+                original_fontdiffuser=base_model,
                 feature_channels=self.fst_feature_channels,
                 num_queries=self.fst_num_queries,
                 query_dim=self.fst_query_dim,
                 num_scales=self.fst_num_scales,
             )
-
-            # Optionally freeze original encoders
-            if self.freeze_original_encoders:
-                logger.info("Freezing original style and content encoders")
-                for param in self.model.style_encoder.parameters():
-                    param.requires_grad = False
-                for param in self.model.content_encoder.parameters():
-                    param.requires_grad = False
-
-                # Log trainable parameters
-                trainable_params = sum(
-                    p.numel() for p in self.model.parameters() if p.requires_grad
-                )
-                total_params = sum(p.numel() for p in self.model.parameters())
-                logger.info(
-                    f"Trainable parameters: {trainable_params:,} / {total_params:,} "
-                    f"({100 * trainable_params / total_params:.2f}%)"
-                )
         else:
-            logger.info("Using base FontDiffuser model (no FST)")
             self.model = base_model
+
+        # Apply freezing if specified
+        if self.use_fst and self.freeze_original_encoders:
+            logger.info("Freezing original encoders...")
+            for param in self.model.content_encoder.parameters():
+                param.requires_grad = False
+            for param in self.model.style_encoder.parameters():
+                param.requires_grad = False
+            for param in self.model.diffusion_unet.parameters():
+                param.requires_grad = False
+            logger.info("✓ Original encoders frozen")
 
         # Perceptual loss (always used)
         self.perceptual_loss = ContentPerceptualLoss()
