@@ -285,4 +285,11 @@ def get_parser():
         default=False,
         help="Whether to use InstructPix2Pix.",
     )
+
+    parser.add_argument(
+        "--compile",
+        action="store_true",
+        default=False,
+        help="Use torch.compile for optimization",
+    )
     return parser

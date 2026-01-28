@@ -112,13 +112,6 @@ def arg_parse() -> Namespace:
         default=False,
         help="Use deterministic algorithms for reproducibility",
     )
-    parser.add_argument(
-        "--compile",
-        action="store_true",
-        default=False,
-        help="Use torch.compile for optimization",
-    )
-
     args: Namespace = parser.parse_args()
 
     style_image_size: int = getattr(args, "style_image_size", 96)

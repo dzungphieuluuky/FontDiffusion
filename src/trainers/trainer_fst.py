@@ -354,6 +354,13 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             except Exception as e:
                 logger.error(f"Failed to load FST module states: {e}")
 
+        # Compile model after preparation (if enabled)
+        if getattr(self.args, "compile", False):
+            logger.info("Compiling model with torch.compile()...")
+            # Note: compile the wrapped model, not unwrapped
+            self.model = torch.compile(self.model)
+            logger.info("✓ Model compiled")
+
     def apply_classifier_free_guidance(
         self,
         content_images: torch.Tensor,
