@@ -52,20 +52,20 @@ class CollateFN(object):
         style_imgs = torch.stack([item["style_image"] for item in batch])
 
         result = {
-            "target_img": target_imgs,
-            "content_img": content_imgs,
-            "style_img": style_imgs,
+            "target_image": target_imgs,
+            "content_image": content_imgs,
+            "style_image": style_imgs,
         }
 
         # Add nonorm_target_image if present
         if "nonorm_target_image" in batch[0]:
             nonorm_targets = torch.stack([item["nonorm_target_image"] for item in batch])
-            result["nonorm_target_img"] = nonorm_targets
+            result["nonorm_target_image"] = nonorm_targets
 
         # Add style_source_image for FST mode
         if "style_source_image" in batch[0]:
             style_source_imgs = torch.stack([item["style_source_image"] for item in batch])
-            result["style_source_img"] = style_source_imgs
+            result["style_source_image"] = style_source_imgs
 
         # Add neg_images for SCR mode
         if "neg_images" in batch[0]:
@@ -74,20 +74,19 @@ class CollateFN(object):
 
         # Collect consistency references if available
         if self.num_consistency_refs > 0:
-            ref_content_imgs = []
+            ref_content_images = []
             for item in batch:
-                refs = item.get("ref_content_imgs", [])
+                refs = item.get("ref_content_images", [])
                 if len(refs) > 0:
                     # Take up to num_consistency_refs
                     item_refs = refs[: self.num_consistency_refs]
-                    ref_content_imgs.append(torch.stack(item_refs))
-
-            if len(ref_content_imgs) > 0:
+                    ref_content_images.append(torch.stack(item_refs))
+            if len(ref_content_images) > 0:
                 # Stack across batch: (B, num_refs, C, H, W)
-                ref_content_imgs = torch.stack(ref_content_imgs)
+                ref_content_images = torch.stack(ref_content_images)
                 # Reshape to list of (B, C, H, W) tensors
-                result["ref_content_imgs"] = [
-                    ref_content_imgs[:, i] for i in range(ref_content_imgs.shape[1])
+                result["ref_content_images"] = [
+                    ref_content_images[:, i] for i in range(ref_content_images.shape[1])
                 ]
 
         return result
