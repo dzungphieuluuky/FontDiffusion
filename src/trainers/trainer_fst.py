@@ -628,7 +628,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                     self.global_step += 1
 
                     # Log to WandB (main process only)
-                    if self.global_step % self.config.logging_steps == 0:
+                    if self.global_step % self.args.log_interval == 0:
                         # Build comprehensive log dict
                         log_dict = {
                             "train/loss": loss_dict.get("train_loss", 0.0),
