@@ -36,14 +36,17 @@ class CollateFN(object):
         """
         Collate batch items.
 
+        Dataset provides keys: target_image, content_image, style_image, style_source_image
+        Trainer expects keys: target_img, content_img, style_img, style_source_img
+        
         Each batch item should contain:
-        - target_image: Generated character
-        - content_image: Content reference
-        - style_source_image: Source style reference (FST mode)
-        - style_image: Target style reference
+        - target_image: Generated character (from dataset)
+        - content_image: Content reference (from dataset)
+        - style_source_image: Source style reference (FST mode, from dataset)
+        - style_image: Target style reference (from dataset)
         - (optional) ref_content_imgs: List of additional content refs
         """
-        # Stack main tensors - use actual keys from dataset
+        # Stack main tensors - read with dataset keys, output with trainer keys
         target_imgs = torch.stack([item["target_image"] for item in batch])
         content_imgs = torch.stack([item["content_image"] for item in batch])
         style_imgs = torch.stack([item["style_image"] for item in batch])
@@ -166,6 +169,8 @@ class CollateFNDebug(CollateFN):
         for key, value in result.items():
             if isinstance(value, torch.Tensor):
                 print(f"  {key:25s}: {tuple(value.shape)}")
+            elif isinstance(value, list):
+                print(f"  {key:25s}: list of {len(value)} tensors")
 
         print(f"{'=' * 80}\n")
 
