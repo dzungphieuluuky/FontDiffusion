@@ -512,14 +512,10 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 offset_loss = offset_out_sum / 2.0 if isinstance(offset_out_sum, torch.Tensor) else torch.tensor(0.0, device=device)
                 
                 loss_dict = {
-                    "diff_loss": diff_loss,
-                    "percep_loss": percep_loss,
-                    "offset_loss": offset_loss,
-                    "train_loss": (
-                        diff_loss 
-                        + self.config.perceptual_coefficient * percep_loss
-                        + self.config.offset_coefficient * offset_loss
-                    ),
+                    "diff_loss": diff_loss.item(),
+                    "percep_loss": percep_loss.item(),
+                    "offset_loss": offset_loss.item(),
+                    "train_loss": total_loss.item(),
                 }
 
             # Add SCR loss for phase 2 (if applicable)
@@ -557,22 +553,23 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 loss_dict["train_loss"] = total_loss
             else:
                 diff_loss = F.mse_loss(noise_pred, noise)
-                offset_loss = offset_out_sum / 2.0 if isinstance(offset_out_sum, torch.Tensor) else torch.tensor(0.0, device=device)
+                offset_loss = offset_out_sum / 2.0
+                # Total loss
+                total_loss = (
+                    diff_loss
+                    + self.args.perceptual_coefficient * percep_loss
+                    + self.args.offset_coefficient * offset_loss
+                )
+
                 loss_dict = {
-                    "diff_loss": diff_loss,
-                    "offset_loss": offset_loss,
-                    "train_loss": diff_loss + self.config.offset_coefficient * offset_loss,
+                    "diff_loss": diff_loss.item(),
+                    "offset_loss": offset_loss.item(),
+                    "train_loss": total_loss.item(),
                 }
 
         loss = loss_dict["train_loss"]
 
-        # Convert to float for logging
-        loss_dict_float = {
-            k: v.item() if isinstance(v, torch.Tensor) else v
-            for k, v in loss_dict.items()
-        }
-
-        return loss, loss_dict_float
+        return loss, loss_dict
 
     def train(self):
         """Training loop with FST-specific logging."""
