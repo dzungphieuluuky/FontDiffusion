@@ -62,9 +62,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         self.fst_feature_channels = self._parse_feature_channels(
             getattr(args, "fst_feature_channels", "64,128,256,512,1024")
         )
-        self.style_source_same_prob = getattr(
-            args, "style_source_same_prob", 0.1
-        )
+        self.style_source_same_prob = getattr(args, "style_source_same_prob", 0.1)
         self.fst_num_queries = getattr(args, "fst_num_queries", 256)
         self.fst_query_dim = getattr(args, "fst_query_dim", 128)
         self.fst_num_scales = getattr(args, "fst_num_scales", 5)
@@ -79,6 +77,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         # Call parent init
         super().__init__(args)
         self.drop_prob = getattr(args, "drop_prob", 0.1)
+
         # Setup consistency loss after model is created
         if self.use_fst and self.use_consistency_loss:
             self.combined_loss = CombinedFSTLoss(
@@ -90,7 +89,8 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 num_queries=self.fst_num_queries,
             )
             logger.info(
-                f"Consistency loss enabled (weight={self.consistency_weight}, type={self.consistency_loss_type})"
+                f"Consistency loss enabled (weight={self.consistency_weight}, "
+                f"type={self.consistency_loss_type})"
             )
 
     def _parse_feature_channels(self, channels_str: str) -> list[int]:
@@ -358,16 +358,58 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         # Compile model after preparation (if enabled)
         if getattr(self.args, "compile", False):
             logger.info("Compiling model with torch.compile()...")
-            # Note: compile the wrapped model, not unwrapped
             self.model = torch.compile(self.model)
             logger.info("✓ Model compiled")
+
+    def _setup_logging(self):
+        """Setup logging and tracking with FST information."""
+        super()._setup_logging()
+
+        # Log FST-specific configuration
+        if self.accelerator.is_main_process:
+            fst_config = {
+                "fst_enabled": self.use_fst,
+                "freeze_original_encoders": self.freeze_original_encoders,
+                "style_source_same_prob": self.style_source_same_prob,
+                "fst_feature_channels": self.fst_feature_channels,
+                "fst_num_queries": self.fst_num_queries,
+                "fst_query_dim": self.fst_query_dim,
+                "fst_num_scales": self.fst_num_scales,
+                "consistency_enabled": self.use_consistency_loss,
+                "consistency_weight": self.consistency_weight,
+                "consistency_loss_type": self.consistency_loss_type,
+            }
+
+            if self.use_fst:
+                unwrapped = self.accelerator.unwrap_model(self.model)
+                fst_config["model_info"] = {
+                    "mss_encoder_params": sum(
+                        p.numel() for p in unwrapped.mss_encoder.parameters()
+                    ),
+                    "fst_module_params": sum(
+                        p.numel() for p in unwrapped.fst_module.parameters()
+                    ),
+                    "fst_projection_params": sum(
+                        p.numel() for p in unwrapped.fst_projection.parameters()
+                    ),
+                    "total_fst_params": sum(
+                        p.numel()
+                        for p in list(unwrapped.mss_encoder.parameters())
+                        + list(unwrapped.fst_module.parameters())
+                        + list(unwrapped.fst_projection.parameters())
+                    ),
+                }
+
+            # Log as config update (not metrics)
+            self.accelerator.log({"fst_config": fst_config})
+            logger.info(f"FST Configuration: {fst_config}")
 
     def apply_classifier_free_guidance(
         self,
         content_images: torch.Tensor,
         style_images: torch.Tensor,
         drop_prob: float,
-        samples: Optional[dict[str, torch.Tensor]] = None,
+        samples: dict[str, torch.Tensor] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Apply classifier-free guidance including FST source style images."""
         # Clone inputs to avoid in-place modifications
@@ -386,12 +428,12 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 style_images[i, :, :, :] = 1.0
 
         # Mask source style images for FST
-        if samples is not None and "style_source_image" in samples:
-            style_source_images = samples["style_source_image"].clone()
+        if samples is not None and "style_source_img" in samples:
+            style_source_images = samples["style_source_img"].clone()
             for i, mask_value in enumerate(context_mask):
                 if mask_value == 1:
                     style_source_images[i, :, :, :] = 1.0
-            samples["style_source_image"] = style_source_images
+            samples["style_source_img"] = style_source_images
 
         return content_images, style_images
 
@@ -407,17 +449,17 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         """
         self.model.train()
 
-        # Extract data from batch
-        target_img = samples["target_img"]
-        style_img = samples["style_img"]
-        content_img = samples["content_img"]
-        nonorm_target_img = samples.get("nonorm_target_img")
+        # Extract data from batch (matching collate_fn output keys)
+        target_images = samples["target_img"]
+        style_images = samples["style_img"]
+        content_images = samples["content_img"]
+        nonorm_target_images = samples.get("nonorm_target_img")
 
         # Additional reference images for consistency (if available)
         ref_content_imgs = samples.get("ref_content_imgs", [])
 
-        batch_size = target_img.shape[0]
-        device = target_img.device
+        batch_size = target_images.shape[0]
+        device = target_images.device
 
         # Sample random timesteps
         timesteps = torch.randint(
@@ -428,28 +470,30 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         ).long()
 
         # Generate random noise
-        noise = torch.randn_like(target_img)
+        noise = torch.randn_like(target_images)
 
-        # Add noise to target image
-        noisy_latents = self.noise_scheduler.add_noise(target_img, noise, timesteps)
+        # Add noise to target image (matching base trainer naming)
+        noisy_target_images = self.noise_scheduler.add_noise(
+            target_images, noise, timesteps
+        )
 
         # Apply classifier-free guidance dropout if enabled
         if self.drop_prob > 0:
-            content_img, style_img = self.apply_classifier_free_guidance(
-                content_img, style_img, self.drop_prob, samples
+            content_images, style_images = self.apply_classifier_free_guidance(
+                content_images, style_images, self.drop_prob, samples
             )
 
         # Forward pass
         if self.use_fst:
             # For FST model, we need source and target style images
-            style_source_img = samples.get("style_source_img", style_img)
+            style_source_img = samples.get("style_source_img", style_images)
 
             outputs = self.model(
-                noisy_latents=noisy_latents,
+                noisy_latents=noisy_target_images,
                 timestep=timesteps,
-                content_img=content_img,
+                content_img=content_images,
                 style_source_img=style_source_img,
-                style_target_img=style_img,
+                style_target_img=style_images,
                 content_encoder_downsample_size=self.args.content_encoder_downsample_size,
                 return_dict=True,
             )
@@ -464,11 +508,11 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 for ref_content in ref_content_imgs[:num_refs]:
                     # Use same style pair but different content
                     ref_outputs = self.model(
-                        noisy_latents=noisy_latents,  # Same noise
+                        noisy_latents=noisy_target_images,  # Same noise
                         timestep=timesteps,
                         content_img=ref_content,
                         style_source_img=style_source_img,
-                        style_target_img=style_img,
+                        style_target_img=style_images,
                         content_encoder_downsample_size=self.args.content_encoder_downsample_size,
                         return_dict=True,
                     )
@@ -476,18 +520,18 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                         ref_outputs["transformation_features"]
                     )
 
-            # Compute perceptual loss (like base trainer)
+            # Compute perceptual loss (matching base trainer approach exactly)
             pred_original_sample_norm = x0_from_epsilon(
                 scheduler=self.noise_scheduler,
                 noise_pred=outputs["noise_pred"],
-                x_t=noisy_latents,
+                x_t=noisy_target_images,
                 timesteps=timesteps,
             )
             pred_original_sample = reNormalize_img(pred_original_sample_norm)
-            
-            if nonorm_target_img is not None:
+
+            if nonorm_target_images is not None:
                 norm_pred_ori = normalize_mean_std(pred_original_sample)
-                norm_target_ori = normalize_mean_std(nonorm_target_img)
+                norm_target_ori = normalize_mean_std(nonorm_target_images)
                 percep_loss = self.perceptual_loss.calculate_loss(
                     generated_images=norm_pred_ori,
                     target_images=norm_target_ori,
@@ -496,7 +540,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             else:
                 percep_loss = torch.tensor(0.0, device=device)
 
-            # Compute loss with all components
+            # Compute loss with all components (matching base trainer keys)
             if self.use_consistency_loss and len(transformation_features_list) >= 2:
                 loss_dict = self.combined_loss(
                     noise_pred=outputs["noise_pred"],
@@ -506,11 +550,26 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                     perceptual_loss=percep_loss,
                 )
             else:
-                # Fallback to basic loss (but still compute all components)
+                # Fallback to basic loss (compute all components like base trainer)
                 offset_out_sum = outputs.get("offset_out_sum")
-                diff_loss = F.mse_loss(outputs["noise_pred"], noise)
-                offset_loss = offset_out_sum / 2.0 if isinstance(offset_out_sum, torch.Tensor) else torch.tensor(0.0, device=device)
-                
+                diff_loss = F.mse_loss(
+                    outputs["noise_pred"].float(), noise.float(), reduction="mean"
+                )
+
+                # Offset loss matches base trainer (divided by 2)
+                if isinstance(offset_out_sum, torch.Tensor):
+                    offset_loss = offset_out_sum / 2.0
+                else:
+                    offset_loss = torch.tensor(0.0, device=device)
+
+                # Total loss with coefficients
+                total_loss = (
+                    diff_loss
+                    + self.config.perceptual_coefficient * percep_loss
+                    + self.config.offset_coefficient * offset_loss
+                )
+
+                # Build loss dict matching base trainer format
                 loss_dict = {
                     "diff_loss": diff_loss.item(),
                     "percep_loss": percep_loss.item(),
@@ -518,65 +577,92 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                     "train_loss": total_loss.item(),
                 }
 
-            # Add SCR loss for phase 2 (if applicable)
+            # Add SCR loss for phase 2 (matching base trainer integration)
             if self.config.phase_2 and self.scr is not None:
                 neg_images = samples.get("neg_images")
                 if neg_images is not None:
                     sc_loss = self.compute_phase2_loss(
                         pred_original_sample_norm=pred_original_sample_norm,
-                        target_images=target_img,
+                        target_images=target_images,
                         neg_images=neg_images,
                     )
-                    loss_dict["train_loss"] = loss_dict["train_loss"] + self.config.sc_coefficient * sc_loss
-                    loss_dict["sc_loss"] = sc_loss
+                    loss_dict["sc_loss"] = sc_loss.item()
+                    # Update train_loss (get tensor value first if needed)
+                    train_loss_val = (
+                        loss_dict["train_loss"]
+                        if isinstance(loss_dict["train_loss"], float)
+                        else loss_dict["train_loss"]
+                    )
+                    loss_dict["train_loss"] = (
+                        train_loss_val + self.config.sc_coefficient * sc_loss.item()
+                    )
 
         else:
-            # Standard FontDiffuser forward (use base trainer approach)
+            # Standard FontDiffuser forward (delegate to base trainer)
             noise_pred, offset_out_sum = self.model(
-                noisy_latents,
+                noisy_target_images,
                 timesteps,
-                style_img,
-                content_img,
+                style_images,
+                content_images,
                 self.args.content_encoder_downsample_size,
             )
 
-            # Use base trainer's compute_losses method
-            if nonorm_target_img is not None:
-                total_loss, loss_dict, pred_original_sample_norm = self.compute_losses(
-                    noise_pred=noise_pred,
-                    noise=noise,
-                    offset_out_sum=offset_out_sum,
-                    noisy_target_images=noisy_latents,
-                    nonorm_target_images=nonorm_target_img,
-                    timesteps=timesteps,
+            # Use base trainer's compute_losses method for consistency
+            if nonorm_target_images is not None:
+                total_loss, loss_components, pred_original_sample_norm = (
+                    self.compute_losses(
+                        noise_pred=noise_pred,
+                        noise=noise,
+                        offset_out_sum=offset_out_sum,
+                        noisy_target_images=noisy_target_images,
+                        nonorm_target_images=nonorm_target_images,
+                        timesteps=timesteps,
+                    )
                 )
-                loss_dict["train_loss"] = total_loss
-            else:
-                diff_loss = F.mse_loss(noise_pred, noise)
-                offset_loss = offset_out_sum / 2.0
-                # Total loss
-                total_loss = (
-                    diff_loss
-                    + self.args.perceptual_coefficient * percep_loss
-                    + self.args.offset_coefficient * offset_loss
-                )
+                # Base trainer returns: (total_loss, loss_dict, pred_x0)
+                # loss_dict contains: diff_loss, percep_loss, offset_loss, train_loss
+                loss_dict = loss_components
 
+                # Add SCR loss if phase 2
+                if self.config.phase_2 and self.scr is not None:
+                    neg_images = samples.get("neg_images")
+                    if neg_images is not None:
+                        sc_loss = self.compute_phase2_loss(
+                            pred_original_sample_norm=pred_original_sample_norm,
+                            target_images=target_images,
+                            neg_images=neg_images,
+                        )
+                        loss_dict["sc_loss"] = sc_loss.item()
+                        loss_dict["train_loss"] = (
+                            loss_dict["train_loss"]
+                            + self.config.sc_coefficient * sc_loss.item()
+                        )
+            else:
+                # Minimal fallback without perceptual loss
+                diff_loss = F.mse_loss(
+                    noise_pred.float(), noise.float(), reduction="mean"
+                )
+                offset_loss = (
+                    offset_out_sum / 2.0
+                    if isinstance(offset_out_sum, torch.Tensor)
+                    else torch.tensor(0.0, device=device)
+                )
                 loss_dict = {
                     "diff_loss": diff_loss.item(),
                     "offset_loss": offset_loss.item(),
-                    "train_loss": total_loss.item(),
+                    "train_loss": (
+                        diff_loss.item()
+                        + self.config.offset_coefficient * offset_loss.item()
+                    ),
                 }
 
-        loss = loss_dict["train_loss"]
+        # Extract scalar loss for backward (matching base trainer)
+        loss = torch.tensor(loss_dict["train_loss"], device=device)
 
         return loss, loss_dict
 
     def train(self):
-        """Training loop with FST-specific logging."""
-        logger.info("=" * 80)
-        logger.info("Starting FST Training")
-        logger.info("=" * 80)
-
+        """Main training loop matching base trainer logging pattern."""
         num_update_steps_per_epoch = math.ceil(
             len(self.train_dataloader) / self.config.gradient_accumulation_steps
         )
@@ -584,97 +670,130 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             self.config.max_train_steps / num_update_steps_per_epoch
         )
 
-        if self.use_fst:
-            logger.info(f"FST enabled with consistency loss: {self.use_consistency_loss}")
+        if self.use_fst and self.accelerator.is_main_process:
+            logger.info(
+                f"FST enabled with consistency loss: {self.use_consistency_loss}"
+            )
             logger.info(f"Consistency weight: {self.consistency_weight}")
             logger.info(f"Consistency loss type: {self.consistency_loss_type}")
 
-        # Setup progress bar
+        # Setup progress bar (matching base trainer)
         progress_bar = HFTqdm(
             range(self.config.max_train_steps),
             disable=not self.accelerator.is_local_main_process,
+            desc="Training",
         )
-        progress_bar.set_description("Steps")
 
-        self.current_epoch = 0
+        # Initialize tracking variables (matching base trainer)
+        train_loss_accum = 0.0
+        loss_accum_count = 0
 
-        for epoch in range(num_train_epochs):
+        # Training loop
+        for epoch in range(self.current_epoch, num_train_epochs):
             self.current_epoch = epoch
-            self.model.train()
 
             for step, samples in enumerate(self.train_dataloader):
+                # Skip steps if resuming
+                if self.global_step >= self.config.max_train_steps:
+                    break
+
                 with self.accelerator.accumulate(self.model):
-                    # Forward + backward
+                    # Forward pass and loss computation
                     loss, loss_dict = self.train_step(samples)
 
+                    # Backward pass
                     self.accelerator.backward(loss)
 
+                    # Gradient clipping
                     if self.accelerator.sync_gradients:
-                        self.accelerator.clip_grad_norm_(
-                            self.model.parameters(),
-                            self.config.max_grad_norm,
+                        grad_norm = torch.nn.utils.clip_grad_norm_(
+                            self.model.parameters(), self.config.max_grad_norm
                         )
 
+                    # Optimization step
                     self.optimizer.step()
                     self.lr_scheduler.step()
                     self.optimizer.zero_grad()
 
-                # Update progress
-                if self.accelerator.sync_gradients:
-                    progress_bar.update(1)
-                    self.global_step += 1
+                    # Update tracking variables
+                    train_loss_accum += loss.detach().item()
+                    loss_accum_count += 1
 
-                    # Log to WandB (main process only)
-                    if self.global_step % self.args.log_interval == 0:
-                        # Build comprehensive log dict
+                    # Sync and log (matching base trainer pattern exactly)
+                    if self.accelerator.sync_gradients:
+                        # Update progress bar
+                        progress_bar.update(1)
+                        self.global_step += 1
+
+                        # Compute average loss
+                        avg_train_loss = train_loss_accum / loss_accum_count
+
+                        # Prepare log dictionary (matching base trainer format)
                         log_dict = {
-                            "train/loss": loss_dict.get("train_loss", 0.0),
-                            "train/diff_loss": loss_dict.get("diff_loss", 0.0),
-                            "train/percep_loss": loss_dict.get("percep_loss", 0.0),
-                            "train/offset_loss": loss_dict.get("offset_loss", 0.0),
-                            "train/learning_rate": self.lr_scheduler.get_last_lr()[0],
-                            "train/epoch": epoch,
+                            "train_loss": avg_train_loss,
+                            "learning_rate": self.lr_scheduler.get_last_lr()[0],
+                            "epoch": epoch + step / len(self.train_dataloader),
+                            "global_step": self.global_step,
+                            "grad_norm": (
+                                grad_norm.item()
+                                if self.accelerator.sync_gradients
+                                else 0.0
+                            ),
                         }
 
-                        # Add FST-specific losses
-                        if "consistency_loss" in loss_dict:
-                            log_dict["train/consistency_loss"] = loss_dict["consistency_loss"]
-                        if "sc_loss" in loss_dict:
-                            log_dict["train/sc_loss"] = loss_dict["sc_loss"]
+                        # Add individual losses with "train/" prefix
+                        for loss_name, loss_val in loss_dict.items():
+                            log_dict[f"train/{loss_name}"] = loss_val
 
-                        # Log to accelerator (which forwards to WandB)
+                        # Log to tracker (matching base trainer)
                         self.accelerator.log(log_dict, step=self.global_step)
 
-                        # Also log to console
-                        logger.info(
-                            f"Step {self.global_step}: "
-                            f"loss={loss_dict.get('train_loss', 0.0):.4f}, "
-                            f"diff={loss_dict.get('diff_loss', 0.0):.4f}, "
-                            f"percep={loss_dict.get('percep_loss', 0.0):.4f}, "
-                            f"offset={loss_dict.get('offset_loss', 0.0):.4f}"
-                            + (
+                        # Reset accumulators
+                        train_loss_accum = 0.0
+                        loss_accum_count = 0
+
+                        # Log to console (matching base trainer frequency)
+                        if self.global_step % self.args.log_interval == 0:
+                            consistency_str = (
                                 f", consistency={loss_dict.get('consistency_loss', 0.0):.4f}"
                                 if "consistency_loss" in loss_dict
                                 else ""
                             )
-                        )
+                            logger.info(
+                                f"Step {self.global_step}: "
+                                f"loss={avg_train_loss:.4f}, "
+                                f"lr={self.lr_scheduler.get_last_lr()[0]:.6f}, "
+                                f"grad_norm={grad_norm.item():.4f}"
+                                + consistency_str
+                            )
 
-                    # Save checkpoint
-                    if self.global_step % self.args.ckpt_interval == 0:
-                        self.save_checkpoint()
+                        # Save checkpoint (matching base trainer)
+                        if (
+                            self.global_step % self.args.ckpt_interval == 0
+                            and self.accelerator.is_main_process
+                        ):
+                            self.save_checkpoint()
 
-                    # Check if done
-                    if self.global_step >= self.args.max_train_steps:
-                        break
+                # Update progress bar description (matching base trainer)
+                progress_bar.set_postfix(
+                    loss=loss.detach().item(),
+                    lr=self.lr_scheduler.get_last_lr()[0],
+                    step=self.global_step,
+                )
 
-            if self.global_step >= self.args.max_train_steps:
+                if self.global_step >= self.config.max_train_steps:
+                    break
+
+            if self.global_step >= self.config.max_train_steps:
                 break
 
-        # Final checkpoint
-        self.save_checkpoint(is_final=True)
-        self.accelerator.end_training()
-        logger.info("Training complete!")
+        progress_bar.close()
 
+        # Save final checkpoint (matching base trainer)
+        if self.accelerator.is_main_process:
+            self.save_checkpoint(is_final=True)
+
+        self.accelerator.end_training()
 
     def save_checkpoint(self, is_final: bool = False):
         """Save FST training checkpoint."""
@@ -725,7 +844,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 save_dir / "fst_projection.safetensors",
             )
 
-            # Save full model
+            # Save full model if requested
             if getattr(self.args, "save_full_model", True):
                 torch.save(unwrapped_model, save_dir / "total_model_fst.pth")
         else:
@@ -780,42 +899,3 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 "checkpoint_type": "fst" if self.use_fst else "base",
             }
         )
-
-    def _setup_logging(self):
-        """Setup logging and tracking with FST information."""
-        super()._setup_logging()
-
-        # Log FST-specific configuration
-        if self.accelerator.is_main_process:
-            fst_config = {
-                "fst_enabled": self.use_fst,
-                "freeze_original_encoders": self.freeze_original_encoders,
-                "style_source_same_prob": self.style_source_same_prob,
-                "fst_feature_channels": self.fst_feature_channels,
-                "fst_num_queries": self.fst_num_queries,
-                "fst_query_dim": self.fst_query_dim,
-                "fst_num_scales": self.fst_num_scales,
-            }
-
-            if self.use_fst:
-                unwrapped = self.accelerator.unwrap_model(self.model)
-                fst_config["model_info"] = {
-                    "mss_encoder_params": sum(
-                        p.numel() for p in unwrapped.mss_encoder.parameters()
-                    ),
-                    "fst_module_params": sum(
-                        p.numel() for p in unwrapped.fst_module.parameters()
-                    ),
-                    "fst_projection_params": sum(
-                        p.numel() for p in unwrapped.fst_projection.parameters()
-                    ),
-                    "total_fst_params": sum(
-                        p.numel()
-                        for p in list(unwrapped.mss_encoder.parameters())
-                        + list(unwrapped.fst_module.parameters())
-                        + list(unwrapped.fst_projection.parameters())
-                    ),
-                }
-
-            self.accelerator.log({"fst_config": fst_config})
-            logger.info(f"FST Configuration: {fst_config}")
