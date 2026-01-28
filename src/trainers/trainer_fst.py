@@ -82,6 +82,8 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         if self.use_fst and self.use_consistency_loss:
             self.combined_loss = CombinedFSTLoss(
                 consistency_weight=self.consistency_weight,
+                perceptual_coefficient=self.config.perceptual_coefficient,
+                offset_coefficient=self.config.offset_coefficient,
                 consistency_loss_type=self.consistency_loss_type,
                 use_query_only=True,
                 num_queries=self.fst_num_queries,
@@ -401,9 +403,9 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         target_img = samples["target_img"]
         style_img = samples["style_img"]
         content_img = samples["content_img"]
+        nonorm_target_img = samples.get("nonorm_target_img")
 
         # Additional reference images for consistency (if available)
-        # These should have different content but same source/target styles
         ref_content_imgs = samples.get("ref_content_imgs", [])
 
         batch_size = target_img.shape[0]
@@ -426,13 +428,12 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         # Apply classifier-free guidance dropout if enabled
         if self.drop_prob > 0:
             content_img, style_img = self.apply_classifier_free_guidance(
-                content_img, style_img, self.drop_prob
+                content_img, style_img, self.drop_prob, samples
             )
 
         # Forward pass
         if self.use_fst:
             # For FST model, we need source and target style images
-            # Assuming style_img is the target and we have a source style reference
             style_source_img = samples.get("style_source_img", style_img)
 
             outputs = self.model(
@@ -467,19 +468,66 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                         ref_outputs["transformation_features"]
                     )
 
-            # Compute loss with consistency
+            # Compute perceptual loss (like base trainer)
+            pred_original_sample_norm = x0_from_epsilon(
+                scheduler=self.noise_scheduler,
+                noise_pred=outputs["noise_pred"],
+                x_t=noisy_latents,
+                timesteps=timesteps,
+            )
+            pred_original_sample = reNormalize_img(pred_original_sample_norm)
+            
+            if nonorm_target_img is not None:
+                norm_pred_ori = normalize_mean_std(pred_original_sample)
+                norm_target_ori = normalize_mean_std(nonorm_target_img)
+                percep_loss = self.perceptual_loss.calculate_loss(
+                    generated_images=norm_pred_ori,
+                    target_images=norm_target_ori,
+                    device=device,
+                )
+            else:
+                percep_loss = torch.tensor(0.0, device=device)
+
+            # Compute loss with all components
             if self.use_consistency_loss and len(transformation_features_list) >= 2:
                 loss_dict = self.combined_loss(
                     noise_pred=outputs["noise_pred"],
                     target_noise=noise,
                     transformation_features_list=transformation_features_list,
                     offset_out_sum=outputs.get("offset_out_sum"),
+                    perceptual_loss=percep_loss,
                 )
             else:
-                # Fallback to basic loss
-                loss_dict = self.model.get_loss_dict(outputs, noise)
+                # Fallback to basic loss (but still compute all components)
+                offset_out_sum = outputs.get("offset_out_sum")
+                diff_loss = F.mse_loss(outputs["noise_pred"], noise)
+                offset_loss = offset_out_sum / 2.0 if isinstance(offset_out_sum, torch.Tensor) else torch.tensor(0.0, device=device)
+                
+                loss_dict = {
+                    "diff_loss": diff_loss,
+                    "percep_loss": percep_loss,
+                    "offset_loss": offset_loss,
+                    "train_loss": (
+                        diff_loss 
+                        + self.config.perceptual_coefficient * percep_loss
+                        + self.config.offset_coefficient * offset_loss
+                    ),
+                }
+
+            # Add SCR loss for phase 2 (if applicable)
+            if self.config.phase_2 and self.scr is not None:
+                neg_images = samples.get("neg_images")
+                if neg_images is not None:
+                    sc_loss = self.compute_phase2_loss(
+                        pred_original_sample_norm=pred_original_sample_norm,
+                        target_images=target_img,
+                        neg_images=neg_images,
+                    )
+                    loss_dict["train_loss"] = loss_dict["train_loss"] + self.config.sc_coefficient * sc_loss
+                    loss_dict["sc_loss"] = sc_loss
+
         else:
-            # Standard FontDiffuser forward
+            # Standard FontDiffuser forward (use base trainer approach)
             noise_pred, offset_out_sum = self.model(
                 noisy_latents,
                 timesteps,
@@ -488,19 +536,27 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 self.args.content_encoder_downsample_size,
             )
 
-            loss_dict = {
-                "noise_loss": torch.nn.functional.mse_loss(noise_pred, noise),
-                "offset_loss": (
-                    offset_out_sum.mean()
-                    if isinstance(offset_out_sum, torch.Tensor)
-                    else torch.tensor(0.0, device=device)
-                ),
-            }
-            loss_dict["total_loss"] = (
-                loss_dict["noise_loss"] + 0.01 * loss_dict["offset_loss"]
-            )
+            # Use base trainer's compute_losses method
+            if nonorm_target_img is not None:
+                total_loss, loss_dict, pred_original_sample_norm = self.compute_losses(
+                    noise_pred=noise_pred,
+                    noise=noise,
+                    offset_out_sum=offset_out_sum,
+                    noisy_target_images=noisy_latents,
+                    nonorm_target_images=nonorm_target_img,
+                    timesteps=timesteps,
+                )
+                loss_dict["train_loss"] = total_loss
+            else:
+                diff_loss = F.mse_loss(noise_pred, noise)
+                offset_loss = offset_out_sum / 2.0 if isinstance(offset_out_sum, torch.Tensor) else torch.tensor(0.0, device=device)
+                loss_dict = {
+                    "diff_loss": diff_loss,
+                    "offset_loss": offset_loss,
+                    "train_loss": diff_loss + self.config.offset_coefficient * offset_loss,
+                }
 
-        loss = loss_dict["total_loss"]
+        loss = loss_dict["train_loss"]
 
         # Convert to float for logging
         loss_dict_float = {

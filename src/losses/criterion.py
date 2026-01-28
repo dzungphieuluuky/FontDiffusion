@@ -238,15 +238,15 @@ class FSTStyleConsistencyLoss(nn.Module):
 
 class CombinedFSTLoss(nn.Module):
     """
-    Combined loss for FST training that includes:
-    1. Reconstruction loss (noise prediction)
-    2. Consistency loss (style transformation)
-    3. Optional perceptual loss
+    Combined loss for FST training that includes all loss components.
+    Returns a dictionary matching base trainer format.
     """
 
     def __init__(
         self,
         consistency_weight: float = 0.1,
+        perceptual_coefficient: float = 0.01,
+        offset_coefficient: float = 0.5,
         consistency_loss_type: str = "mse",
         use_query_only: bool = True,
         num_queries: int = 256,
@@ -254,12 +254,16 @@ class CombinedFSTLoss(nn.Module):
         """
         Args:
             consistency_weight: Weight for consistency loss
+            perceptual_coefficient: Weight for perceptual loss
+            offset_coefficient: Weight for offset loss
             consistency_loss_type: Type of consistency loss
             use_query_only: Whether to use query-only consistency
             num_queries: Number of learnable queries
         """
         super().__init__()
         self.consistency_weight = consistency_weight
+        self.perceptual_coefficient = perceptual_coefficient
+        self.offset_coefficient = offset_coefficient
 
         if use_query_only:
             self.consistency_loss = FSTStyleConsistencyLoss(
@@ -277,23 +281,26 @@ class CombinedFSTLoss(nn.Module):
         target_noise: torch.Tensor,
         transformation_features_list: list[torch.Tensor],
         offset_out_sum: Optional[torch.Tensor] = None,
+        perceptual_loss: Optional[torch.Tensor] = None,
     ) -> dict[str, torch.Tensor]:
         """
-        Compute combined loss.
+        Compute combined loss matching base trainer format.
 
         Args:
             noise_pred: Predicted noise from U-Net
             target_noise: Ground truth noise
             transformation_features_list: List of transformation features
             offset_out_sum: Optional offset loss term
+            perceptual_loss: Pre-computed perceptual loss (if available)
 
         Returns:
-            Dictionary with loss components
+            Dictionary with loss components: diff_loss, percep_loss, offset_loss,
+            consistency_loss, train_loss
         """
         losses = {}
 
-        # Main reconstruction loss
-        losses["noise_loss"] = torch.nn.functional.mse_loss(noise_pred, target_noise)
+        # Main diffusion loss (renamed to match base trainer)
+        losses["diff_loss"] = torch.nn.functional.mse_loss(noise_pred, target_noise)
 
         # Consistency loss
         if len(transformation_features_list) >= 2:
@@ -303,17 +310,24 @@ class CombinedFSTLoss(nn.Module):
         else:
             losses["consistency_loss"] = torch.tensor(0.0, device=noise_pred.device)
 
-        # Offset loss (if applicable)
+        # Offset loss (divided by 2 to match base trainer)
         if offset_out_sum is not None and isinstance(offset_out_sum, torch.Tensor):
-            losses["offset_loss"] = offset_out_sum.mean()
+            losses["offset_loss"] = offset_out_sum / 2.0
         else:
             losses["offset_loss"] = torch.tensor(0.0, device=noise_pred.device)
 
-        # Total loss
-        losses["total_loss"] = (
-            losses["noise_loss"]
+        # Perceptual loss (should be provided externally like base trainer)
+        if perceptual_loss is not None:
+            losses["percep_loss"] = perceptual_loss
+        else:
+            losses["percep_loss"] = torch.tensor(0.0, device=noise_pred.device)
+
+        # Total loss (matching base trainer naming: train_loss)
+        losses["train_loss"] = (
+            losses["diff_loss"]
+            + self.perceptual_coefficient * losses["percep_loss"]
+            + self.offset_coefficient * losses["offset_loss"]
             + self.consistency_weight * losses["consistency_loss"]
-            + 0.01 * losses["offset_loss"]
         )
 
         return losses
