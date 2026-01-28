@@ -4,6 +4,7 @@ Extends base FontDiffuserTrainer with FST-specific functionality.
 """
 
 import logging
+import math
 import traceback
 from dataclasses import asdict
 from pathlib import Path
@@ -579,6 +580,13 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         logger.info("Starting FST Training")
         logger.info("=" * 80)
 
+        num_update_steps_per_epoch = math.ceil(
+            len(self.train_dataloader) / self.config.gradient_accumulation_steps
+        )
+        num_train_epochs = math.ceil(
+            self.config.max_train_steps / num_update_steps_per_epoch
+        )
+
         if self.use_fst:
             logger.info(f"FST enabled with consistency loss: {self.use_consistency_loss}")
             logger.info(f"Consistency weight: {self.consistency_weight}")
@@ -593,7 +601,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
 
         self.current_epoch = 0
 
-        for epoch in range(self.config.num_train_epochs):
+        for epoch in range(num_train_epochs):
             self.current_epoch = epoch
             self.model.train()
 
