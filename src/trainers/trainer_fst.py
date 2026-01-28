@@ -333,6 +333,12 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             except Exception as e:
                 logger.error(f"Failed to load FST module states: {e}")
 
+        # compile models
+        if self.args.compile:
+            logger.info("Compiling model for optimized performance...")
+            self.model = torch.compile(self.model)
+            logger.info("✓ Model compilation complete")
+
     def apply_classifier_free_guidance(
         self,
         content_images: torch.Tensor,
@@ -502,7 +508,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             )
 
             # Save full model
-            if getattr(self.args, "save_full_model", True):
+            if getattr(self.args, "save_full_model", False):
                 torch.save(unwrapped_model, save_dir / "total_model_fst.pth")
         else:
             # Save original model
