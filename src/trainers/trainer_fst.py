@@ -61,6 +61,9 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         self.fst_feature_channels = self._parse_feature_channels(
             getattr(args, "fst_feature_channels", "64,128,256,512,1024")
         )
+        self.style_source_same_prob = getattr(
+            args, "style_source_same_prob", 0.1
+        )
         self.fst_num_queries = getattr(args, "fst_num_queries", 256)
         self.fst_query_dim = getattr(args, "fst_query_dim", 128)
         self.fst_num_scales = getattr(args, "fst_num_scales", 5)
