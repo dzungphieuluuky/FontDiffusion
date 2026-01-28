@@ -87,7 +87,6 @@ FontDiffuser is a modular toolkit for font style transfer and generation using d
 ## Project-Specific Patterns & Conventions
 - **Argument Parsing:** All scripts use the shared parser from configs/fontdiffuser.py. Never duplicate argument logic.
 - **Type Hints:** Use lowercase types (list, dict, torch.Tensor, etc.) everywhere. Prefer torch.from_numpy() for numpy→tensor. Use torch.Tensor to declare tensor types and torch.tensor(...) to create tensors.
-- **File Naming:** All generated images use hash-based filenames (see tools/filename_utils.py) for deduplication and traceability.
 - **Caching:** LRU caching is used for font loading, image transforms, and character checks (see tools/utils.py).
 - **Data Integrity:** All dataset creation/validation scripts use results_checkpoint.json as the single source of truth. Never trust directory listings alone.
 - **Optimizations:** All performance flags (FP16, xformers, channels_last, torch.compile) are safe and do not alter model outputs.

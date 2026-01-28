@@ -293,18 +293,6 @@ def get_style_transform(style_image_size: tuple[int, int]) -> transforms.Compose
 
 
 def load_state_dict_auto(path: str):
-    """
-    Load state_dict from .pth or .safetensors automatically
-
-    Args:
-        path (str): Path to checkpoint file
-
-    Raises:
-        ImportError: safetensors not installed for .safetensors files
-
-    Returns:
-        _type_: Loaded state_dict
-    """
     if path.endswith(".safetensors"):
         try:
             from safetensors.torch import load_file as safe_load_file

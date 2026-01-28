@@ -1,12 +1,3 @@
-"""
-Multi-GPU batch sampling and evaluation for FontDiffuser using Accelerate.
-
-Uses hash-based file naming, results_checkpoint.json as single source of truth,
-and supports resumable generation with proper multi-GPU distribution.
-
-FIXED: Deadlock issues in multi-GPU inference
-"""
-
 import sys
 from pathlib import Path
 import argparse
