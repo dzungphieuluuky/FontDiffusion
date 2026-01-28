@@ -77,7 +77,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
 
         # Call parent init
         super().__init__(args)
-
+        self.drop_prob = getattr(args, "drop_prob", 0.1)
         # Setup consistency loss after model is created
         if self.use_fst and self.use_consistency_loss:
             self.combined_loss = CombinedFSTLoss(
@@ -424,9 +424,9 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         noisy_latents = self.noise_scheduler.add_noise(target_img, noise, timesteps)
 
         # Apply classifier-free guidance dropout if enabled
-        if self.cfg_drop_prob > 0:
+        if self.drop_prob > 0:
             content_img, style_img = self.apply_classifier_free_guidance(
-                content_img, style_img, self.cfg_drop_prob
+                content_img, style_img, self.drop_prob
             )
 
         # Forward pass
