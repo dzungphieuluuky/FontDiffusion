@@ -37,25 +37,37 @@ class CollateFN(object):
         Collate batch items.
 
         Each batch item should contain:
-        - target_img: Generated character
-        - content_img: Content reference
-        - style_source_img: Source style reference
-        - style_target_img: Target style reference
+        - target_image: Generated character
+        - content_image: Content reference
+        - style_source_image: Source style reference (FST mode)
+        - style_image: Target style reference
         - (optional) ref_content_imgs: List of additional content refs
         """
-        # Stack main tensors
-        target_imgs = torch.stack([item["target_img"] for item in batch])
-        content_imgs = torch.stack([item["content_img"] for item in batch])
-        style_source_imgs = torch.stack([item["style_source_img"] for item in batch])
-        style_target_imgs = torch.stack([item["style_target_img"] for item in batch])
+        # Stack main tensors - use actual keys from dataset
+        target_imgs = torch.stack([item["target_image"] for item in batch])
+        content_imgs = torch.stack([item["content_image"] for item in batch])
+        style_imgs = torch.stack([item["style_image"] for item in batch])
 
         result = {
             "target_img": target_imgs,
             "content_img": content_imgs,
-            "style_source_img": style_source_imgs,
-            "style_target_img": style_target_imgs,
-            "style_img": style_target_imgs,  # Alias for compatibility
+            "style_img": style_imgs,
         }
+
+        # Add nonorm_target_image if present
+        if "nonorm_target_image" in batch[0]:
+            nonorm_targets = torch.stack([item["nonorm_target_image"] for item in batch])
+            result["nonorm_target_img"] = nonorm_targets
+
+        # Add style_source_image for FST mode
+        if "style_source_image" in batch[0]:
+            style_source_imgs = torch.stack([item["style_source_image"] for item in batch])
+            result["style_source_img"] = style_source_imgs
+
+        # Add neg_images for SCR mode
+        if "neg_images" in batch[0]:
+            neg_imgs = self._collate_neg_images([item["neg_images"] for item in batch])
+            result["neg_images"] = neg_imgs
 
         # Collect consistency references if available
         if self.num_consistency_refs > 0:
@@ -76,37 +88,6 @@ class CollateFN(object):
                 ]
 
         return result
-
-    def _collate_tensors(self, key: str, tensors: list[torch.Tensor]) -> torch.Tensor:
-        """
-        Collate a list of tensors, handling variable shapes.
-
-        Args:
-            key: Name of the tensor field (for logging)
-            tensors: List of tensors to collate
-
-        Returns:
-            Batched tensor
-        """
-        first_shape = tensors[0].shape
-
-        # Special handling for neg_images (already batched per sample)
-        if key == "neg_images":
-            return self._collate_neg_images(tensors)
-
-        # Check if all tensors have the same shape
-        if all(t.shape == first_shape for t in tensors):
-            # All same shape - standard stacking
-            return torch.stack(tensors)
-
-        # Variable shapes detected - try to standardize
-        if self.verbose:
-            logging.warning(
-                f"Variable shapes detected for key '{key}': "
-                f"{[tuple(t.shape) for t in tensors]}"
-            )
-
-        return self._standardize_and_stack(key, tensors, first_shape)
 
     def _collate_neg_images(
         self, neg_image_tensors: list[torch.Tensor]
@@ -151,70 +132,12 @@ class CollateFN(object):
 
         return torch.stack(padded_negs)
 
-    def _standardize_and_stack(
-        self, key: str, tensors: list[torch.Tensor], target_shape: torch.Size
-    ) -> torch.Tensor:
-        """
-        Standardize tensor shapes and stack them.
-
-        Args:
-            key: Tensor field name
-            tensors: List of tensors to standardize
-            target_shape: Target shape to resize to
-
-        Returns:
-            Stacked tensor with standardized shapes
-        """
-        try:
-            from torchvision.transforms import functional as TF
-
-            standardized = []
-            for tensor in tensors:
-                if tensor.shape != target_shape:
-                    # For images (C, H, W), resize spatial dimensions
-                    if len(tensor.shape) == 3 and len(target_shape) == 3:
-                        tensor = TF.resize(
-                            tensor,
-                            (target_shape[-2], target_shape[-1]),
-                            interpolation=TF.InterpolationMode.BILINEAR,
-                            antialias=True,
-                        )
-                    elif len(tensor.shape) == 4 and len(target_shape) == 4:
-                        # For batched images (N, C, H, W)
-                        resized = []
-                        for i in range(tensor.shape[0]):
-                            img = TF.resize(
-                                tensor[i],
-                                (target_shape[-2], target_shape[-1]),
-                                interpolation=TF.InterpolationMode.BILINEAR,
-                                antialias=True,
-                            )
-                            resized.append(img)
-                        tensor = torch.stack(resized)
-                    else:
-                        # Fallback: warn and keep original
-                        logging.warning(
-                            f"Cannot resize tensor of shape {tensor.shape} "
-                            f"to {target_shape} for key '{key}'"
-                        )
-
-                standardized.append(tensor)
-
-            return torch.stack(standardized)
-
-        except Exception as e:
-            logging.error(
-                f"Could not standardize shapes for '{key}': {e}. Returning as list."
-            )
-            # Fallback: keep as list
-            return tensors
-
 
 class CollateFNDebug(CollateFN):
     """Debug version of CollateFN with detailed logging."""
 
     def __init__(self):
-        super().__init__(verbose=True)
+        super().__init__()
         self.call_count = 0
 
     def __call__(self, batch: list[dict[str, Any]]) -> dict[str, Any]:
@@ -325,26 +248,6 @@ def test_collate_fn():
     ]
 
     batched_scr = collate_fn(batch_scr)
-
-    # Test 4: Variable shapes (should trigger warning)
-    print("\n" + "=" * 80)
-    print("Test 4: Variable shapes (should warn and resize)")
-    print("=" * 80)
-
-    batch_variable = [
-        {
-            "content_image": torch.randn(1, 96, 96),
-            "style_image": torch.randn(1, 96, 96),
-            "target_image": torch.randn(1, 128, 128),
-        },
-        {
-            "content_image": torch.randn(1, 96, 96),
-            "style_image": torch.randn(1, 100, 100),  # Different size
-            "target_image": torch.randn(1, 128, 128),
-        },
-    ]
-
-    batched_variable = collate_fn(batch_variable)
 
     print("\n" + "=" * 80)
     print("All tests completed!")
