@@ -663,14 +663,14 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                         )
 
                     # Save checkpoint
-                    if self.global_step % self.config.ckpt_interval == 0:
+                    if self.global_step % self.args.ckpt_interval == 0:
                         self.save_checkpoint()
 
                     # Check if done
-                    if self.global_step >= self.config.max_train_steps:
+                    if self.global_step >= self.args.max_train_steps:
                         break
 
-            if self.global_step >= self.config.max_train_steps:
+            if self.global_step >= self.args.max_train_steps:
                 break
 
         # Final checkpoint
