@@ -279,7 +279,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             train_dataset,
             shuffle=True,
             batch_size=self.config.train_batch_size,
-            collate_fn=CollateFNFST(verbose=True),
+            collate_fn=CollateFNFST(),
             num_workers=getattr(self.args, "num_workers", 4),
             pin_memory=True,
             persistent_workers=True,
