@@ -441,7 +441,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 content_img=content_img,
                 style_source_img=style_source_img,
                 style_target_img=style_img,
-                content_encoder_downsample_size=self.content_encoder_downsample_size,
+                content_encoder_downsample_size=self.args.content_encoder_downsample_size,
                 return_dict=True,
             )
 
@@ -460,7 +460,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                         content_img=ref_content,
                         style_source_img=style_source_img,
                         style_target_img=style_img,
-                        content_encoder_downsample_size=self.content_encoder_downsample_size,
+                        content_encoder_downsample_size=self.args.content_encoder_downsample_size,
                         return_dict=True,
                     )
                     transformation_features_list.append(
@@ -485,7 +485,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 timesteps,
                 style_img,
                 content_img,
-                self.content_encoder_downsample_size,
+                self.args.content_encoder_downsample_size,
             )
 
             loss_dict = {
