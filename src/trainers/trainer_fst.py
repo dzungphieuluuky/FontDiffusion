@@ -573,6 +573,104 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
 
         return loss, loss_dict_float
 
+    def train(self):
+        """Training loop with FST-specific logging."""
+        logger.info("=" * 80)
+        logger.info("Starting FST Training")
+        logger.info("=" * 80)
+
+        if self.use_fst:
+            logger.info(f"FST enabled with consistency loss: {self.use_consistency_loss}")
+            logger.info(f"Consistency weight: {self.consistency_weight}")
+            logger.info(f"Consistency loss type: {self.consistency_loss_type}")
+
+        # Setup progress bar
+        progress_bar = HFTqdm(
+            range(self.config.max_train_steps),
+            disable=not self.accelerator.is_local_main_process,
+        )
+        progress_bar.set_description("Steps")
+
+        self.current_epoch = 0
+
+        for epoch in range(self.config.num_train_epochs):
+            self.current_epoch = epoch
+            self.model.train()
+
+            for step, samples in enumerate(self.train_dataloader):
+                with self.accelerator.accumulate(self.model):
+                    # Forward + backward
+                    loss, loss_dict = self.train_step(samples)
+
+                    self.accelerator.backward(loss)
+
+                    if self.accelerator.sync_gradients:
+                        self.accelerator.clip_grad_norm_(
+                            self.model.parameters(),
+                            self.config.max_grad_norm,
+                        )
+
+                    self.optimizer.step()
+                    self.lr_scheduler.step()
+                    self.optimizer.zero_grad()
+
+                # Update progress
+                if self.accelerator.sync_gradients:
+                    progress_bar.update(1)
+                    self.global_step += 1
+
+                    # Log to WandB (main process only)
+                    if self.global_step % self.config.logging_steps == 0:
+                        # Build comprehensive log dict
+                        log_dict = {
+                            "train/loss": loss_dict.get("train_loss", 0.0),
+                            "train/diff_loss": loss_dict.get("diff_loss", 0.0),
+                            "train/percep_loss": loss_dict.get("percep_loss", 0.0),
+                            "train/offset_loss": loss_dict.get("offset_loss", 0.0),
+                            "train/learning_rate": self.lr_scheduler.get_last_lr()[0],
+                            "train/epoch": epoch,
+                        }
+
+                        # Add FST-specific losses
+                        if "consistency_loss" in loss_dict:
+                            log_dict["train/consistency_loss"] = loss_dict["consistency_loss"]
+                        if "sc_loss" in loss_dict:
+                            log_dict["train/sc_loss"] = loss_dict["sc_loss"]
+
+                        # Log to accelerator (which forwards to WandB)
+                        self.accelerator.log(log_dict, step=self.global_step)
+
+                        # Also log to console
+                        logger.info(
+                            f"Step {self.global_step}: "
+                            f"loss={loss_dict.get('train_loss', 0.0):.4f}, "
+                            f"diff={loss_dict.get('diff_loss', 0.0):.4f}, "
+                            f"percep={loss_dict.get('percep_loss', 0.0):.4f}, "
+                            f"offset={loss_dict.get('offset_loss', 0.0):.4f}"
+                            + (
+                                f", consistency={loss_dict.get('consistency_loss', 0.0):.4f}"
+                                if "consistency_loss" in loss_dict
+                                else ""
+                            )
+                        )
+
+                    # Save checkpoint
+                    if self.global_step % self.config.ckpt_interval == 0:
+                        self.save_checkpoint()
+
+                    # Check if done
+                    if self.global_step >= self.config.max_train_steps:
+                        break
+
+            if self.global_step >= self.config.max_train_steps:
+                break
+
+        # Final checkpoint
+        self.save_checkpoint(is_final=True)
+        self.accelerator.end_training()
+        logger.info("Training complete!")
+
+
     def save_checkpoint(self, is_final: bool = False):
         """Save FST training checkpoint."""
         if not self.accelerator.is_main_process:
