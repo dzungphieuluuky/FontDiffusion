@@ -40,7 +40,7 @@ class DatasetConfig:
     resize_height: int = 256
     spacing: int = 10
     num_workers: int = None  # None = auto-detect
-    config_name: str = "streaming"
+    config_name: str = None
 
     def __post_init__(self):
         """Convert paths to Path if they're strings."""
