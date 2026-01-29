@@ -18,7 +18,7 @@ from huggingface_hub import HfApi, create_repo, login
 
 from utilities import load_model_checkpoint, save_model_checkpoint, HFTqdm
 
-logger = logging.getLogger("ModelsUploader")
+logger = logging.getLogger(__name__)
 
 # Default FontDiffusion weight files
 DEFAULT_FILES = [

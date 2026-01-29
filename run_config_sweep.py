@@ -35,7 +35,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.tools.utilities import HFTqdm
 from analyze_evaluation_results import EvaluationAnalyzer
 
-logger = logging.getLogger("ConfigSweep")
+logger = logging.getLogger(__name__)
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )

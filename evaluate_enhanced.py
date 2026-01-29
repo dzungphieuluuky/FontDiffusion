@@ -83,7 +83,7 @@ except ImportError:
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
-logger = logging.getLogger("EnhancedEvaluator")
+logger = logging.getLogger(__name__)
 
 # Set style for matplotlib
 sns.set_style("whitegrid")

@@ -23,7 +23,7 @@ from src.configs.fontdiffuser import get_parser
 from src.trainers.training_config import TrainingConfig
 from src.trainers.trainer import FontDiffuserTrainer
 
-logger = logging.getLogger("FontDiffuserTrainer")
+logger = logging.getLogger(__name__)
 
 
 def parse_args_training():

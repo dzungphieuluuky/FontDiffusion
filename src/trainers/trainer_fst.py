@@ -43,7 +43,7 @@ from src.tools.utils import (
 from src.trainers.training_config import TrainingConfig
 from src.trainers.trainer import FontDiffuserTrainer
 
-logger = logging.getLogger("FontDiffuserFSTTrainer")
+logger = logging.getLogger(__name__)
 
 
 class FontDiffuserFSTTrainer(FontDiffuserTrainer):

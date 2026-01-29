@@ -18,7 +18,7 @@ from utilities import (
     HFTqdm,
 )
 
-logger = logging.getLogger("ValidationSplitCreator")
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================

@@ -33,7 +33,7 @@ from inference.sample_optimized import (
     get_style_transform,
 )
 
-logger = logging.getLogger("BatchSampler")
+logger = logging.getLogger(__name__)
 enable_progress_bars()
 
 # Import evaluation metrics

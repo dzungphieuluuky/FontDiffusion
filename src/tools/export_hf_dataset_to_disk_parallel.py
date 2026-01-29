@@ -23,7 +23,7 @@ from filename_utils import (
     get_target_filename,
 )
 
-logger = logging.getLogger("DatasetExporter")
+logger = logging.getLogger(__name__)
 
 
 @dataclass

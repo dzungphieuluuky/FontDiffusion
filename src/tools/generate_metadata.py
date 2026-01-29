@@ -16,7 +16,7 @@ from filename_utils import (
     compute_file_hash,
 )
 
-logger = logging.getLogger("GenerateMetadata")
+logger = logging.getLogger(__name__)
 
 
 def generate_checkpoint_from_disk(data_root: str) -> dict[str, Any]:

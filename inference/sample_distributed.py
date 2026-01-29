@@ -39,7 +39,7 @@ from inference.sample_batch import (
 )
 from src.dpm_solver.pipeline_dpm_solver import FontDiffuserDPMPipeline
 
-logger = logging.getLogger("MultiGPUsBatchSampler")
+logger = logging.getLogger(__name__)
 # Optional dependencies
 try:
     import lpips

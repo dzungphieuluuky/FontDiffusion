@@ -17,7 +17,7 @@ from PIL import Image
 from utilities import HFTqdm
 from filename_utils import compute_file_hash
 
-logger = logging.getLogger("DatasetCreator")
+logger = logging.getLogger(__name__)
 
 
 @dataclass

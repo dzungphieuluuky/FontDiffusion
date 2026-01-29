@@ -42,7 +42,7 @@ from src.tools.filename_utils import (
     compute_file_hash,
 )
 
-logger = logging.getLogger("OptimizedSampler")
+logger = logging.getLogger(__name__)
 
 
 def arg_parse() -> Namespace:
