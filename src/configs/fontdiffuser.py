@@ -87,7 +87,7 @@ def get_parser():
     )
     model_group.add_argument(
         "--channel_attn",
-        type=bool,
+        action="store_true", 
         default=True,
         help="Use SE attention in U-Net",
     )
@@ -489,12 +489,6 @@ def get_parser():
         help="Enable style transformation module",
     )
     style_transform_group.add_argument(
-        "--num_scales",
-        type=int,
-        default=5,
-        help="Number of scales in style transformation",
-    )
-    style_transform_group.add_argument(
         "--feature_dim",
         type=int,
         default=512,
@@ -557,20 +551,6 @@ def get_parser():
         nargs="+",
         default=None,
         help="FST feature channel dimensions (auto if None)",
-    )
-
-    # ADD THESE NEW ARGUMENTS:
-    fst_group.add_argument(
-        "--mss_base_channels",
-        type=int,
-        default=64,
-        help="Base channels for Multi-Scale Style Encoder (MSSE)",
-    )
-    fst_group.add_argument(
-        "--mss_num_scales",
-        type=int,
-        default=5,
-        help="Number of scales in MSSE (should match fst_num_scales)",
     )
     # MSS Encoder specific
     fst_group.add_argument(
