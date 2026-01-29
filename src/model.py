@@ -275,12 +275,16 @@ class FontDiffuserWithFST(nn.Module):
         The FST transformation should be similar for all pairs since they
         share the same source→target style transformation, regardless of content.
         
+        Uses John Schulman's k3 estimator for KL divergence:
+        KL(P||Q) ≈ E[(exp(log P(x) - log Q(x)) - 1) - (log P(x) - log Q(x))]
+        Reference: http://joschu.net/blog/kl-approx.html
+        
         Args:
             consistency_source_images: (B, k, 1, 96, 96) - k source images per batch
             consistency_target_images: (B, k, 1, 96, 96) - k target images per batch
             
         Returns:
-            consistency_loss: scalar tensor (variance of transformation features)
+            consistency_loss: scalar tensor (variance + KL divergence loss)
         """
         batch_size, num_pairs, C, H, W = consistency_source_images.shape
         
@@ -299,26 +303,49 @@ class FontDiffuserWithFST(nn.Module):
             batch_size, num_pairs, transformation_features.shape[1], transformation_features.shape[2]
         )
         
-        # Compute mean and std across pairs (dim=1)
-        mean_T = T.mean(dim=1, keepdim=True)  # (B, 1, N, D)
+        # Compute statistics across pairs (dim=1)
+        mean_T = T.mean(dim=1, keepdim=True)  # (B, 1, N, D) - target uniform distribution
         std_T = T.std(dim=1, keepdim=True)    # (B, 1, N, D)
         
-        # Coefficient of Variation (scale-invariant)
-        # CV = std / (mean + eps)
+        # Coefficient of Variation (scale-invariant variance measure)
         eps = 1e-6
         cv = std_T / (mean_T.abs() + eps)
-        
-        # Combine variance loss + KL divergence from uniform distribution
         variance_loss = cv.mean()
         
-        # Optional: KL divergence encourages uniform spread
-        # KL(P||Q) where P = empirical dist, Q = uniform
-        normalized_T = (T - mean_T) / (std_T + eps)  # Standardize
-        kl_loss = 0.5 * ((normalized_T ** 2).mean() - torch.log(std_T + eps).mean())
+        # KL divergence using Schulman's k3 estimator
+        # P = uniform distribution (target), Q = empirical distribution (actual)
+        # We want KL(P||Q) to be small → transformations are uniformly distributed
         
-        total_loss = variance_loss + 0.1 * kl_loss
+        # Compute log probability ratio: log P(x) - log Q(x)
+        # For standardized Gaussian assumption:
+        # log P(x) = -0.5 * x^2 (standard normal)
+        # log Q(x) = -0.5 * ((x - μ) / σ)^2 - log(σ)
         
-        return total_loss    
+        # Standardize features: z = (T - mean) / std
+        z = (T - mean_T) / (std_T + eps)  # (B, k, N, D)
+        
+        # Log probability under P (standard normal, mean=0, std=1)
+        log_p = -0.5 * (z ** 2)
+        
+        # Log probability under Q (empirical distribution with learned mean/std)
+        # Since z is already standardized, log Q(x) includes the normalization term
+        log_q = -0.5 * (z ** 2) - torch.log(std_T + eps)
+        
+        # Log ratio
+        logr = log_p - log_q  # (B, k, N, D)
+        
+        # Schulman's k3 estimator: E[(exp(logr) - 1) - logr]
+        # This is an unbiased estimator with lower variance than k1 or k2
+        kl_loss = ((logr.exp() - 1.0) - logr).mean()
+        
+        # Clip KL loss for numerical stability (optional but recommended)
+        kl_loss = torch.clamp(kl_loss, min=0.0, max=10.0)
+        
+        # Combined loss: variance + KL divergence
+        # Lower weight on KL since it's already normalized
+        total_loss = variance_loss + 0.05 * kl_loss
+        
+        return total_loss
 class FontDiffuserModel(ModelMixin, ConfigMixin):
     """Forward function for FontDiffuer with content encoder style encoder and unet."""
 

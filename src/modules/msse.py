@@ -4,42 +4,70 @@ import torch.nn.functional as F
 
 
 class MultiScaleStyleEncoder(nn.Module):
-    """Multi-Scale Style Encoder (MSSE) for extracting style features at different scales."""
-
+    """Enhanced MSSE with residual connections and attention."""
     def __init__(
-        self, in_channels: int = 3, base_channels: int = 64, num_scales: int = 5
+        self, 
+        in_channels: int = 1,  # Grayscale for fonts
+        base_channels: int = 64, 
+        num_scales: int = 5,
+        use_attention: bool = True
     ):
         super().__init__()
         self.num_scales = num_scales
-
-        # Store the actual output channels for each scale
         self.output_channels = []
-
         self.encoders = nn.ModuleList()
+        
         for i in range(num_scales):
-            out_channels = base_channels * (2**i)  # 64, 128, 256, 512, 1024
+            out_channels = base_channels * (2 ** i)
             self.output_channels.append(out_channels)
-
-            encoder = nn.Sequential(
-                nn.Conv2d(in_channels, out_channels // 2, 3, 1, 1),
-                nn.ReLU(),
-                nn.Conv2d(out_channels // 2, out_channels, 3, 1, 1),
-                nn.ReLU(),
-                nn.AdaptiveAvgPool2d((48 // (2**i), 48 // (2**i))),
-            )
-            self.encoders.append(encoder)
-
+            
+            layers = [
+                # Initial conv with larger receptive field
+                nn.Conv2d(in_channels, out_channels // 2, 5, 1, 2),
+                nn.InstanceNorm2d(out_channels // 2),
+                nn.LeakyReLU(0.2, inplace=True),
+                
+                # Residual block
+                ResidualBlock(out_channels // 2, out_channels, downsample=False),
+            ]
+            
+            # Add attention at higher scales (512, 1024)
+            if use_attention and i >= 3:
+                layers.append(SELayer(out_channels, reduction=16))
+            
+            # Adaptive pooling to target resolution
+            target_size = 48 // (2 ** i)
+            layers.append(nn.AdaptiveAvgPool2d((target_size, target_size)))
+            
+            self.encoders.append(nn.Sequential(*layers))
+    
     def forward(self, x: torch.Tensor) -> list[torch.Tensor]:
+        """x: (B, 1, H, W) → list of (B, C_i, H_i, W_i)"""
         features = []
         for encoder in self.encoders:
-            features.append(encoder(x))
+            feat = encoder(x)
+            features.append(feat)
         return features
 
     def get_output_channels(self) -> list[int]:
         """Return the actual output channels for each scale."""
         return self.output_channels
 
-
+class SELayer(nn.Module):
+    """Squeeze-and-Excitation channel attention."""
+    def __init__(self, channels: int, reduction: int = 16):
+        super().__init__()
+        self.fc = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(channels, channels // reduction, 1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(channels // reduction, channels, 1),
+            nn.Sigmoid()
+        )
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x * self.fc(x)
+    
 class ResidualBlock(nn.Module):
     """Basic residual block with optional downsampling."""
 
