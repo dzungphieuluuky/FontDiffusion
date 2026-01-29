@@ -26,6 +26,12 @@ from src import (
     build_scr,
     build_style_encoder,
     build_unet,
+
+    build_fst,
+    build_mss_encoder,
+    build_fst_projection,
+    build_original_style_projection,
+    get_unet_cross_attention_dim
 )
 from src.model import FontDiffuserWithFST
 from src.tools.utilities import (
@@ -50,11 +56,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
     """Trainer for FontDiffuserWithFST model with MSSE and FST modules."""
 
     def __init__(self, args):
-        """Initialize FST trainer.
-
-        Args:
-            args: Training arguments with FST-specific parameters
-        """
+        """Initialize FST trainer."""
         # Store FST-specific args before calling super
         self.use_fst = getattr(args, "use_fst", True)
         self.freeze_original_encoders = getattr(args, "freeze_original_encoders", False)
@@ -64,7 +66,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         self.fst_feature_channels = self._parse_feature_channels(
             getattr(args, "fst_feature_channels", "64,128,256,512,1024")
         )
-        self.fst_num_queries = getattr(args, "fst_num_queries", 220)
+        self.fst_num_queries = getattr(args, "fst_num_queries", 256)
         self.fst_query_dim = getattr(args, "fst_query_dim", 128)
         self.fst_num_scales = getattr(args, "fst_num_scales", 5)
 
@@ -77,19 +79,10 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             return [int(x.strip()) for x in channels_str.split(",")]
         return channels_str
 
-    def _create_config(self, args) -> TrainingConfig:
-        """Create TrainingConfig with FST-specific parameters."""
-        config = super()._create_config(args)
-
-        # Add FST-specific config (if needed for logging)
-        config.use_fst = self.use_fst
-        config.freeze_original_encoders = self.freeze_original_encoders
-        config.style_source_same_prob = self.style_source_same_prob
-
-        return config
-
     def _setup_models(self):
         """Initialize FST model components."""
+        logger.info("Building model components...")
+        
         # Build core components
         unet = build_unet(args=self.args)
         style_encoder = build_style_encoder(args=self.args)
@@ -105,44 +98,69 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 ckpt_dir=self.args.phase_1_ckpt_dir,
             )
 
-        # Create base FontDiffuser model
-        base_model = FontDiffuserModel(
-            unet=unet,
-            style_encoder=style_encoder,
-            content_encoder=content_encoder,
-        )
-
-        # Wrap with FSTDiff enhancement
+        # Create model based on FST flag
         if self.use_fst:
-            logger.info("Creating FontDiffuserWithFST model...")
-            self.model = FontDiffuserWithFST(
-                original_fontdiffuser=base_model,
-                feature_channels=self.fst_feature_channels,
-                num_queries=self.fst_num_queries,
-                query_dim=self.fst_query_dim,
-                num_scales=self.fst_num_scales,
+            logger.info("Building FST-enhanced model...")
+            
+            # Build FST-specific modules
+            mss_encoder = build_mss_encoder(args=self.args)
+            fst_module = build_fst(args=self.args)
+            
+            # Get cross-attention dimension from U-Net
+            cross_attn_dim = get_unet_cross_attention_dim(unet)
+            
+            # Build projection layers
+            fst_projection = build_fst_projection(
+                feature_dim=self.fst_feature_channels[-1],
+                cross_attn_dim=cross_attn_dim
+            )
+            original_style_projection = build_original_style_projection(
+                style_dim=1024,
+                cross_attn_dim=cross_attn_dim
             )
             
-            # Log model architecture and parameters
-            self.model.log_model_info()
-        else:
-            self.model = base_model
-            # Log base model parameters
-            self.model.log_model_info()
-
-        # Apply freezing if specified
-        if self.use_fst and self.freeze_original_encoders:
-            logger.info("Freezing original encoders...")
-            for param in self.model.content_encoder.parameters():
-                param.requires_grad = False
-            for param in self.model.style_encoder.parameters():
-                param.requires_grad = False
-            for param in self.model.diffusion_unet.parameters():
-                param.requires_grad = False
-            logger.info("✓ Original encoders frozen")
+            # Load FST checkpoints if available from phase 1
+            if hasattr(self, "_fst_module_states"):
+                self._load_fst_module_states(
+                    mss_encoder, fst_module, fst_projection, original_style_projection
+                )
             
-            # Log updated trainable parameters after freezing
-            logger.info("\nAfter freezing original encoders:")
+            # Create FST model
+            self.model = FontDiffuserWithFST(
+                unet=unet,
+                style_encoder=style_encoder,
+                content_encoder=content_encoder,
+                mss_encoder=mss_encoder,
+                fst_module=fst_module,
+                fst_projection=fst_projection,
+                original_style_projection=original_style_projection,
+            )
+            
+            logger.info("✓ Created FontDiffuserWithFST")
+            self.model.log_model_info()
+            
+            # Apply freezing if specified
+            if self.freeze_original_encoders:
+                logger.info("Freezing original encoders...")
+                for param in self.model.content_encoder.parameters():
+                    param.requires_grad = False
+                for param in self.model.style_encoder.parameters():
+                    param.requires_grad = False
+                for param in self.model.diffusion_unet.parameters():
+                    param.requires_grad = False
+                logger.info("✓ Original encoders frozen")
+                
+                logger.info("\nTrainable parameters after freezing:")
+                self.model.log_model_info()
+        else:
+            # Standard model without FST
+            from src.model import FontDiffuserModel
+            self.model = FontDiffuserModel(
+                unet=unet,
+                style_encoder=style_encoder,
+                content_encoder=content_encoder,
+            )
+            logger.info("✓ Created standard FontDiffuserModel")
             self.model.log_model_info()
 
         # Perceptual loss (always used)
@@ -156,23 +174,33 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 self._load_scr_checkpoint(self.args.scr_ckpt_path)
             self.scr.requires_grad_(False)
 
+    def _load_fst_module_states(self, mss_encoder, fst_module, fst_projection, original_style_projection):
+        """Load FST module states from phase 1 checkpoint."""
+        try:
+            if "mss_encoder" in self._fst_module_states:
+                mss_encoder.load_state_dict(self._fst_module_states["mss_encoder"])
+                logger.info("  ✓ Loaded mss_encoder from phase 1")
+            
+            if "fst_module" in self._fst_module_states:
+                fst_module.load_state_dict(self._fst_module_states["fst_module"])
+                logger.info("  ✓ Loaded fst_module from phase 1")
+            
+            if "fst_projection" in self._fst_module_states:
+                fst_projection.load_state_dict(self._fst_module_states["fst_projection"])
+                logger.info("  ✓ Loaded fst_projection from phase 1")
+                
+            if "original_style_projection" in self._fst_module_states:
+                original_style_projection.load_state_dict(self._fst_module_states["original_style_projection"])
+                logger.info("  ✓ Loaded original_style_projection from phase 1")
+                
+        except Exception as e:
+            logger.warning(f"Error loading FST module states: {e}")
+
     def _load_phase1_checkpoints(
         self, unet, style_encoder, content_encoder, ckpt_dir: str
     ):
         """Load phase 1 checkpoints with FST module support."""
         logger.info(f"Loading Phase 1 checkpoints from {ckpt_dir}...")
-
-        # Try to load FST-enhanced checkpoint first
-        fst_ckpt_path = Path(ckpt_dir) / "total_model_fst.pth"
-        if fst_ckpt_path.exists() and self.use_fst:
-            try:
-                logger.info("Loading full FST model checkpoint")
-                checkpoint = torch.load(fst_ckpt_path, map_location="cpu")
-                # Will load into model after it's created
-                self._fst_checkpoint = checkpoint
-                return
-            except Exception as e:
-                logger.warning(f"Failed to load FST checkpoint: {e}")
 
         # Load individual components
         components = {
@@ -198,7 +226,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
 
         # Try to load FST-specific modules if available
         if self.use_fst:
-            fst_modules = ["mss_encoder", "fst_module", "fst_projection"]
+            fst_modules = ["mss_encoder", "fst_module", "fst_projection", "original_style_projection"]
             self._fst_module_states = {}
 
             for module_name in fst_modules:
@@ -477,8 +505,8 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         unwrapped_model = self.accelerator.unwrap_model(self.model)
 
         if self.use_fst:
-            # Save FST-enhanced model components
-            logger.info("Saving FST model components")
+            # Save all FST model components individually
+            logger.info("Saving FST model components...")
 
             save_model_checkpoint(
                 unwrapped_model.diffusion_unet.state_dict(),
@@ -492,8 +520,6 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 unwrapped_model.content_encoder.state_dict(),
                 save_dir / "content_encoder.safetensors",
             )
-
-            # Save FST-specific modules
             save_model_checkpoint(
                 unwrapped_model.mss_encoder.state_dict(),
                 save_dir / "mss_encoder.safetensors",
@@ -506,12 +532,14 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 unwrapped_model.fst_projection.state_dict(),
                 save_dir / "fst_projection.safetensors",
             )
+            save_model_checkpoint(
+                unwrapped_model.original_style_projection.state_dict(),
+                save_dir / "original_style_projection.safetensors",
+            )
 
-            # Save full model
-            if getattr(self.args, "save_full_model", False):
-                torch.save(unwrapped_model, save_dir / "total_model_fst.pth")
+            logger.info("✓ Saved all FST components")
         else:
-            # Save original model
+            # Save standard model
             save_model_checkpoint(
                 unwrapped_model.config.unet.state_dict(),
                 save_dir / "unet.safetensors",
@@ -525,9 +553,6 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 save_dir / "content_encoder.safetensors",
             )
 
-            if getattr(self.args, "save_full_model", False):
-                torch.save(unwrapped_model, save_dir / "total_model.pth")
-
         # Save SCR for phase 2
         if self.config.phase_2 and self.scr is not None:
             save_model_checkpoint(self.scr.state_dict(), save_dir / "scr.safetensors")
@@ -537,7 +562,6 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             {
                 "global_step": self.global_step,
                 "epoch": self.current_epoch,
-                "model_state_dict": unwrapped_model.state_dict(),
                 "optimizer_state_dict": self.optimizer.state_dict(),
                 "lr_scheduler_state_dict": self.lr_scheduler.state_dict(),
                 "config": asdict(self.config),
@@ -554,7 +578,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             save_dir / "training_state.pt",
         )
 
-        logger.info(f"✓ Saved FST checkpoint to {save_dir}")
+        logger.info(f"✓ Saved checkpoint to {save_dir}")
         self.accelerator.log(
             {
                 "checkpoint_saved": True,
