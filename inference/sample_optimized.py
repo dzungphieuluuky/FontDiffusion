@@ -367,7 +367,6 @@ def load_fontdiffuser_pipeline(args: Namespace, use_fst: bool = False) -> FontDi
 
     logger.info("✓ Loaded model state_dict successfully")
 
-    # Create model BEFORE applying optimizations
     if use_fst:
         from src.model import FontDiffuserModelDPMWithFST
         
