@@ -367,22 +367,41 @@ def load_fontdiffuser_pipeline(args: Namespace, use_fst: bool = False) -> FontDi
     )
     content_encoder.load_state_dict(load_state_dict_auto(content_encoder_ckpt_path))
 
-    logger.info("✓ Loaded model state_dict successfully")
+    logger.info("✓ Loaded base model components (unet, style_encoder, content_encoder)")
 
     if use_fst:
         from src.model import FontDiffuserModelDPMWithFST
         
-        # Load FST-specific weights if available
-        if hasattr(args, "fst_ckpt_path") and args.fst_ckpt_path:
-            logger.info(f"Loading FST weights from {args.fst_ckpt_path}...")
-            fst_state_dict = load_state_dict_auto(args.fst_ckpt_path)
-        if hasattr(args, "mss_ckpt_path") and args.mss_ckpt_path:
-            logger.info(f"Loading MSS weights from {args.mss_ckpt_path}...")
-            mss_state_dict = load_state_dict_auto(args.mss_ckpt_path)
-
+        # Build FST modules (initially with random weights)
         fst_module = build_fst(args=args)
         mss_encoder = build_mss_encoder(args=args)
+        
+        # Load FST checkpoint if provided
+        if hasattr(args, "fst_ckpt_path") and args.fst_ckpt_path:
+            if os.path.exists(args.fst_ckpt_path):
+                logger.info(f"Loading FST checkpoint from {args.fst_ckpt_path}...")
+                fst_checkpoint = load_state_dict_auto(args.fst_ckpt_path)
+                
+                # Load individual module weights
+                if "fst_module" in fst_checkpoint:
+                    fst_module.load_state_dict(fst_checkpoint["fst_module"])
+                    logger.info("  ✓ Loaded fst_module weights")
+                else:
+                    logger.warning("  ⚠ fst_module weights not found in checkpoint")
+                
+                if "mss_encoder" in fst_checkpoint:
+                    mss_encoder.load_state_dict(fst_checkpoint["mss_encoder"])
+                    logger.info("  ✓ Loaded mss_encoder weights")
+                else:
+                    logger.warning("  ⚠ mss_encoder weights not found in checkpoint")
+            else:
+                logger.warning(f"FST checkpoint not found: {args.fst_ckpt_path}")
+                logger.warning("Using randomly initialized FST modules")
+        else:
+            logger.warning("No FST checkpoint path provided (--fst_ckpt_path)")
+            logger.warning("Using randomly initialized FST modules")
 
+        # Create FST-enhanced model
         model: FontDiffuserModelDPMWithFST = FontDiffuserModelDPMWithFST(
             unet=unet,
             style_encoder=style_encoder,
@@ -394,10 +413,15 @@ def load_fontdiffuser_pipeline(args: Namespace, use_fst: bool = False) -> FontDi
             query_dim=getattr(args, "fst_query_dim", 128),
             num_scales=getattr(args, "fst_num_scales", 5),
         )
+        logger.info("✓ Created FontDiffuserModelDPMWithFST")
     else:
+        # Standard model (non-FST)
         model: FontDiffuserModelDPM = FontDiffuserModelDPM(
-            unet=unet, style_encoder=style_encoder, content_encoder=content_encoder
+            unet=unet, 
+            style_encoder=style_encoder, 
+            content_encoder=content_encoder
         )
+        logger.info("✓ Created standard FontDiffuserModelDPM")
 
     # Apply FP16 conversion AFTER model creation
     if getattr(args, "fp16", False):
@@ -422,7 +446,7 @@ def load_fontdiffuser_pipeline(args: Namespace, use_fst: bool = False) -> FontDi
     model.to(args.device, dtype=dtype)
     model.eval()
 
-    logger.info("✓ Model moved to device")
+    logger.info("✓ Model moved to device and set to eval mode")
     
     # Log model info
     if hasattr(model, "log_model_info"):
@@ -430,9 +454,9 @@ def load_fontdiffuser_pipeline(args: Namespace, use_fst: bool = False) -> FontDi
 
     # Load the training ddpm_scheduler
     train_scheduler = build_ddpm_scheduler(args=args)
-    logger.info("✓ Loaded training DDPM scheduler successfully")
+    logger.info("✓ Loaded training DDPM scheduler")
 
-    # Load the DPM_Solver to generate the sample
+    # Create DPM-Solver pipeline
     pipe: FontDiffuserDPMPipeline = FontDiffuserDPMPipeline(
         model=model,
         ddpm_train_scheduler=train_scheduler,
@@ -440,7 +464,8 @@ def load_fontdiffuser_pipeline(args: Namespace, use_fst: bool = False) -> FontDi
         guidance_type=getattr(args, "guidance_type", "classifier-free"),
         guidance_scale=getattr(args, "guidance_scale", 7.5),
     )
-    logger.info("✓ Loaded DPM-Solver pipeline successfully")
+    logger.info("✓ Created DPM-Solver pipeline")
+    
     return pipe
 
 def sampling_batch(
