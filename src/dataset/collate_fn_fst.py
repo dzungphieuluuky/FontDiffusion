@@ -22,7 +22,6 @@ class CollateFN(object):
     def __init__(
         self,
         return_tensors: str = "pt",
-        num_consistency_refs: int = 0,
     ):
         """
         Args:
@@ -30,7 +29,6 @@ class CollateFN(object):
             num_consistency_refs: Number of additional content refs for consistency
         """
         self.return_tensors = return_tensors
-        self.num_consistency_refs = num_consistency_refs
 
     def __call__(self, batch: list[dict]) -> dict[str, torch.Tensor]:
         """
@@ -72,22 +70,27 @@ class CollateFN(object):
             neg_imgs = self._collate_neg_images([item["neg_images"] for item in batch])
             result["neg_images"] = neg_imgs
 
-        # Collect consistency references if available
-        if self.num_consistency_refs > 0:
-            ref_content_images = []
+        if "consistency_pairs" in batch[0]:
+            # Each batch item has a list of (source, target) tuples
+            # We need to collate these into separate tensors
+            
+            consistency_sources = []
+            consistency_targets = []
+            
             for item in batch:
-                refs = item.get("ref_content_images", [])
-                if len(refs) > 0:
-                    # Take up to num_consistency_refs
-                    item_refs = refs[: self.num_consistency_refs]
-                    ref_content_images.append(torch.stack(item_refs))
-            if len(ref_content_images) > 0:
-                # Stack across batch: (B, num_refs, C, H, W)
-                ref_content_images = torch.stack(ref_content_images)
-                # Reshape to list of (B, C, H, W) tensors
-                result["ref_content_images"] = [
-                    ref_content_images[:, i] for i in range(ref_content_images.shape[1])
-                ]
+                pairs = item.get("consistency_pairs", [])
+                if pairs:
+                    # Stack all pairs for this batch item
+                    # pairs: [(tensor, tensor), (tensor, tensor), ...]
+                    sources = torch.stack([p[0] for p in pairs])  # (k, C, H, W)
+                    targets = torch.stack([p[1] for p in pairs])  # (k, C, H, W)
+                    consistency_sources.append(sources)
+                    consistency_targets.append(targets)
+            
+            if consistency_sources:
+                # Stack across batch: (B, k, C, H, W)
+                result["consistency_source_images"] = torch.stack(consistency_sources)
+                result["consistency_target_images"] = torch.stack(consistency_targets)
 
         return result
 

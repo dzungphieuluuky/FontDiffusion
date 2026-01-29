@@ -332,6 +332,48 @@ class FontDataset(Dataset):
 
             sample["style_source_image"] = style_source_image
 
+        # Add consistency pairs for FST consistency loss
+        if self.num_consistency_pairs > 0:
+            # Determine source style from the style_source_image path
+            # We need to extract which style the source image came from
+            # This requires tracking the source style in get_style_source_image
+            
+            # For now, we'll infer it from the sampling strategy:
+            # If same_style was used, source_style = target_style
+            # If different_style was used, we need to find which style was selected
+            
+            # To properly implement this, we need to modify get_style_source_image
+            # to return both the image and the source style name
+            
+            # Get source style name by re-sampling with same logic
+            use_same_style = random.random() < self.style_source_same_prob
+            
+            if use_same_style:
+                source_style = style  # Same as target
+            else:
+                # Need to determine which different style was chosen
+                # We'll modify get_style_source_image to return style name
+                source_style, style_source_image_resampled = self.get_style_source_image_with_name(
+                    target_style=style, 
+                    content=content, 
+                    target_image_path=target_image_path
+                )
+                # Use the resampled image (with known style)
+                if self.transforms is not None:
+                    style_source_image = self.transforms[1](style_source_image_resampled)
+                sample["style_source_image"] = style_source_image
+            
+            # Get consistency pairs: same source→target style, different contents
+            consistency_pairs = self.get_consistency_pairs(
+                target_style=style,
+                source_style=source_style,
+                exclude_content=content,
+                num_pairs=self.num_consistency_pairs
+            )
+            
+            sample["consistency_pairs"] = consistency_pairs
+
+
         # Add negative samples for SCR loss
         if self.scr:
             style_list = list(self.style_to_images.keys())
@@ -385,6 +427,73 @@ class FontDataset(Dataset):
 
         return sample
 
+    def get_style_source_image_with_name(
+        self, target_style: str, content: str, target_image_path: str
+    ) -> tuple[str, Image.Image]:
+        """
+        Get source style image for FST, returning both the style name and image.
+
+        Strategy:
+        1. With probability style_source_same_prob: use same style (different character)
+        2. Otherwise: use different style (same or different character)
+        
+        Returns:
+            tuple of (source_style_name, source_image)
+        """
+        use_same_style = random.random() < self.style_source_same_prob
+
+        if use_same_style:
+            # Same style, different character (standard case)
+            source_style = target_style
+            images_in_style = self.style_to_images[target_style].copy()
+            images_in_style.remove(target_image_path)
+            if images_in_style:
+                source_image_path = random.choice(images_in_style)
+            else:
+                # Fallback: use target image if no other images available
+                source_image_path = target_image_path
+        else:
+            # Different style for style transformation learning
+            # Try to get same content in different style
+            if content in self.content_to_images:
+                available_styles = list(self.content_to_images[content].keys())
+                if target_style in available_styles:
+                    available_styles.remove(target_style)
+
+                if available_styles:
+                    # Same content, different style
+                    source_style = random.choice(available_styles)
+                    source_candidates = self.content_to_images[content][source_style]
+                    source_image_path = random.choice(source_candidates)
+                else:
+                    # Fallback: random style image
+                    other_styles = [
+                        s for s in self.style_to_images.keys() if s != target_style
+                    ]
+                    if other_styles:
+                        source_style = random.choice(other_styles)
+                        source_image_path = random.choice(
+                            self.style_to_images[source_style]
+                        )
+                    else:
+                        source_style = target_style
+                        source_image_path = target_image_path
+            else:
+                # Fallback: random different style
+                other_styles = [
+                    s for s in self.style_to_images.keys() if s != target_style
+                ]
+                if other_styles:
+                    source_style = random.choice(other_styles)
+                    source_image_path = random.choice(
+                        self.style_to_images[source_style]
+                    )
+                else:
+                    source_style = target_style
+                    source_image_path = target_image_path
+
+        source_image = Image.open(source_image_path).convert("RGB")
+        return source_style, source_image
     def __len__(self) -> int:
         return len(self.target_images)
 

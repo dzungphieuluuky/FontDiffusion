@@ -70,6 +70,9 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         self.fst_query_dim = getattr(args, "fst_query_dim", 128)
         self.fst_num_scales = getattr(args, "fst_num_scales", 5)
 
+        self.num_consistency_pairs = getattr(args, "num_consistency_pairs", 0)
+        self.consistency_loss_weight = getattr(args, "consistency_loss_weight", 0.1)
+
         # Call parent constructor
         super().__init__(args)
 
@@ -282,6 +285,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             scr=self.config.phase_2,
             use_fst=self.use_fst,
             style_source_same_prob=self.style_source_same_prob,
+            num_consistency_pairs=self.num_consistency_pairs,
         )
 
         self.train_dataloader = torch.utils.data.DataLoader(
@@ -484,6 +488,23 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 total_loss += self.config.sc_coefficient * sc_loss
                 loss_dict["sc_loss"] = sc_loss.item()
 
+        # Add consistency loss if consistency pairs are provided (add around line 458)
+        if (
+            self.use_fst 
+            and self.num_consistency_pairs > 0 
+            and "consistency_source_images" in samples
+        ):
+            consistency_source = samples["consistency_source_images"]
+            consistency_target = samples["consistency_target_images"]
+            
+            consistency_loss = self.model.compute_consistency_loss(
+                consistency_source_images=consistency_source,
+                consistency_target_images=consistency_target,
+            )
+            
+            total_loss += self.consistency_loss_weight * consistency_loss
+            loss_dict["consistency_loss"] = consistency_loss.item()
+
         return total_loss, loss_dict
 
     def save_checkpoint(self, is_final: bool = False):
@@ -573,6 +594,9 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                     "fst_num_queries": self.fst_num_queries,
                     "fst_query_dim": self.fst_query_dim,
                     "fst_num_scales": self.fst_num_scales,
+                    "num_consistency_pairs": self.num_consistency_pairs,
+                    "consistency_loss_weight": self.consistency_loss_weight,
+
                 },
             },
             save_dir / "training_state.pt",

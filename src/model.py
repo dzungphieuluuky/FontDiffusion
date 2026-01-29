@@ -231,7 +231,96 @@ class FontDiffuserWithFST(nn.Module):
             }
         else:
             return noise_pred, offset_out_sum
+    
+    def compute_transformation_matrix(
+        self,
+        style_source_img: torch.Tensor,
+        style_target_img: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Compute the font style transformation features for a pair of images.
+        
+        This extracts the transformation learned by the FST module without
+        going through the full diffusion process.
+        
+        Args:
+            style_source_img: (B, 1, 96, 96) - source style reference
+            style_target_img: (B, 1, 96, 96) - target style reference
+            
+        Returns:
+            transformation_features: (B, N, D) - transformation matrix/features
+        """
+        # Extract multi-scale features from both images
+        source_style_features = self.mss_encoder(style_source_img)
+        target_style_features = self.mss_encoder(style_target_img)
+        
+        # Apply FST module to get transformation
+        transformation_features = self.fst_module(
+            source_style_features, 
+            target_style_features
+        )
+        
+        return transformation_features
 
+
+    def compute_consistency_loss(
+        self,
+        consistency_source_images: torch.Tensor,
+        consistency_target_images: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Compute consistency loss across multiple content pairs.
+        
+        The FST transformation should be similar for all pairs since they
+        share the same source→target style transformation, regardless of content.
+        
+        Args:
+            consistency_source_images: (B, k, 1, 96, 96) - k source images per batch
+            consistency_target_images: (B, k, 1, 96, 96) - k target images per batch
+            
+        Returns:
+            consistency_loss: scalar tensor
+        """
+        batch_size, num_pairs, C, H, W = consistency_source_images.shape
+        
+        # Reshape to process all pairs at once
+        # (B, k, C, H, W) -> (B*k, C, H, W)
+        sources_flat = consistency_source_images.reshape(batch_size * num_pairs, C, H, W)
+        targets_flat = consistency_target_images.reshape(batch_size * num_pairs, C, H, W)
+        
+        # Compute transformation matrices for all pairs
+        transformation_matrices = self.compute_transformation_matrix(
+            sources_flat, 
+            targets_flat
+        )  # (B*k, N, D)
+        
+        # Reshape back to separate pairs
+        # (B*k, N, D) -> (B, k, N, D)
+        _, N, D = transformation_matrices.shape
+        transformation_matrices = transformation_matrices.reshape(
+            batch_size, num_pairs, N, D
+        )
+        
+        # Compute pairwise MSE between all transformation matrices within each batch
+        # We want all k matrices to be similar
+        total_loss = 0.0
+        count = 0
+        
+        for b in range(batch_size):
+            # Get all transformation matrices for this batch item: (k, N, D)
+            batch_matrices = transformation_matrices[b]  # (k, N, D)
+            
+            # Compute mean transformation as reference
+            mean_matrix = batch_matrices.mean(dim=0, keepdim=True)  # (1, N, D)
+            
+            # MSE between each matrix and the mean
+            mse = F.mse_loss(batch_matrices, mean_matrix.expand(num_pairs, -1, -1))
+            total_loss += mse
+            count += 1
+        
+        consistency_loss = total_loss / max(count, 1)
+        
+        return consistency_loss
 
 class FontDiffuserModel(ModelMixin, ConfigMixin):
     """Forward function for FontDiffuer with content encoder style encoder and unet."""

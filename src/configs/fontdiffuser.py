@@ -566,6 +566,21 @@ def get_parser():
         help="Number of scales in MSSE (if None, uses fst_num_scales)",
     )
 
+    # ==================== Consistency Loss ====================
+    consistency_group = parser.add_argument_group('Consistency Loss')
+    consistency_group.add_argument(
+        "--num_consistency_pairs",
+        type=int,
+        default=0,
+        help="Number of additional content reference pairs for consistency loss",
+    )
+    consistency_group.add_argument(
+        "--consistency_loss_weight",
+        type=float,
+        default=0.1,
+        help="Weight for consistency loss",
+    )
+    
     # ==================== Optimization Flags ====================
     optimization_group = parser.add_argument_group('Performance Optimization')
     optimization_group.add_argument(
