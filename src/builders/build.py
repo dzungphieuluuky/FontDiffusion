@@ -1,4 +1,8 @@
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
+import torch 
+from torch import nn
+
+
 from src import ContentEncoder, StyleEncoder, UNet, SCR
 from src.model import FontStyleTransformationModule
 from src.model import MultiScaleStyleEncoder
@@ -77,17 +81,24 @@ def build_ddpm_scheduler(args):
     return ddpm_scheduler
 
 def build_fst(args):
+    """Build Font Style Transformation module."""
+    # Parse feature channels if string
+    feature_channels = args.fst_feature_channels
+    if isinstance(feature_channels, str):
+        feature_channels = [int(x.strip()) for x in feature_channels.split(",")]
+    
     fst_module = FontStyleTransformationModule(
-        feature_channels=args.fst_feature_channels,
+        feature_channels=feature_channels,
         num_queries=args.fst_num_queries,
         query_dim=args.fst_query_dim,
         num_scale_features=args.fst_num_scales,
     )
-    print("Loaded Font Style Transformation Module successfully!")
+    print(f"✓ Built FST module (queries={args.fst_num_queries}, dim={args.fst_query_dim})")
     return fst_module
 
+
 def build_mss_encoder(args):
-    # Default to fst_num_scales if mss_num_scales not specified
+    """Build Multi-Scale Style Encoder."""
     num_scales = getattr(args, 'mss_num_scales', None) or getattr(args, 'fst_num_scales', 5)
     base_channels = getattr(args, 'mss_base_channels', 64)
     
@@ -96,5 +107,42 @@ def build_mss_encoder(args):
         base_channels=base_channels,
         num_scales=num_scales,
     )
-    print(f"✓ Multi-Scale Style Encoder loaded (scales={num_scales}, base_ch={base_channels})")
+    print(f"✓ Built MSSE (scales={num_scales}, base_ch={base_channels})")
     return mss_encoder
+
+
+def build_fst_projection(feature_dim: int, cross_attn_dim: int) -> nn.Linear:
+    """Build FST projection layer."""
+    projection = nn.Linear(feature_dim, cross_attn_dim)
+    print(f"✓ Built FST projection ({feature_dim} → {cross_attn_dim})")
+    return projection
+
+
+def build_original_style_projection(style_dim: int, cross_attn_dim: int) -> nn.Linear:
+    """Build original style projection layer."""
+    projection = nn.Linear(style_dim, cross_attn_dim)
+    print(f"✓ Built style projection ({style_dim} → {cross_attn_dim})")
+    return projection
+
+
+def get_unet_cross_attention_dim(unet: UNet) -> int:
+    """
+    Infer cross-attention dimension from U-Net.
+    
+    Args:
+        unet: U-Net module
+        
+    Returns:
+        Cross-attention dimension
+    """
+    # Try to get from config
+    if hasattr(unet, "config") and hasattr(unet.config, "cross_attention_dim"):
+        return unet.config.cross_attention_dim
+    
+    # Inspect first cross-attention layer
+    for module in unet.modules():
+        if hasattr(module, "to_k") and isinstance(module.to_k, nn.Linear):
+            return module.to_k.in_features
+    
+    # Default fallback
+    return 1024
