@@ -32,7 +32,7 @@ from inference.sample_optimized import (
     get_content_transform,
     get_style_transform,
 )
-
+from src.configs.fontdiffuser import get_parser
 logger = logging.getLogger(__name__)
 enable_progress_bars()
 
@@ -360,222 +360,6 @@ class QualityEvaluator:
         except Exception as e:
             logger.info(f"Error saving image to {path}: {e}")
 
-
-def parse_args() -> Namespace:
-    """Parse command line arguments"""
-    parser: ArgumentParser = argparse.ArgumentParser(
-        description="Batch sampling and evaluation"
-    )
-
-    # Input/Output
-    parser.add_argument(
-        "--characters",
-        type=str,
-        required=True,
-        help="Comma-separated list of characters or path to text file",
-    )
-    parser.add_argument(
-        "--start_line",
-        type=int,
-        default=1,
-        help="Start line number for character file (1-indexed)",
-    )
-    parser.add_argument(
-        "--end_line",
-        type=int,
-        default=None,
-        help="End line number for character file (inclusive, None = end of file)",
-    )
-    parser.add_argument(
-        "--style_images",
-        type=str,
-        required=True,
-        help="Comma-separated paths to style images or directory",
-    )
-    parser.add_argument(
-        "--output_dir",
-        type=str,
-        default="my_dataset/train_original",
-        help="Output directory (will create ContentImage/ and TargetImage/ subdirs)",
-    )
-    parser.add_argument(
-        "--ground_truth_dir",
-        type=str,
-        default=None,
-        help="Directory with ground truth images for evaluation",
-    )
-
-    # Model configuration
-    parser.add_argument(
-        "--ckpt_dir", type=str, required=True, help="Checkpoint directory"
-    )
-    parser.add_argument(
-        "--ttf_path",
-        type=str,
-        required=True,
-        help="Path to TTF font file or directory with multiple fonts",
-    )
-    parser.add_argument("--device", type=str, default="cuda", help="Device to use")
-
-    parser.add_argument(
-        "--num_scales",
-        type=int,
-        default=4,
-        help="Number of scales in style transformation",
-    )
-    parser.add_argument(
-        "--feature_dim",
-        type=int,
-        default=512,
-        help="Feature dimension for style transformation",
-    )
-    parser.add_argument(
-        "--hidden_dim",
-        type=int,
-        default=256,
-        help="Hidden dimension for style transformation",
-    )
-    parser.add_argument(
-        "--num_heads", type=int, default=8, help="Number of attention heads"
-    )
-    parser.add_argument(
-        "--ffn_dim", type=int, default=2048, help="Feedforward Network dimension"
-    )
-    parser.add_argument(
-        "--style_transform_coefficient",
-        type=float,
-        default=0.1,
-        help="Loss coefficient for style transformation",
-    )
-
-    # Generation parameters
-    parser.add_argument(
-        "--num_inference_steps", type=int, default=15, help="Number of inference steps"
-    )
-    parser.add_argument(
-        "--guidance_scale", type=float, default=7.5, help="Guidance scale"
-    )
-    parser.add_argument(
-        "--batch_size", type=int, default=4, help="Batch size for generation"
-    )
-    parser.add_argument("--seed", type=int, default=42, help="Random seed")
-
-    # Optimization flags
-    parser.add_argument(
-        "--fp16", action="store_true", default=False, help="Use FP16 precision"
-    )
-    parser.add_argument(
-        "--compile", action="store_true", default=False, help="Use torch.compile"
-    )
-    parser.add_argument(
-        "--channels_last",
-        action="store_true",
-        default=True,
-        help="Use channels last memory format",
-    )
-    parser.add_argument(
-        "--enable_xformers", action="store_true", default=False, help="Enable xformers"
-    )
-    parser.add_argument(
-        "--fast_sampling",
-        action="store_true",
-        default=False,
-        help="Use fast sampling mode",
-    )
-
-    parser.add_argument(
-        "--enable_style_transform",
-        action="store_true",
-        default=False,
-        help="Enable style transformation module",
-    )
-
-    # Checkpoint and resume
-    parser.add_argument(
-        "--save_interval",
-        type=int,
-        default=10,
-        help="Save results every N styles (0 = only save at end)",
-    )
-
-    # Evaluation flags
-    parser.add_argument(
-        "--evaluate",
-        action="store_true",
-        default=True,
-        help="Evaluate generated images",
-    )
-    parser.add_argument(
-        "--compute_fid",
-        action="store_true",
-        default=False,
-        help="Compute FID (requires ground truth)",
-    )
-    parser.add_argument(
-        "--enable_attention_slicing",
-        action="store_true",
-        default=False,
-        help="Enable attention slicing for memory efficiency",
-    )
-
-    # Wandb configuration
-    parser.add_argument(
-        "--use_wandb",
-        action="store_true",
-        default=True,
-        help="Log results to Weights & Biases",
-    )
-    parser.add_argument(
-        "--wandb_project",
-        type=str,
-        default="fontdiffuser-eval",
-        help="Wandb project name",
-    )
-    parser.add_argument(
-        "--wandb_run_name", type=str, default=None, help="Wandb run name"
-    )
-
-    parser.add_argument(
-        "--dataset_split",
-        type=str,
-        default="train_original",
-        help="Dataset split name (e.g., train_original, val)",
-    )
-
-    # FST-specific arguments
-    parser.add_argument(
-        "--use_fst",
-        action="store_true",
-        default=False,
-        help="Use FST-enhanced model for improved style transfer",
-    )
-    parser.add_argument(
-        "--fst_ckpt_path",
-        type=str,
-        default=None,
-        help="Path to FST module checkpoint (optional)",
-    )
-    parser.add_argument(
-        "--fst_num_queries",
-        type=int,
-        default=256,
-        help="Number of learnable queries in FST module",
-    )
-    parser.add_argument(
-        "--fst_query_dim",
-        type=int,
-        default=128,
-        help="Dimension of FST queries",
-    )
-    parser.add_argument(
-        "--fst_num_scales",
-        type=int,
-        default=5,
-        help="Number of scales in MSSE",
-    )
-    return parser.parse_args()
-
-
 def load_characters(
     characters_arg: str, start_line: int = 1, end_line: int = None
 ) -> list[str]:
@@ -741,71 +525,7 @@ def load_style_images(style_images_arg: str) -> list[tuple[str, str]]:
 
     return verified_paths
 
-
-def create_args_namespace(args: Namespace) -> Namespace:
-    """Create args namespace for FontDiffuser pipeline"""
-
-    try:
-        from src.configs.fontdiffuser import get_parser
-
-        parser: ArgumentParser = get_parser()
-        default_args: Namespace = parser.parse_args([])
-    except Exception:
-        default_args: Namespace = Namespace()
-
-    # Override with user arguments
-    for key, value in vars(args).items():
-        setattr(default_args, key, value)
-
-    # Ensure image sizes are tuples
-    if not hasattr(default_args, "style_image_size"):
-        default_args.style_image_size = (96, 96)
-    elif isinstance(default_args.style_image_size, int):
-        default_args.style_image_size = (
-            default_args.style_image_size,
-            default_args.style_image_size,
-        )
-
-    if not hasattr(default_args, "content_image_size"):
-        default_args.content_image_size = (96, 96)
-    elif isinstance(default_args.content_image_size, int):
-        default_args.content_image_size = (
-            default_args.content_image_size,
-            default_args.content_image_size,
-        )
-
-    # set required attributes
-    default_args.demo = False
-    default_args.character_input = True
-    default_args.save_image = True
-    default_args.cache_models = True
-    default_args.controlnet = False
-    default_args.resolution = 96
-    default_args.ground_truth_dir = None
-
-    # Generation parameters
-    default_args.algorithm_type = getattr(default_args, "algorithm_type", "dpmsolver++")
-    default_args.guidance_type = getattr(
-        default_args, "guidance_type", "classifier-free"
-    )
-    default_args.method = getattr(default_args, "method", "multistep")
-    default_args.order = getattr(default_args, "order", 2)
-    default_args.model_type = getattr(default_args, "model_type", "noise")
-    default_args.t_start = getattr(default_args, "t_start", 1.0)
-    default_args.t_end = getattr(default_args, "t_end", 1e-3)
-    default_args.skip_type = getattr(default_args, "skip_type", "time_uniform")
-    default_args.correcting_x0_fn = getattr(default_args, "correcting_x0_fn", None)
-    default_args.content_encoder_downsample_size = getattr(
-        default_args, "content_encoder_downsample_size", 3
-    )
-
-    return default_args
-
-
 def save_checkpoint(results: dict[str, str], output_dir: str) -> None:
-    """
-    ✅ Save results_checkpoint.json (single source of truth)
-    """
     try:
         checkpoint_path: str = os.path.join(output_dir, "results_checkpoint.json")
 
@@ -832,7 +552,6 @@ def generate_content_images(
 ) -> dict[str, str]:
     """
     Generate and save content character images
-    ✅ CORRECTED: Only generates if content image doesn't already exist
     Returns: char_paths dict mapping character to file path
     """
     content_dir: str = os.path.join(output_dir, "ContentImage")
@@ -1631,11 +1350,19 @@ def log_to_wandb(results: dict, args: Namespace) -> None:
 
 def main() -> None:
     """Main function"""
-    args: Namespace = parse_args()
+    parser = get_parser()
+    args = parser.parse_args()
+
+    # Convert image sizes to tuples
+    if isinstance(args.style_image_size, int):
+        args.style_image_size = (args.style_image_size, args.style_image_size)
+    if isinstance(args.content_image_size, int):
+        args.content_image_size = (args.content_image_size, args.content_image_size)
+        
     results: dict[str, str] = {}
 
     logger.info("=" * 60)
-    logger.info("FONTDIFFUSER SYNTHESIS DATA GENERATION MAGIC")
+    logger.info("FontDiffuser Distributed Sampling")
     logger.info("=" * 60)
 
     try:
@@ -1676,31 +1403,13 @@ def main() -> None:
         )
 
         # Create args namespace for pipeline
-        pipeline_args: Namespace = create_args_namespace(args)
+        pipeline_args: Namespace = args
+
+        
 
         logger.info("\nLoading FontDiffuser pipeline...")
-        pipe: FontDiffuserDPMPipeline = load_fontdiffuser_pipeline(pipeline_args)
-
-        # Add this block to enable torch.compile if requested
-        if getattr(args, "compile", False):
-            import torch
-
-            logger.info("🔧 Compiling model components with torch.compile...")
-            try:
-                if hasattr(pipe.model.config, "unet"):
-                    pipe.model.config.unet = torch.compile(pipe.model.config.unet)
-                if hasattr(pipe.model.config, "style_encoder"):
-                    pipe.model.config.style_encoder = torch.compile(
-                        pipe.model.config.style_encoder
-                    )
-                if hasattr(pipe.model.config, "content_encoder"):
-                    pipe.model.config.content_encoder = torch.compile(
-                        pipe.model.config.content_encoder
-                    )
-                logger.info("✓ Compilation complete.")
-            except Exception as e:
-                logger.info(f"⚠ Compilation failed: {e}")
-
+        pipe: FontDiffuserDPMPipeline = load_fontdiffuser_pipeline(pipeline_args, use_fst=args.use_fst)
+        logger.info("✓ Pipeline loaded successfully.\n")
         evaluator: QualityEvaluator = QualityEvaluator(device=args.device)
 
         # Generate images
