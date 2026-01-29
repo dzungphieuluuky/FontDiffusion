@@ -3,6 +3,7 @@ Trainer class for FontDiffuserWithFST.
 Extends base FontDiffuserTrainer with FST-specific functionality.
 """
 
+import argparse
 import logging
 import traceback
 from dataclasses import asdict
@@ -55,7 +56,7 @@ logger = logging.getLogger(__name__)
 class FontDiffuserFSTTrainer(FontDiffuserTrainer):
     """Trainer for FontDiffuserWithFST model with MSSE and FST modules."""
 
-    def __init__(self, args):
+    def __init__(self, args: argparse.Namespace):
         """Initialize FST trainer."""
         # Store FST-specific args before calling super
         self.use_fst = getattr(args, "use_fst", True)
@@ -442,22 +443,18 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
 
         # Forward pass - different for FST model
         if self.use_fst:
-            # Get style source images from the batch
-            style_source_images = samples.get("style_source_image", style_images)
-
-            outputs = self.model(
+            style_source_images = samples.get("style_source_image")
+            model_output = self.model(
                 noisy_latents=noisy_target_images,
                 timestep=timesteps,
                 content_img=content_images,
                 style_source_img=style_source_images,
                 style_target_img=style_images,
                 content_encoder_downsample_size=self.args.content_encoder_downsample_size,
-                return_dict=True,
             )
-            noise_pred = outputs["noise_pred"]
-            offset_out_sum = outputs["offset_out_sum"]
+            noise_pred = model_output["noise_pred"]
+            offset_out_sum = model_output["offset_out_sum"]
         else:
-            # Original model forward
             noise_pred, offset_out_sum = self.model(
                 x_t=noisy_target_images,
                 timesteps=timesteps,
@@ -488,24 +485,29 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 total_loss += self.config.sc_coefficient * sc_loss
                 loss_dict["sc_loss"] = sc_loss.item()
 
-        # Add consistency loss if consistency pairs are provided (add around line 458)
-        if (
-            self.use_fst 
-            and self.num_consistency_pairs > 0 
-            and "consistency_source_images" in samples
-        ):
-            consistency_source = samples["consistency_source_images"]
-            consistency_target = samples["consistency_target_images"]
+        # Add consistency loss if consistency pairs are provided
+        if self.use_fst and self.num_consistency_pairs > 0:
+            consistency_source = samples.get("consistency_source_images")
+            consistency_target = samples.get("consistency_target_images")
             
-            consistency_loss = self.model.compute_consistency_loss(
-                consistency_source_images=consistency_source,
-                consistency_target_images=consistency_target,
-            )
-            
-            total_loss += self.consistency_loss_weight * consistency_loss
-            loss_dict["consistency_loss"] = consistency_loss.item()
+            if consistency_source is not None and consistency_target is not None:
+                # Check if we have valid consistency pairs (not just dummy tensors)
+                if consistency_source.shape[1] > 1 or consistency_source.abs().sum() > 0:
+                    # Get the actual model (unwrap if using DDP/accelerate)
+                    model = self.accelerator.unwrap_model(self.model) if hasattr(self.model, "module") else self.model
+                    
+                    consistency_loss = model.compute_consistency_loss(
+                        consistency_source_images=consistency_source,
+                        consistency_target_images=consistency_target,
+                    )
+                    
+                    total_loss += self.consistency_loss_weight * consistency_loss
+                    loss_dict["consistency_loss"] = consistency_loss.item()
+                    loss_dict["weighted_consistency_loss"] = (
+                        self.consistency_loss_weight * consistency_loss.item()
+                    )
 
-        return total_loss, loss_dict
+        return total_loss, loss_dict    
 
     def save_checkpoint(self, is_final: bool = False):
         """Save FST training checkpoint."""

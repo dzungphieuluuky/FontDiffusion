@@ -11,6 +11,7 @@ from src.modules.msse import MultiScaleStyleEncoder
 from src.modules.fst import FontStyleTransformationModule
 from src.modules.content_encoder import ContentEncoder
 from src.modules.style_encoder import StyleEncoder
+from src.modules.scr import SCR
 from src.modules.unet import UNet
 
 logger = logging.getLogger(__name__)
@@ -94,13 +95,13 @@ class FontDiffuserWithFST(nn.Module):
         super().__init__()
 
         # Assign all modules (no internal creation)
-        self.content_encoder = content_encoder
-        self.diffusion_unet = unet
-        self.style_encoder = style_encoder
-        self.mss_encoder = mss_encoder
-        self.fst_module = fst_module
-        self.fst_projection = fst_projection
-        self.original_style_projection = original_style_projection
+        self.content_encoder: ContentEncoder = content_encoder
+        self.diffusion_unet: UNet = unet
+        self.style_encoder: StyleEncoder = style_encoder
+        self.mss_encoder: MultiScaleStyleEncoder = mss_encoder
+        self.fst_module: FontStyleTransformationModule = fst_module
+        self.fst_projection: nn.Linear = fst_projection
+        self.original_style_projection: nn.Linear = original_style_projection
 
     def log_model_info(self) -> None:
         """Log detailed parameter information for the FST model and its components."""
@@ -279,49 +280,45 @@ class FontDiffuserWithFST(nn.Module):
             consistency_target_images: (B, k, 1, 96, 96) - k target images per batch
             
         Returns:
-            consistency_loss: scalar tensor
+            consistency_loss: scalar tensor (variance of transformation features)
         """
         batch_size, num_pairs, C, H, W = consistency_source_images.shape
         
         # Reshape to process all pairs at once
-        # (B, k, C, H, W) -> (B*k, C, H, W)
-        sources_flat = consistency_source_images.reshape(batch_size * num_pairs, C, H, W)
-        targets_flat = consistency_target_images.reshape(batch_size * num_pairs, C, H, W)
+        # (B, k, C, H, W) → (B*k, C, H, W)
+        source_flat = consistency_source_images.view(-1, C, H, W)
+        target_flat = consistency_target_images.view(-1, C, H, W)
         
-        # Compute transformation matrices for all pairs
-        transformation_matrices = self.compute_transformation_matrix(
-            sources_flat, 
-            targets_flat
+        # Extract multi-scale features for all pairs
+        source_features = self.mss_encoder(source_flat)  # (B*k, N, D)
+        target_features = self.mss_encoder(target_flat)  # (B*k, N, D)
+        
+        # Compute transformation features for all pairs
+        transformation_features = self.fst_module(
+            source_features, target_features
         )  # (B*k, N, D)
         
-        # Reshape back to separate pairs
-        # (B*k, N, D) -> (B, k, N, D)
-        _, N, D = transformation_matrices.shape
-        transformation_matrices = transformation_matrices.reshape(
-            batch_size, num_pairs, N, D
+        # Reshape back to separate batch and pair dimensions
+        # (B*k, N, D) → (B, k, N, D)
+        transformation_features = transformation_features.view(
+            batch_size, num_pairs, -1, transformation_features.shape[-1]
         )
         
-        # Compute pairwise MSE between all transformation matrices within each batch
-        # We want all k matrices to be similar
-        total_loss = 0.0
-        count = 0
+        # Compute variance across pairs (dimension 1)
+        # For each batch, the k transformations should be similar
+        # We want low variance → transformation is content-agnostic
         
-        for b in range(batch_size):
-            # Get all transformation matrices for this batch item: (k, N, D)
-            batch_matrices = transformation_matrices[b]  # (k, N, D)
-            
-            # Compute mean transformation as reference
-            mean_matrix = batch_matrices.mean(dim=0, keepdim=True)  # (1, N, D)
-            
-            # MSE between each matrix and the mean
-            mse = F.mse_loss(batch_matrices, mean_matrix.expand(num_pairs, -1, -1))
-            total_loss += mse
-            count += 1
+        # Compute mean transformation per batch
+        mean_transform = transformation_features.mean(dim=1, keepdim=True)  # (B, 1, N, D)
         
-        consistency_loss = total_loss / max(count, 1)
+        # Compute variance (mean squared difference from mean)
+        variance = ((transformation_features - mean_transform) ** 2).mean()
         
-        return consistency_loss
-
+        # Alternative: use standard deviation for better numerical stability
+        std = torch.std(transformation_features, dim=1).mean()
+        
+        return std**2  # Return variance as loss
+    
 class FontDiffuserModel(ModelMixin, ConfigMixin):
     """Forward function for FontDiffuer with content encoder style encoder and unet."""
 
