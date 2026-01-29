@@ -265,6 +265,7 @@ class FontDataset(Dataset):
             - target_image: Ground truth
             - nonorm_target_image: Target without normalization
             - neg_images: Negative samples (SCR only)
+            - consistency_pairs: List of (source, target) tuples for consistency loss (FST only)
         """
         target_image_path = self.target_images[index]
         target_image_name = target_image_path.split("/")[-1]

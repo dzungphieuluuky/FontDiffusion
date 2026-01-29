@@ -42,9 +42,9 @@ class CollateFN(object):
         - content_image: Content reference (from dataset)
         - style_source_image: Source style reference (FST mode, from dataset)
         - style_image: Target style reference (from dataset)
-        - (optional) ref_content_imgs: List of additional content refs
+        - consistency_pairs: List of (source_tensor, target_tensor) tuples
         """
-        # Stack main tensors - read with dataset keys, output with trainer keys
+        # Stack main tensors
         target_imgs = torch.stack([item["target_image"] for item in batch])
         content_imgs = torch.stack([item["content_image"] for item in batch])
         style_imgs = torch.stack([item["style_image"] for item in batch])
@@ -70,9 +70,10 @@ class CollateFN(object):
             neg_imgs = self._collate_neg_images([item["neg_images"] for item in batch])
             result["neg_images"] = neg_imgs
 
+        # Add consistency pairs if present
         if "consistency_pairs" in batch[0]:
-            # Each batch item has a list of (source, target) tuples
-            # We need to collate these into separate tensors
+            # Each batch item has a list of (source_tensor, target_tensor) tuples
+            # Each tensor is already (C, H, W)
             
             consistency_sources = []
             consistency_targets = []
@@ -86,6 +87,13 @@ class CollateFN(object):
                     targets = torch.stack([p[1] for p in pairs])  # (k, C, H, W)
                     consistency_sources.append(sources)
                     consistency_targets.append(targets)
+                else:
+                    # If no pairs, create dummy tensors to maintain batch structure
+                    # Use same shape as style images
+                    dummy_shape = batch[0]["style_image"].shape
+                    dummy_tensor = torch.zeros(1, *dummy_shape)
+                    consistency_sources.append(dummy_tensor)
+                    consistency_targets.append(dummy_tensor)
             
             if consistency_sources:
                 # Stack across batch: (B, k, C, H, W)
@@ -93,7 +101,6 @@ class CollateFN(object):
                 result["consistency_target_images"] = torch.stack(consistency_targets)
 
         return result
-
     def _collate_neg_images(
         self, neg_image_tensors: list[torch.Tensor]
     ) -> torch.Tensor:
