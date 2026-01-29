@@ -284,41 +284,41 @@ class FontDiffuserWithFST(nn.Module):
         """
         batch_size, num_pairs, C, H, W = consistency_source_images.shape
         
-        # Reshape to process all pairs at once
-        # (B, k, C, H, W) → (B*k, C, H, W)
+        # Flatten and extract features
         source_flat = consistency_source_images.view(-1, C, H, W)
         target_flat = consistency_target_images.view(-1, C, H, W)
         
-        # Extract multi-scale features for all pairs
-        source_features = self.mss_encoder(source_flat)  # (B*k, N, D)
-        target_features = self.mss_encoder(target_flat)  # (B*k, N, D)
+        source_features = self.mss_encoder(source_flat)
+        target_features = self.mss_encoder(target_flat)
         
-        # Compute transformation features for all pairs
-        transformation_features = self.fst_module(
-            source_features, target_features
-        )  # (B*k, N, D)
+        # Get transformation features
+        transformation_features = self.fst_module(source_features, target_features)
         
-        # Reshape back to separate batch and pair dimensions
-        # (B*k, N, D) → (B, k, N, D)
-        transformation_features = transformation_features.view(
-            batch_size, num_pairs, -1, transformation_features.shape[-1]
+        # Reshape: (B*k, N, D) → (B, k, N, D)
+        T = transformation_features.view(
+            batch_size, num_pairs, transformation_features.shape[1], transformation_features.shape[2]
         )
         
-        # Compute variance across pairs (dimension 1)
-        # For each batch, the k transformations should be similar
-        # We want low variance → transformation is content-agnostic
+        # Compute mean and std across pairs (dim=1)
+        mean_T = T.mean(dim=1, keepdim=True)  # (B, 1, N, D)
+        std_T = T.std(dim=1, keepdim=True)    # (B, 1, N, D)
         
-        # Compute mean transformation per batch
-        mean_transform = transformation_features.mean(dim=1, keepdim=True)  # (B, 1, N, D)
+        # Coefficient of Variation (scale-invariant)
+        # CV = std / (mean + eps)
+        eps = 1e-6
+        cv = std_T / (mean_T.abs() + eps)
         
-        # Compute variance (mean squared difference from mean)
-        variance = ((transformation_features - mean_transform) ** 2).mean()
+        # Combine variance loss + KL divergence from uniform distribution
+        variance_loss = cv.mean()
         
-        # Alternative: use standard deviation for better numerical stability
-        std = torch.std(transformation_features, dim=1).mean()
+        # Optional: KL divergence encourages uniform spread
+        # KL(P||Q) where P = empirical dist, Q = uniform
+        normalized_T = (T - mean_T) / (std_T + eps)  # Standardize
+        kl_loss = 0.5 * ((normalized_T ** 2).mean() - torch.log(std_T + eps).mean())
         
-        return std**2  # Return variance as loss
-    
+        total_loss = variance_loss + 0.1 * kl_loss
+        
+        return total_loss    
 class FontDiffuserModel(ModelMixin, ConfigMixin):
     """Forward function for FontDiffuer with content encoder style encoder and unet."""
 
