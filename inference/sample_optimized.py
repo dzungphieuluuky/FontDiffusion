@@ -337,18 +337,10 @@ def load_state_dict_auto(path: str):
 
 
 def load_fontdiffuser_pipeline(args: Namespace, use_fst: bool = False) -> FontDiffuserDPMPipeline:
-    """Load Font Diffuser pipeline with optimizations
-
-    Args:
-        args (Namespace): Arguments namespace
-        use_fst (bool): Whether to use FST-enhanced model
-
-    Returns:
-        FontDiffuserDPMPipeline: Loaded FontDiffuserDPMPipeline instance
-    """
+    """Load Font Diffuser pipeline with optimizations"""
     logger.info(f"Loading FontDiffuser{'WithFST' if use_fst else ''} pipeline...")
 
-    # Load the model state_dict
+    # Load base components
     unet: UNet = build_unet(args=args)
     unet_ckpt_path = (
         f"{args.ckpt_dir}/unet.safetensors"
@@ -375,30 +367,7 @@ def load_fontdiffuser_pipeline(args: Namespace, use_fst: bool = False) -> FontDi
 
     logger.info("✓ Loaded model state_dict successfully")
 
-    # Apply FP16 conversion if requested
-    if args.fp16:
-        logger.info("Converting to FP16 precision...")
-        unet = unet.half()
-        style_encoder = style_encoder.half()
-        content_encoder = content_encoder.half()
-        logger.info("✓ Converted to FP16")
-
-    # SAFE: Apply channels-last memory format
-    if args.channels_last:
-        logger.info("Converting to channels-last memory format...")
-        unet = unet.to(memory_format=torch.channels_last)
-        style_encoder = style_encoder.to(memory_format=torch.channels_last)
-        content_encoder = content_encoder.to(memory_format=torch.channels_last)
-        logger.info("✓ Converted to channels-last")
-
-    if args.compile:
-        logger.info("Compiling model with torch.compile...")
-        unet = torch.compile(unet)
-        style_encoder = torch.compile(style_encoder)
-        content_encoder = torch.compile(content_encoder)
-        logger.info("✓ Model compiled")
-
-    # Create model (FST or original)
+    # Create model BEFORE applying optimizations
     if use_fst:
         from src.model import FontDiffuserModelDPMWithFST
         
@@ -416,25 +385,60 @@ def load_fontdiffuser_pipeline(args: Namespace, use_fst: bool = False) -> FontDi
         if hasattr(args, "fst_ckpt_path") and args.fst_ckpt_path:
             logger.info(f"Loading FST weights from {args.fst_ckpt_path}...")
             fst_state_dict = load_state_dict_auto(args.fst_ckpt_path)
-            # Load only FST-specific modules
-            model.mss_encoder.load_state_dict(
-                {k.replace("mss_encoder.", ""): v for k, v in fst_state_dict.items() 
-                 if k.startswith("mss_encoder.")},
-                strict=False
-            )
-            model.fst_module.load_state_dict(
-                {k.replace("fst_module.", ""): v for k, v in fst_state_dict.items() 
-                 if k.startswith("fst_module.")},
-                strict=False
-            )
-            logger.info("✓ Loaded FST weights successfully")
+            
+            # Load MSSE weights
+            msse_weights = {
+                k.replace("mss_encoder.", ""): v 
+                for k, v in fst_state_dict.items() 
+                if k.startswith("mss_encoder.")
+            }
+            if msse_weights:
+                model.config.mss_encoder.load_state_dict(msse_weights, strict=False)
+                logger.info(f"  ✓ Loaded MSSE weights ({len(msse_weights)} params)")
+            
+            # Load FST module weights
+            fst_weights = {
+                k.replace("fst_module.", ""): v 
+                for k, v in fst_state_dict.items() 
+                if k.startswith("fst_module.")
+            }
+            if fst_weights:
+                model.config.fst_module.load_state_dict(fst_weights, strict=False)
+                logger.info(f"  ✓ Loaded FST weights ({len(fst_weights)} params)")
+            
+            # Load projection weights
+            proj_weights = {
+                k: v for k, v in fst_state_dict.items() 
+                if "projection" in k
+            }
+            if proj_weights:
+                model.load_state_dict(proj_weights, strict=False)
+                logger.info(f"  ✓ Loaded projection weights ({len(proj_weights)} params)")
     else:
         model: FontDiffuserModelDPM = FontDiffuserModelDPM(
             unet=unet, style_encoder=style_encoder, content_encoder=content_encoder
         )
 
+    # Apply FP16 conversion AFTER model creation
+    if getattr(args, "fp16", False):
+        logger.info("Converting to FP16 precision...")
+        model = model.half()
+        logger.info("✓ Converted to FP16")
+
+    # SAFE: Apply channels-last memory format
+    if getattr(args, "channels_last", False):
+        logger.info("Converting to channels-last memory format...")
+        model = model.to(memory_format=torch.channels_last)
+        logger.info("✓ Converted to channels-last")
+
+    # Apply torch.compile if requested
+    if getattr(args, "compile", False):
+        logger.info("Compiling model with torch.compile...")
+        model = torch.compile(model)
+        logger.info("✓ Model compiled")
+
     # Move to device with proper dtype
-    dtype: torch.dtype = torch.float16 if args.fp16 else torch.float32
+    dtype: torch.dtype = torch.float16 if getattr(args, "fp16", False) else torch.float32
     model.to(args.device, dtype=dtype)
     model.eval()
 
@@ -445,20 +449,19 @@ def load_fontdiffuser_pipeline(args: Namespace, use_fst: bool = False) -> FontDi
         model.log_model_info()
 
     # Load the training ddpm_scheduler
-    train_scheduler: Any = build_ddpm_scheduler(args=args)
+    train_scheduler = build_ddpm_scheduler(args=args)
     logger.info("✓ Loaded training DDPM scheduler successfully")
 
     # Load the DPM_Solver to generate the sample
     pipe: FontDiffuserDPMPipeline = FontDiffuserDPMPipeline(
         model=model,
         ddpm_train_scheduler=train_scheduler,
-        model_type=getattr(args, "model_type", None),
+        model_type=getattr(args, "model_type", "noise"),
         guidance_type=getattr(args, "guidance_type", "classifier-free"),
         guidance_scale=getattr(args, "guidance_scale", 7.5),
     )
     logger.info("✓ Loaded DPM-Solver pipeline successfully")
     return pipe
-
 
 def sampling_batch(
     args: Namespace,
