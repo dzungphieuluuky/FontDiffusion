@@ -508,6 +508,8 @@ class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
         unet: UNet,
         style_encoder: StyleEncoder,
         content_encoder: ContentEncoder,
+        mss_encoder: MultiScaleStyleEncoder = None,
+        fst_module: FontStyleTransformationModule = None,
         feature_channels: list[int] = None,
         num_queries: int = 256,
         query_dim: int = 128,
@@ -519,7 +521,7 @@ class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
         self.content_encoder = content_encoder
 
         # Add FST modules
-        self.mss_encoder = MultiScaleStyleEncoder(
+        self.mss_encoder = mss_encoder or MultiScaleStyleEncoder(
             in_channels=3, base_channels=64, num_scales=num_scales
         )
 
@@ -527,7 +529,7 @@ class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
         if feature_channels is None:
             feature_channels = self.mss_encoder.get_output_channels()
 
-        self.fst_module = FontStyleTransformationModule(
+        self.fst_module = fst_module or FontStyleTransformationModule(
             feature_channels=feature_channels,
             num_queries=num_queries,
             query_dim=query_dim,

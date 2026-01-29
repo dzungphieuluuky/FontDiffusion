@@ -14,6 +14,8 @@ from .builders.build import (
     build_style_encoder,
     build_content_encoder,
     build_scr,
+    build_fst,
+    build_mss_encoder
 )
 from .builders.build_optimized import (
     build_unet_cached,

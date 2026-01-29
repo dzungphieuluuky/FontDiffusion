@@ -1,6 +1,7 @@
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from src import ContentEncoder, StyleEncoder, UNet, SCR
-
+from src.model import FontStyleTransformationModule
+from src.model import MultiScaleStyleEncoder
 
 def build_unet(args):
     unet = UNet(
@@ -74,3 +75,26 @@ def build_ddpm_scheduler(args):
         clip_sample=True,
     )
     return ddpm_scheduler
+
+def build_fst(args):
+    fst_module = FontStyleTransformationModule(
+        feature_channels=args.fst_feature_channels,
+        num_queries=args.fst_num_queries,
+        query_dim=args.fst_query_dim,
+        num_scale_features=args.fst_num_scales,
+    )
+    print("Loaded Font Style Transformation Module successfully!")
+    return fst_module
+
+def build_mss_encoder(args):
+    # Default to fst_num_scales if mss_num_scales not specified
+    num_scales = getattr(args, 'mss_num_scales', None) or getattr(args, 'fst_num_scales', 5)
+    base_channels = getattr(args, 'mss_base_channels', 64)
+    
+    mss_encoder = MultiScaleStyleEncoder(
+        in_channels=3,
+        base_channels=base_channels,
+        num_scales=num_scales,
+    )
+    print(f"✓ Multi-Scale Style Encoder loaded (scales={num_scales}, base_ch={base_channels})")
+    return mss_encoder

@@ -25,6 +25,8 @@ from src import (
     build_unet,
     build_content_encoder,
     build_style_encoder,
+    build_fst,
+    build_mss_encoder,
     UNet,
     ContentEncoder,
     StyleEncoder,
@@ -370,49 +372,28 @@ def load_fontdiffuser_pipeline(args: Namespace, use_fst: bool = False) -> FontDi
     if use_fst:
         from src.model import FontDiffuserModelDPMWithFST
         
+        # Load FST-specific weights if available
+        if hasattr(args, "fst_ckpt_path") and args.fst_ckpt_path:
+            logger.info(f"Loading FST weights from {args.fst_ckpt_path}...")
+            fst_state_dict = load_state_dict_auto(args.fst_ckpt_path)
+        if hasattr(args, "mss_ckpt_path") and args.mss_ckpt_path:
+            logger.info(f"Loading MSS weights from {args.mss_ckpt_path}...")
+            mss_state_dict = load_state_dict_auto(args.mss_ckpt_path)
+
+        fst_module = build_fst(args=args)
+        mss_encoder = build_mss_encoder(args=args)
+
         model: FontDiffuserModelDPMWithFST = FontDiffuserModelDPMWithFST(
             unet=unet,
             style_encoder=style_encoder,
             content_encoder=content_encoder,
+            fst_module=fst_module,
+            mss_encoder=mss_encoder,
             feature_channels=getattr(args, "fst_feature_channels", None),
             num_queries=getattr(args, "fst_num_queries", 256),
             query_dim=getattr(args, "fst_query_dim", 128),
             num_scales=getattr(args, "fst_num_scales", 5),
         )
-        
-        # Load FST-specific weights if available
-        if hasattr(args, "fst_ckpt_path") and args.fst_ckpt_path:
-            logger.info(f"Loading FST weights from {args.fst_ckpt_path}...")
-            fst_state_dict = load_state_dict_auto(args.fst_ckpt_path)
-            
-            # Load MSSE weights
-            msse_weights = {
-                k.replace("mss_encoder.", ""): v 
-                for k, v in fst_state_dict.items() 
-                if k.startswith("mss_encoder.")
-            }
-            if msse_weights:
-                model.config.mss_encoder.load_state_dict(msse_weights, strict=False)
-                logger.info(f"  ✓ Loaded MSSE weights ({len(msse_weights)} params)")
-            
-            # Load FST module weights
-            fst_weights = {
-                k.replace("fst_module.", ""): v 
-                for k, v in fst_state_dict.items() 
-                if k.startswith("fst_module.")
-            }
-            if fst_weights:
-                model.config.fst_module.load_state_dict(fst_weights, strict=False)
-                logger.info(f"  ✓ Loaded FST weights ({len(fst_weights)} params)")
-            
-            # Load projection weights
-            proj_weights = {
-                k: v for k, v in fst_state_dict.items() 
-                if "projection" in k
-            }
-            if proj_weights:
-                model.load_state_dict(proj_weights, strict=False)
-                logger.info(f"  ✓ Loaded projection weights ({len(proj_weights)} params)")
     else:
         model: FontDiffuserModelDPM = FontDiffuserModelDPM(
             unet=unet, style_encoder=style_encoder, content_encoder=content_encoder

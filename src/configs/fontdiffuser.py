@@ -491,7 +491,7 @@ def get_parser():
     style_transform_group.add_argument(
         "--num_scales",
         type=int,
-        default=4,
+        default=5,
         help="Number of scales in style transformation",
     )
     style_transform_group.add_argument(
@@ -549,7 +549,7 @@ def get_parser():
         "--fst_num_scales",
         type=int,
         default=5,
-        help="Number of scales in MSSE",
+        help="Number of scales in MSSE and FST",
     )
     fst_group.add_argument(
         "--fst_feature_channels",
@@ -557,6 +557,33 @@ def get_parser():
         nargs="+",
         default=None,
         help="FST feature channel dimensions (auto if None)",
+    )
+
+    # ADD THESE NEW ARGUMENTS:
+    fst_group.add_argument(
+        "--mss_base_channels",
+        type=int,
+        default=64,
+        help="Base channels for Multi-Scale Style Encoder (MSSE)",
+    )
+    fst_group.add_argument(
+        "--mss_num_scales",
+        type=int,
+        default=5,
+        help="Number of scales in MSSE (should match fst_num_scales)",
+    )
+    # MSS Encoder specific
+    fst_group.add_argument(
+        "--mss_base_channels",
+        type=int,
+        default=64,
+        help="Base channels for MSSE (default: 64)",
+    )
+    fst_group.add_argument(
+        "--mss_num_scales",
+        type=int,
+        default=None,
+        help="Number of scales in MSSE (if None, uses fst_num_scales)",
     )
 
     # ==================== Optimization Flags ====================
