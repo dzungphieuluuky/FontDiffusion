@@ -59,7 +59,7 @@ def clean_and_center_character(image_path, output_path, target_size=256):
 def main():
     parser = argparse.ArgumentParser(description="Clean Han-Nom characters for FontDiffuser.")
     parser.add_argument("input_folder", type=str, help="Folder containing raw image crops")
-    parser.add_argument("--output", type=str, default="cleaned_nom", help="Output folder name")
+    parser.add_argument("--output", type=str, default="cleaned_handwritten", help="Output folder name")
     parser.add_argument("--size", type=int, default=256, help="Target square size (default 256)")
     
     args = parser.parse_args()
