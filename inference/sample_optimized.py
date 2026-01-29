@@ -342,8 +342,12 @@ def load_fontdiffuser_pipeline(args: Namespace, use_fst: bool = False) -> FontDi
     """Load Font Diffuser pipeline with optimizations"""
     logger.info(f"Loading FontDiffuser{'WithFST' if use_fst else ''} pipeline...")
 
-    # Load base components
+    # Build base components
     unet: UNet = build_unet(args=args)
+    style_encoder: StyleEncoder = build_style_encoder(args=args)
+    content_encoder: ContentEncoder = build_content_encoder(args=args)
+    
+    # Load base component weights
     unet_ckpt_path = (
         f"{args.ckpt_dir}/unet.safetensors"
         if os.path.exists(f"{args.ckpt_dir}/unet.safetensors")
@@ -351,7 +355,6 @@ def load_fontdiffuser_pipeline(args: Namespace, use_fst: bool = False) -> FontDi
     )
     unet.load_state_dict(load_state_dict_auto(unet_ckpt_path))
 
-    style_encoder: StyleEncoder = build_style_encoder(args=args)
     style_encoder_ckpt_path = (
         f"{args.ckpt_dir}/style_encoder.safetensors"
         if os.path.exists(f"{args.ckpt_dir}/style_encoder.safetensors")
@@ -359,7 +362,6 @@ def load_fontdiffuser_pipeline(args: Namespace, use_fst: bool = False) -> FontDi
     )
     style_encoder.load_state_dict(load_state_dict_auto(style_encoder_ckpt_path))
 
-    content_encoder: ContentEncoder = build_content_encoder(args=args)
     content_encoder_ckpt_path = (
         f"{args.ckpt_dir}/content_encoder.safetensors"
         if os.path.exists(f"{args.ckpt_dir}/content_encoder.safetensors")
@@ -371,47 +373,68 @@ def load_fontdiffuser_pipeline(args: Namespace, use_fst: bool = False) -> FontDi
 
     if use_fst:
         from src.model import FontDiffuserModelDPMWithFST
+        from src.builders.build import (
+            build_fst,
+            build_mss_encoder,
+            build_fst_projection,
+            build_original_style_projection,
+            get_unet_cross_attention_dim,
+        )
         
-        # Build FST modules (initially with random weights)
-        fst_module = build_fst(args=args)
+        logger.info("Building FST modules...")
+        
+        # Build FST modules
         mss_encoder = build_mss_encoder(args=args)
+        fst_module = build_fst(args=args)
         
-        # Load FST checkpoint if provided
-        if hasattr(args, "fst_ckpt_path") and args.fst_ckpt_path:
-            if os.path.exists(args.fst_ckpt_path):
-                logger.info(f"Loading FST checkpoint from {args.fst_ckpt_path}...")
-                fst_checkpoint = load_state_dict_auto(args.fst_ckpt_path)
+        # Get cross-attention dimension
+        cross_attn_dim = get_unet_cross_attention_dim(unet)
+        
+        # Parse feature channels
+        feature_channels = args.fst_feature_channels
+        if isinstance(feature_channels, str):
+            feature_channels = [int(x.strip()) for x in feature_channels.split(",")]
+        
+        # Build projection layers
+        fst_projection = build_fst_projection(feature_channels[-1], cross_attn_dim)
+        original_style_projection = build_original_style_projection(1024, cross_attn_dim)
+        
+        logger.info("✓ Built FST modules")
+        
+        # Load FST module weights
+        fst_ckpt_dir = getattr(args, "fst_ckpt_path", args.ckpt_dir)
+        if fst_ckpt_dir and os.path.exists(fst_ckpt_dir):
+            logger.info(f"Loading FST weights from {fst_ckpt_dir}...")
+            
+            fst_components = {
+                "mss_encoder": mss_encoder,
+                "fst_module": fst_module,
+                "fst_projection": fst_projection,
+                "original_style_projection": original_style_projection,
+            }
+            
+            for name, module in fst_components.items():
+                ckpt_path = f"{fst_ckpt_dir}/{name}.safetensors"
+                if not os.path.exists(ckpt_path):
+                    ckpt_path = f"{fst_ckpt_dir}/{name}.pth"
                 
-                # Load individual module weights
-                if "fst_module" in fst_checkpoint:
-                    fst_module.load_state_dict(fst_checkpoint["fst_module"])
-                    logger.info("  ✓ Loaded fst_module weights")
+                if os.path.exists(ckpt_path):
+                    module.load_state_dict(load_state_dict_auto(ckpt_path))
+                    logger.info(f"  ✓ Loaded {name}")
                 else:
-                    logger.warning("  ⚠ fst_module weights not found in checkpoint")
-                
-                if "mss_encoder" in fst_checkpoint:
-                    mss_encoder.load_state_dict(fst_checkpoint["mss_encoder"])
-                    logger.info("  ✓ Loaded mss_encoder weights")
-                else:
-                    logger.warning("  ⚠ mss_encoder weights not found in checkpoint")
-            else:
-                logger.warning(f"FST checkpoint not found: {args.fst_ckpt_path}")
-                logger.warning("Using randomly initialized FST modules")
+                    logger.warning(f"  ⚠ {name} checkpoint not found")
         else:
-            logger.warning("No FST checkpoint path provided (--fst_ckpt_path)")
-            logger.warning("Using randomly initialized FST modules")
+            logger.warning("No FST checkpoint path provided - using random weights")
 
         # Create FST-enhanced model
         model: FontDiffuserModelDPMWithFST = FontDiffuserModelDPMWithFST(
             unet=unet,
             style_encoder=style_encoder,
             content_encoder=content_encoder,
-            fst_module=fst_module,
             mss_encoder=mss_encoder,
-            feature_channels=getattr(args, "fst_feature_channels", None),
-            num_queries=getattr(args, "fst_num_queries", 256),
-            query_dim=getattr(args, "fst_query_dim", 128),
-            num_scales=getattr(args, "fst_num_scales", 5),
+            fst_module=fst_module,
+            fst_projection=fst_projection,
+            original_style_projection=original_style_projection,
         )
         logger.info("✓ Created FontDiffuserModelDPMWithFST")
     else:
@@ -423,25 +446,23 @@ def load_fontdiffuser_pipeline(args: Namespace, use_fst: bool = False) -> FontDi
         )
         logger.info("✓ Created standard FontDiffuserModelDPM")
 
-    # Apply FP16 conversion AFTER model creation
+    # Apply optimizations
     if getattr(args, "fp16", False):
         logger.info("Converting to FP16 precision...")
         model = model.half()
         logger.info("✓ Converted to FP16")
 
-    # SAFE: Apply channels-last memory format
     if getattr(args, "channels_last", False):
         logger.info("Converting to channels-last memory format...")
         model = model.to(memory_format=torch.channels_last)
         logger.info("✓ Converted to channels-last")
 
-    # Apply torch.compile if requested
     if getattr(args, "compile", False):
         logger.info("Compiling model with torch.compile...")
         model = torch.compile(model)
         logger.info("✓ Model compiled")
 
-    # Move to device with proper dtype
+    # Move to device
     dtype: torch.dtype = torch.float16 if getattr(args, "fp16", False) else torch.float32
     model.to(args.device, dtype=dtype)
     model.eval()
@@ -452,7 +473,7 @@ def load_fontdiffuser_pipeline(args: Namespace, use_fst: bool = False) -> FontDi
     if hasattr(model, "log_model_info"):
         model.log_model_info()
 
-    # Load the training ddpm_scheduler
+    # Load scheduler
     train_scheduler = build_ddpm_scheduler(args=args)
     logger.info("✓ Loaded training DDPM scheduler")
 
