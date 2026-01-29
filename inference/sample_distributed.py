@@ -1248,7 +1248,6 @@ def sampling_batch_optimized(
                     skip_type=args.skip_type,
                     method=args.method,
                     correcting_x0_fn=args.correcting_x0_fn,
-                    enable_style_transform=enable_style_transform,
                 )
 
                 all_images.extend(images)
