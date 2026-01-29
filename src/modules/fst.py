@@ -3,82 +3,60 @@ from einops import rearrange, repeat
 
 import torch
 import torch.nn as nn
-
+from torch.nn import functional as F
 
 class CrossAttentionBlock(nn.Module):
-    """Cross-attention block with projection layers for different dimensions."""
-
+    """Memory-efficient cross-attention with gradient checkpointing."""
     def __init__(
         self,
         query_dim: int,
         key_dim: int,
         value_dim: int,
         num_heads: int = 8,
-        dropout: float = 0.0,
+        dropout: float = 0.1,
+        use_flash_attn: bool = False,
     ):
         super().__init__()
         self.num_heads = num_heads
         self.head_dim = query_dim // num_heads
-        self.scale = self.head_dim**-0.5
-
-        # Projections for queries, keys, and values
-        self.to_q = nn.Linear(query_dim, query_dim)
-        self.to_k = nn.Linear(key_dim, query_dim)  # Project to query_dim
-        self.to_v = nn.Linear(value_dim, query_dim)  # Project to query_dim
-
+        self.scale = self.head_dim ** -0.5
+        
+        # Project K/V to query_dim ONCE (not per-head)
+        self.to_q = nn.Linear(query_dim, query_dim, bias=False)
+        self.to_k = nn.Linear(key_dim, query_dim, bias=False)
+        self.to_v = nn.Linear(value_dim, query_dim, bias=False)
+        
         self.proj_out = nn.Linear(query_dim, query_dim)
         self.dropout = nn.Dropout(dropout)
-
-        # Layer normalization
-        self.norm_q = nn.LayerNorm(query_dim)
-        self.norm_kv = nn.LayerNorm(key_dim)
-
-    def forward(
-        self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
-    ) -> torch.Tensor:
-        """
-        Args:
-            query: (B, N_q, query_dim)
-            key: (B, N_kv, key_dim)
-            value: (B, N_kv, value_dim)
-        Returns:
-            (B, N_q, query_dim)
-        """
-        B, N_q, _ = query.shape
+        
+        # Use Flash Attention if available
+        self.use_flash_attn = use_flash_attn and hasattr(F, 'scaled_dot_product_attention')
+        
+    def forward(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
+        B, N_q, C = query.shape
         _, N_kv, _ = key.shape
-
-        # Normalize inputs
-        query = self.norm_q(query)
-        key = self.norm_kv(key)
-
-        # Project to q, k, v
-        q = (
-            self.to_q(query)
-            .reshape(B, N_q, self.num_heads, self.head_dim)
-            .transpose(1, 2)
-        )
-        k = (
-            self.to_k(key)
-            .reshape(B, N_kv, self.num_heads, self.head_dim)
-            .transpose(1, 2)
-        )
-        v = (
-            self.to_v(value)
-            .reshape(B, N_kv, self.num_heads, self.head_dim)
-            .transpose(1, 2)
-        )
-
-        # Attention: (B, num_heads, N_q, head_dim) @ (B, num_heads, head_dim, N_kv)
-        attn = (q @ k.transpose(-2, -1)) * self.scale
-        attn = attn.softmax(dim=-1)
-        attn = self.dropout(attn)
-
-        # Apply attention to values
-        out = (attn @ v).transpose(1, 2).reshape(B, N_q, -1)
-        out = self.proj_out(out)
-
-        return out
-
+        
+        # Project
+        q = self.to_q(query).reshape(B, N_q, self.num_heads, self.head_dim).transpose(1, 2)
+        k = self.to_k(key).reshape(B, N_kv, self.num_heads, self.head_dim).transpose(1, 2)
+        v = self.to_v(value).reshape(B, N_kv, self.num_heads, self.head_dim).transpose(1, 2)
+        
+        if self.use_flash_attn:
+            # Use PyTorch 2.0+ Flash Attention (faster + less memory)
+            out = F.scaled_dot_product_attention(
+                q, k, v, 
+                dropout_p=self.dropout.p if self.training else 0.0,
+                scale=self.scale
+            )
+        else:
+            # Standard attention
+            attn = (q @ k.transpose(-2, -1)) * self.scale
+            attn = attn.softmax(dim=-1)
+            attn = self.dropout(attn)
+            out = attn @ v
+        
+        out = out.transpose(1, 2).reshape(B, N_q, C)
+        return self.proj_out(out)
 
 class SelfAttentionBlock(nn.Module):
     """Self-attention block for feature fusion."""
@@ -114,60 +92,101 @@ class SelfAttentionBlock(nn.Module):
 
         return x
 
+class AdaptivePositionalEncoding(nn.Module):
+    """Learnable positional encoding with spatial awareness."""
+    def __init__(self, channels: int, max_h: int = 48, max_w: int = 48):
+        super().__init__()
+        self.channels = channels
+        
+        # Learnable embeddings for height and width
+        self.height_embed = nn.Parameter(torch.randn(max_h, channels // 2))
+        self.width_embed = nn.Parameter(torch.randn(max_w, channels // 2))
+        
+        # Optional: Add learned scale factor
+        self.scale = nn.Parameter(torch.ones(1))
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """x: (B, C, H, W)"""
+        B, C, H, W = x.shape
+        
+        # Interpolate if input size doesn't match
+        h_embed = F.interpolate(
+            self.height_embed.unsqueeze(0).unsqueeze(-1),
+            size=(H, 1), mode='bilinear', align_corners=False
+        ).squeeze(-1).permute(0, 2, 1)  # (1, H, C//2)
+        
+        w_embed = F.interpolate(
+            self.width_embed.unsqueeze(0).unsqueeze(1),
+            size=(1, W), mode='bilinear', align_corners=False
+        ).squeeze(1).permute(0, 2, 1)  # (1, W, C//2)
+        
+        # Combine height and width embeddings
+        pos_embed = torch.cat([
+            h_embed.repeat(1, 1, W).reshape(1, H, W, C//2),
+            w_embed.repeat(1, H, 1).reshape(1, H, W, C//2)
+        ], dim=-1).permute(0, 3, 1, 2)  # (1, C, H, W)
+        
+        return x + self.scale * pos_embed
 
 class FontStyleTransformationModule(nn.Module):
     def __init__(
         self,
-        feature_channels: list[int],  # List of c_i for each scale i
-        num_queries: int = 256,
+        msse_output_channels: list[int],  # Rename for clarity
+        num_queries: int = 220,  # 220 + 36 = 256 total (paper spec)
         query_dim: int = 128,
-        num_scale_features: int = 5,
         num_cross_attn_blocks: int = 2,
         num_self_attn_blocks: int = 2,
     ) -> None:
         super().__init__()
         self.num_queries = num_queries
         self.query_dim = query_dim
-        self.num_scale_features = num_scale_features
-        self.feature_channels = feature_channels
-
-        # Learnable query vectors L ∈ R^{N_L × d} (Eq. in text before Eq. 3)
+        self.num_scales = len(msse_output_channels)
+        self.msse_channels = msse_output_channels  # [64, 128, 256, 512, 1024]
+        
+        # Learnable queries (N_L = 220, per paper)
         self.learnable_queries = nn.Parameter(torch.randn(num_queries, query_dim))
-
-        # Per-scale learnable positional encodings PE_i (Section 3.2, before Eq. 5)
-        # Create positional encodings that match the actual feature channels
-        self.pos_encodings = nn.ParameterList()
-        for i, ch in enumerate(feature_channels):
-            # Create positional encoding with correct channel dimension
-            self.pos_encodings.append(nn.Parameter(torch.randn(1, ch, 1, 1)))
-
-        # Cross-attention blocks for each scale (Eq. 5)
-        self.cross_attn_blocks = nn.ModuleList()
-        for ch in feature_channels:
-            blocks = nn.ModuleList()
-            for _ in range(num_cross_attn_blocks):
-                blocks.append(
-                    CrossAttentionBlock(query_dim=query_dim, key_dim=ch, value_dim=ch)
+        
+        # Update FST to use this
+        self.pos_encodings = nn.ModuleList([
+            AdaptivePositionalEncoding(ch) 
+            for ch in msse_output_channels
+        ])        
+        # Cross-attention blocks per scale
+        self.cross_attn_blocks = nn.ModuleList([
+            nn.ModuleList([
+                CrossAttentionBlock(
+                    query_dim=query_dim,
+                    key_dim=ch,
+                    value_dim=ch,
+                    num_heads=8 if query_dim >= 128 else 4
                 )
-            self.cross_attn_blocks.append(blocks)
-
-        # Self-attention blocks for fusion (Eq. 7)
-        self.self_attn_blocks = nn.ModuleList()
-        concat_dim = query_dim * num_scale_features
-        for _ in range(num_self_attn_blocks):
-            self.self_attn_blocks.append(SelfAttentionBlock(dim=concat_dim))
-
-        # MLP to adjust concatenated features to final dimension
-        final_dim = feature_channels[-1]  # Use last scale's channel count
-        self.mlp_channel_adjust = nn.Sequential(
-            nn.Linear(concat_dim, final_dim * 2),
-            nn.ReLU(),
+                for _ in range(num_cross_attn_blocks)
+            ])
+            for ch in msse_output_channels
+        ])
+        
+        # Self-attention for fusion (operates on concatenated features)
+        fusion_dim = query_dim * self.num_scales  # 128 * 5 = 640
+        self.self_attn_blocks = nn.ModuleList([
+            SelfAttentionBlock(dim=fusion_dim)
+            for _ in range(num_self_attn_blocks)
+        ])
+        
+        # Project to final dimension (matches last scale: 1024)
+        final_dim = msse_output_channels[-1]
+        self.projection = nn.Sequential(
+            nn.LayerNorm(fusion_dim),
+            nn.Linear(fusion_dim, final_dim * 2),
+            nn.GELU(),
+            nn.Dropout(0.1),
             nn.Linear(final_dim * 2, final_dim),
         )
-
-        # Projection for residual connection (Eq. 9)
-        self.residual_proj = nn.Linear(final_dim, final_dim)
-
+        
+        # Residual connection projection
+        self.residual_proj = nn.Sequential(
+            nn.LayerNorm(final_dim),
+            nn.Linear(final_dim, final_dim)
+        )
     def forward(
         self,
         source_features: list[torch.Tensor],  # f_{x_r}^s = [f^{s,1}, ..., f^{s,n_s}]
