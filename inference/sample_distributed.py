@@ -30,13 +30,13 @@ from inference.sample_batch import (
     FontManager,
     QualityEvaluator,
     GenerationTracker,
-    parse_args,
-    create_args_namespace,
     load_characters,
     load_style_images,
     save_checkpoint,
     log_to_wandb,
 )
+
+from src.configs.fontdiffuser import get_parser
 from src.dpm_solver.pipeline_dpm_solver import FontDiffuserDPMPipeline
 
 logger = logging.getLogger(__name__)
@@ -570,30 +570,49 @@ def evaluate_results_with_accelerator(
 
 def main():
     """Main entry point."""
-    args = parse_args()
-    args = create_args_namespace(args)
+    parser = get_parser()
+    args = parser.parse_args()
+
+    # Convert image sizes to tuples
+    if isinstance(args.style_image_size, int):
+        args.style_image_size = (args.style_image_size, args.style_image_size)
+    if isinstance(args.content_image_size, int):
+        args.content_image_size = (args.content_image_size, args.content_image_size)
 
     # Initialize accelerator
     accelerator = Accelerator(
         mixed_precision="fp16" if args.fp16 else "no",
     )
 
+    # Override device to use accelerator's device
+    args.device = accelerator.device
+
     if accelerator.is_main_process:
         logger.info("=" * 60)
         logger.info("FontDiffuser Multi-GPU Batch Sampler")
         logger.info("=" * 60)
         logger.info(f"Using {accelerator.num_processes} GPUs")
+        logger.info(f"FST Enhancement: {'ENABLED' if args.use_fst else 'DISABLED'}")
+        logger.info(f"Mixed Precision: {'fp16' if args.fp16 else 'none'}")
 
     try:
-        # FIX 14: All processes load data
+        # Load data on all processes
         characters = load_characters(args.characters, args.start_line, args.end_line)
         style_paths_with_names = load_style_images(args.style_images)
 
+        # Validate after loading
+        if not characters:
+            raise ValueError("No characters loaded")
+        if not style_paths_with_names:
+            raise ValueError("No style images loaded")
+
         # Initialize font manager on all processes
-        font_manager: FontManager = FontManager(args.ttf_path)
+        font_manager = FontManager(args.ttf_path)
+        if not font_manager.get_font_names():
+            raise ValueError(f"No fonts loaded from {args.ttf_path}")
 
         if accelerator.is_main_process:
-            logger.info(f"✓ Loaded {len(font_manager.get_font_names())} fonts.")
+            logger.info(f"✓ Loaded {len(font_manager.get_font_names())} fonts")
             logger.info(f"📊 Configuration:")
             logger.info(f"  Dataset split: {args.dataset_split}")
             logger.info(
@@ -602,7 +621,7 @@ def main():
             logger.info(f"  Styles: {len(style_paths_with_names)}")
             logger.info(f"  Output Directory: {args.output_dir}")
             logger.info(f"  Checkpoint Directory: {args.ckpt_dir}")
-            logger.info(f"  Device: {args.device}")
+            logger.info(f"  Device per process: {args.device}")
             logger.info(f"  Batch Size: {args.batch_size}")
             logger.info(
                 f"  Results checkpoint path: {os.path.join(args.output_dir, 'results_checkpoint.json')}"
@@ -618,16 +637,13 @@ def main():
             checkpoint_path if os.path.exists(checkpoint_path) else None
         )
 
-        # Create args namespace for pipeline
-        pipeline_args = create_args_namespace(args)
-
         # FIX 15: Load pipeline on all processes
         if accelerator.is_main_process:
             logger.info("=" * 60)
             logger.info("Loading FontDiffuser pipeline...")
             logger.info("=" * 60)
 
-        pipe = load_fontdiffuser_pipeline(pipeline_args)
+        pipe = load_fontdiffuser_pipeline(args, use_fst=args.use_fst)
         if accelerator.is_main_process:
             logger.info("✓ Pipeline loaded successfully.")
 
@@ -721,7 +737,6 @@ def main():
             logger.warning(
                 f"GPU {accelerator.process_index}: Error during cleanup: {e}"
             )
-
 
 if __name__ == "__main__":
     main()

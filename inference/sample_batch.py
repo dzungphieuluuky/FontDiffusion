@@ -542,6 +542,37 @@ def parse_args() -> Namespace:
         help="Dataset split name (e.g., train_original, val)",
     )
 
+    # FST-specific arguments
+    parser.add_argument(
+        "--use_fst",
+        action="store_true",
+        default=False,
+        help="Use FST-enhanced model for improved style transfer",
+    )
+    parser.add_argument(
+        "--fst_ckpt_path",
+        type=str,
+        default=None,
+        help="Path to FST module checkpoint (optional)",
+    )
+    parser.add_argument(
+        "--fst_num_queries",
+        type=int,
+        default=256,
+        help="Number of learnable queries in FST module",
+    )
+    parser.add_argument(
+        "--fst_query_dim",
+        type=int,
+        default=128,
+        help="Dimension of FST queries",
+    )
+    parser.add_argument(
+        "--fst_num_scales",
+        type=int,
+        default=5,
+        help="Number of scales in MSSE",
+    )
     return parser.parse_args()
 
 
