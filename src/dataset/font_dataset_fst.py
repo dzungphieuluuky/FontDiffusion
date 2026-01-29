@@ -56,6 +56,7 @@ class FontDataset(Dataset):
         scr: bool = False,
         use_fst: bool = False,
         style_source_same_prob: float = 0.5,
+        num_consistency_pairs: int = 0,
     ):
         super().__init__()
         self.root = args.data_root
@@ -63,7 +64,7 @@ class FontDataset(Dataset):
         self.scr = scr
         self.use_fst = use_fst
         self.style_source_same_prob = style_source_same_prob
-
+        self.num_consistency_pairs = num_consistency_pairs
         if self.scr:
             self.num_neg = args.num_neg
 
@@ -188,6 +189,69 @@ class FontDataset(Dataset):
 
         source_image = Image.open(source_image_path).convert("RGB")
         return source_image
+
+    def get_consistency_pairs(
+        self, 
+        target_style: str, 
+        source_style: str,
+        exclude_content: str,
+        num_pairs: int
+    ) -> list[tuple[Image.Image, Image.Image]]:
+        """
+        Get k pairs of images for consistency loss.
+        
+        Each pair contains:
+        - Image with same content in source_style
+        - Image with same content in target_style
+        
+        All pairs should have different content from each other and from exclude_content.
+        
+        Args:
+            target_style: Target style name
+            source_style: Source style name  
+            exclude_content: Content to exclude (the main training sample)
+            num_pairs: Number of pairs to return (k)
+            
+        Returns:
+            List of (source_image, target_image) tuples
+        """
+        pairs = []
+        
+        # Find available contents that exist in both styles
+        available_contents = []
+        for content, styles_dict in self.content_to_images.items():
+            if content == exclude_content:
+                continue
+            if source_style in styles_dict and target_style in styles_dict:
+                available_contents.append(content)
+        
+        if not available_contents:
+            logger.warning(
+                f"No available contents for consistency pairs "
+                f"(source={source_style}, target={target_style})"
+            )
+            return pairs
+        
+        # Sample k different contents
+        selected_contents = random.sample(
+            available_contents, 
+            min(num_pairs, len(available_contents))
+        )
+        
+        for content in selected_contents:
+            # Get source style image
+            source_candidates = self.content_to_images[content][source_style]
+            source_image_path = random.choice(source_candidates)
+            source_image = Image.open(source_image_path).convert("RGB")
+            
+            # Get target style image  
+            target_candidates = self.content_to_images[content][target_style]
+            target_image_path = random.choice(target_candidates)
+            target_image = Image.open(target_image_path).convert("RGB")
+            
+            pairs.append((source_image, target_image))
+        
+        return pairs
 
     def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
         """
