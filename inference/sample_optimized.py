@@ -628,18 +628,21 @@ def main() -> None:
     args: Namespace = arg_parse()
 
     logger.info("\n" + "=" * 60)
-    logger.info("FONTDIFFUSER - OPTIMIZED SAMPLING")
+    logger.info("FontDiffuser Optimized Sampling")
     logger.info("=" * 60)
     logger.info(f"Model: {args.ckpt_dir}")
     logger.info(f"Device: {args.device}")
+    logger.info(f"FST Mode: {getattr(args, 'use_fst', False)}")
     logger.info(f"FP16: {getattr(args, 'fp16', False)}")
     logger.info(f"Channels Last: {getattr(args, 'channels_last', False)}")
     logger.info(f"Compile: {getattr(args, 'compile', False)}")
     logger.info(f"Batch Size: {getattr(args, 'batch_size', 1)}")
     logger.info("=" * 60 + "\n")
 
-    # Load pipeline
-    pipe: FontDiffuserDPMPipeline = load_fontdiffuser_pipeline(args=args)
+    # Load pipeline with FST support
+    pipe: FontDiffuserDPMPipeline = load_fontdiffuser_pipeline(
+        args=args, use_fst=args.use_fst
+    )
 
     # Parse characters
     characters: list[str] = parse_characters(
