@@ -32,7 +32,7 @@ from inference.sample_optimized import (
     get_content_transform,
     get_style_transform,
 )
-
+from src.configs.fontdiffuser import get_parser
 logger = logging.getLogger(__name__)
 enable_progress_bars()
 
@@ -359,222 +359,6 @@ class QualityEvaluator:
             image.save(path)
         except Exception as e:
             logger.info(f"Error saving image to {path}: {e}")
-
-
-def parse_args() -> Namespace:
-    """Parse command line arguments"""
-    parser: ArgumentParser = argparse.ArgumentParser(
-        description="Batch sampling and evaluation"
-    )
-
-    # Input/Output
-    parser.add_argument(
-        "--characters",
-        type=str,
-        required=True,
-        help="Comma-separated list of characters or path to text file",
-    )
-    parser.add_argument(
-        "--start_line",
-        type=int,
-        default=1,
-        help="Start line number for character file (1-indexed)",
-    )
-    parser.add_argument(
-        "--end_line",
-        type=int,
-        default=None,
-        help="End line number for character file (inclusive, None = end of file)",
-    )
-    parser.add_argument(
-        "--style_images",
-        type=str,
-        required=True,
-        help="Comma-separated paths to style images or directory",
-    )
-    parser.add_argument(
-        "--output_dir",
-        type=str,
-        default="my_dataset/train_original",
-        help="Output directory (will create ContentImage/ and TargetImage/ subdirs)",
-    )
-    parser.add_argument(
-        "--ground_truth_dir",
-        type=str,
-        default=None,
-        help="Directory with ground truth images for evaluation",
-    )
-
-    # Model configuration
-    parser.add_argument(
-        "--ckpt_dir", type=str, required=True, help="Checkpoint directory"
-    )
-    parser.add_argument(
-        "--ttf_path",
-        type=str,
-        required=True,
-        help="Path to TTF font file or directory with multiple fonts",
-    )
-    parser.add_argument("--device", type=str, default="cuda", help="Device to use")
-
-    parser.add_argument(
-        "--num_scales",
-        type=int,
-        default=4,
-        help="Number of scales in style transformation",
-    )
-    parser.add_argument(
-        "--feature_dim",
-        type=int,
-        default=512,
-        help="Feature dimension for style transformation",
-    )
-    parser.add_argument(
-        "--hidden_dim",
-        type=int,
-        default=256,
-        help="Hidden dimension for style transformation",
-    )
-    parser.add_argument(
-        "--num_heads", type=int, default=8, help="Number of attention heads"
-    )
-    parser.add_argument(
-        "--ffn_dim", type=int, default=2048, help="Feedforward Network dimension"
-    )
-    parser.add_argument(
-        "--style_transform_coefficient",
-        type=float,
-        default=0.1,
-        help="Loss coefficient for style transformation",
-    )
-
-    # Generation parameters
-    parser.add_argument(
-        "--num_inference_steps", type=int, default=15, help="Number of inference steps"
-    )
-    parser.add_argument(
-        "--guidance_scale", type=float, default=7.5, help="Guidance scale"
-    )
-    parser.add_argument(
-        "--batch_size", type=int, default=4, help="Batch size for generation"
-    )
-    parser.add_argument("--seed", type=int, default=42, help="Random seed")
-
-    # Optimization flags
-    parser.add_argument(
-        "--fp16", action="store_true", default=False, help="Use FP16 precision"
-    )
-    parser.add_argument(
-        "--compile", action="store_true", default=False, help="Use torch.compile"
-    )
-    parser.add_argument(
-        "--channels_last",
-        action="store_true",
-        default=True,
-        help="Use channels last memory format",
-    )
-    parser.add_argument(
-        "--enable_xformers", action="store_true", default=False, help="Enable xformers"
-    )
-    parser.add_argument(
-        "--fast_sampling",
-        action="store_true",
-        default=False,
-        help="Use fast sampling mode",
-    )
-
-    parser.add_argument(
-        "--enable_style_transform",
-        action="store_true",
-        default=False,
-        help="Enable style transformation module",
-    )
-
-    # Checkpoint and resume
-    parser.add_argument(
-        "--save_interval",
-        type=int,
-        default=10,
-        help="Save results every N styles (0 = only save at end)",
-    )
-
-    # Evaluation flags
-    parser.add_argument(
-        "--evaluate",
-        action="store_true",
-        default=True,
-        help="Evaluate generated images",
-    )
-    parser.add_argument(
-        "--compute_fid",
-        action="store_true",
-        default=False,
-        help="Compute FID (requires ground truth)",
-    )
-    parser.add_argument(
-        "--enable_attention_slicing",
-        action="store_true",
-        default=False,
-        help="Enable attention slicing for memory efficiency",
-    )
-
-    # Wandb configuration
-    parser.add_argument(
-        "--use_wandb",
-        action="store_true",
-        default=True,
-        help="Log results to Weights & Biases",
-    )
-    parser.add_argument(
-        "--wandb_project",
-        type=str,
-        default="fontdiffuser-eval",
-        help="Wandb project name",
-    )
-    parser.add_argument(
-        "--wandb_run_name", type=str, default=None, help="Wandb run name"
-    )
-
-    parser.add_argument(
-        "--dataset_split",
-        type=str,
-        default="train_original",
-        help="Dataset split name (e.g., train_original, val)",
-    )
-
-    # FST-specific arguments
-    parser.add_argument(
-        "--use_fst",
-        action="store_true",
-        default=False,
-        help="Use FST-enhanced model for improved style transfer",
-    )
-    parser.add_argument(
-        "--fst_ckpt_path",
-        type=str,
-        default=None,
-        help="Path to FST module checkpoint (optional)",
-    )
-    parser.add_argument(
-        "--fst_num_queries",
-        type=int,
-        default=256,
-        help="Number of learnable queries in FST module",
-    )
-    parser.add_argument(
-        "--fst_query_dim",
-        type=int,
-        default=128,
-        help="Dimension of FST queries",
-    )
-    parser.add_argument(
-        "--fst_num_scales",
-        type=int,
-        default=5,
-        help="Number of scales in MSSE",
-    )
-    return parser.parse_args()
-
 
 def load_characters(
     characters_arg: str, start_line: int = 1, end_line: int = None
@@ -1632,11 +1416,33 @@ def log_to_wandb(results: dict, args: Namespace) -> None:
 
 def main() -> None:
     """Main function"""
-    args: Namespace = parse_args()
+    parser = get_parser()
+    args = parser.parse_args()
+    
+    # Validate required arguments
+    if not args.characters:
+        raise ValueError("--characters is required")
+    if not args.style_images:
+        raise ValueError("--style_images is required") 
+    if not args.ckpt_dir:
+        raise ValueError("--ckpt_dir is required")
+    if not args.ttf_path:
+        raise ValueError("--ttf_path is required")
+    
+    # Convert image sizes to tuples (centralized parser uses int)
+    if isinstance(args.style_image_size, int):
+        args.style_image_size = (args.style_image_size, args.style_image_size)
+    if isinstance(args.content_image_size, int):
+        args.content_image_size = (args.content_image_size, args.content_image_size)
+    
+    # Set derived defaults if not provided
+    if not args.output_dir:
+        args.output_dir = "my_dataset/train_original"
+    
     results: dict[str, str] = {}
 
     logger.info("=" * 60)
-    logger.info("FONTDIFFUSER SYNTHESIS DATA GENERATION MAGIC")
+    logger.info("FontDiffuser Batch Sampling")
     logger.info("=" * 60)
 
     try:
