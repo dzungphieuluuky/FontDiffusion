@@ -494,3 +494,229 @@ class FontDiffuserModelDPM(ModelMixin, ConfigMixin):
         noise_pred = out[0]
 
         return noise_pred
+    
+class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
+    """
+    DPM Forward function for FontDiffuser with FST enhancement.
+    Integrates Multi-Scale Style Encoder (MSSE) and Font Style Transformation (FST)
+    modules while maintaining DPM-Solver compatibility.
+    """
+
+    @register_to_config
+    def __init__(
+        self,
+        unet: UNet,
+        style_encoder: StyleEncoder,
+        content_encoder: ContentEncoder,
+        feature_channels: list[int] = None,
+        num_queries: int = 256,
+        query_dim: int = 128,
+        num_scales: int = 5,
+    ):
+        super().__init__()
+        self.unet = unet
+        self.style_encoder = style_encoder
+        self.content_encoder = content_encoder
+
+        # Add FST modules
+        self.mss_encoder = MultiScaleStyleEncoder(
+            in_channels=3, base_channels=64, num_scales=num_scales
+        )
+
+        # Get actual feature channels from MSSE output if not provided
+        if feature_channels is None:
+            feature_channels = self.mss_encoder.get_output_channels()
+
+        self.fst_module = FontStyleTransformationModule(
+            feature_channels=feature_channels,
+            num_queries=num_queries,
+            query_dim=query_dim,
+            num_scale_features=num_scales,
+        )
+
+        # Determine U-Net's cross-attention dimension
+        cross_attn_dim = self._get_unet_cross_attention_dim()
+
+        # Project FST output to U-Net cross-attention dimension
+        self.fst_projection = nn.Linear(feature_channels[-1], cross_attn_dim)
+
+        # Project original style vector (1024-dim) to cross-attention dimension
+        self.original_style_projection = nn.Linear(1024, cross_attn_dim)
+
+    def _get_unet_cross_attention_dim(self) -> int:
+        """
+        Infer the cross-attention dimension from the U-Net architecture.
+
+        Returns:
+            int: Cross-attention dimension (typically 1024 for FontDiffuser)
+        """
+        # Try to get from config if available
+        if hasattr(self.unet, "config") and hasattr(
+            self.unet.config, "cross_attention_dim"
+        ):
+            return self.unet.config.cross_attention_dim
+
+        # Otherwise, inspect the first cross-attention layer
+        for module in self.unet.modules():
+            if hasattr(module, "to_k") and isinstance(module.to_k, nn.Linear):
+                return module.to_k.in_features
+
+        # Default fallback to 1024 (standard for FontDiffuser)
+        return 1024
+
+    def log_model_info(self) -> None:
+        """Log parameter information for the DPM FST FontDiffuser model."""
+        logger.info("\n" + "=" * 80)
+        logger.info("FontDiffuserModelDPMWithFST Model Architecture")
+        logger.info("=" * 80)
+
+        # Log individual component parameters
+        components = [
+            ("Content Encoder", self.content_encoder),
+            ("Style Encoder", self.style_encoder),
+            ("Diffusion U-Net", self.unet),
+            ("Multi-Scale Style Encoder (MSSE)", self.mss_encoder),
+            ("Font Style Transformation (FST)", self.fst_module),
+            ("FST Projection", self.fst_projection),
+            ("Original Style Projection", self.original_style_projection),
+        ]
+
+        logger.info("\nComponent Parameters:")
+        logger.info("-" * 80)
+        logger.info(f"{'Component':<45} {'Total':>15} {'Trainable':>15}")
+        logger.info("-" * 80)
+
+        total_all = 0
+        trainable_all = 0
+
+        for name, component in components:
+            total, trainable = count_parameters(component)
+            total_all += total
+            trainable_all += trainable
+            frozen_marker = " [FROZEN]" if trainable == 0 and total > 0 else ""
+            logger.info(f"{name:<45} {total:>15,} {trainable:>15,}{frozen_marker}")
+
+        logger.info("-" * 80)
+        logger.info(f"{'TOTAL':<45} {total_all:>15,} {trainable_all:>15,}")
+        logger.info(f"{'Non-trainable':<45} {'':<15} {total_all - trainable_all:>15,}")
+        logger.info("=" * 80 + "\n")
+
+        # Log FST-specific details
+        logger.info("FST Module Details:")
+        logger.info("-" * 80)
+        logger.info(f"  Feature channels: {self.fst_module.feature_channels}")
+        logger.info(f"  Num queries: {self.fst_module.num_queries}")
+        logger.info(f"  Query dim: {self.fst_module.query_dim}")
+        logger.info(f"  Num scales: {self.fst_module.num_scale_features}")
+        logger.info(f"  Cross-attention dim: {self._get_unet_cross_attention_dim()}")
+        logger.info("=" * 80 + "\n")
+
+    def forward(
+        self,
+        x_t: torch.Tensor,
+        timesteps: torch.Tensor,
+        cond: tuple[torch.Tensor, torch.Tensor],
+        content_encoder_downsample_size: int,
+        version: str = None,
+    ) -> torch.Tensor:
+        """
+        DPM-compatible forward pass with FST enhancement.
+
+        Tensor Shape Flow (DPM mode):
+        1. Extract content_images and style_images from cond tuple
+        2. content_images: (B, 1, 96, 96) → content_encoder → (B, C, H, W)
+        3. style_images: (B, 3, 96, 96) → style_encoder → orig_style_vec: (B, 1024)
+        4. style_images → mss_encoder → multi-scale features
+        5. FST module → transformation_features: (B, 292, 1024)
+        6. Project and combine with original style → (B, 293, cross_attn_dim)
+        7. U-Net denoising with enhanced style conditioning
+
+        Args:
+            x_t: (B, 4, H, W) - noisy latent representations
+            timesteps: (B,) or scalar - diffusion timestep
+            cond: tuple of (content_images, style_images)
+                - content_images: (B, 1, 96, 96) - source font character
+                - style_images: (B, 3, 96, 96) - target font style reference
+            content_encoder_downsample_size: downsampling factor for content encoder
+            version: version string (unused, for compatibility)
+
+        Returns:
+            torch.Tensor: (B, 4, H, W) - predicted noise
+        """
+        content_images = cond[0]
+        style_images = cond[1]
+
+        # ========== 1. ORIGINAL STYLE ENCODING ==========
+        style_img_feature, style_vec, style_residual_features = self.config.style_encoder(
+            style_images
+        )
+        # style_img_feature: (B, C, H, W) spatial features
+        # style_vec: (B, 1024) global style vector
+
+        # ========== 2. MULTI-SCALE STYLE ENCODING (MSSE) ==========
+        # For DPM sampling, we use style_images as both source and target
+        # (single style reference mode)
+        target_style_features = self.config.mss_encoder(style_images)
+        # List[(B, 64, 48, 48), (B, 128, 24, 24), ..., (B, 1024, 6, 6)]
+
+        # Use same features as source for consistency in single-style mode
+        source_style_features = target_style_features
+
+        # ========== 3. FONT STYLE TRANSFORMATION (FST) ==========
+        transformation_features = self.config.fst_module(
+            source_style_features, target_style_features
+        )
+        # Shape: (B, 292, 1024) where 292 = 256 queries + 36 spatial
+
+        # ========== 4. PREPARE ENHANCED STYLE CONDITION ==========
+        # Project FST features to U-Net cross-attention dimension
+        fst_condition = self.config.fst_projection(transformation_features)
+        # Shape: (B, 292, cross_attn_dim)
+
+        # Project original style vector
+        orig_style_projected = self.config.original_style_projection(style_vec)
+        # Shape: (B, cross_attn_dim)
+        orig_style_projected = orig_style_projected.unsqueeze(1)
+        # Shape: (B, 1, cross_attn_dim)
+
+        # Combine FST and original style features
+        combined_style_condition = torch.cat(
+            [fst_condition, orig_style_projected], dim=1
+        )
+        # Shape: (B, 293, cross_attn_dim)
+
+        # ========== 5. CONTENT ENCODING ==========
+        # Get content feature
+        content_img_feature, content_residual_features = self.config.content_encoder(
+            content_images
+        )
+        content_residual_features.append(content_img_feature)
+
+        # Get the content feature from reference image
+        style_content_feature, style_content_res_features = self.config.content_encoder(
+            style_images
+        )
+        style_content_res_features.append(style_content_feature)
+
+        # ========== 6. PREPARE ENCODER HIDDEN STATES ==========
+        # FontDiffuser U-Net expects a list:
+        # [style_img_feature, content_residual_features,
+        #  style_hidden_states, style_content_res_features]
+        input_hidden_states = [
+            style_img_feature,  # (B, C, H, W) spatial style features
+            content_residual_features,  # List of content skip connections
+            combined_style_condition,  # (B, 293, cross_attn_dim) enhanced style
+            style_content_res_features,  # List of style-content skip connections
+        ]
+
+        # ========== 7. DIFFUSION U-NET FORWARD ==========
+        out = self.config.unet(
+            x_t,
+            timesteps,
+            encoder_hidden_states=input_hidden_states,
+            content_encoder_downsample_size=content_encoder_downsample_size,
+        )
+        noise_pred = out[0]
+
+        return noise_pred
+

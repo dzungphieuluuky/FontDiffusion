@@ -112,6 +112,39 @@ def arg_parse() -> Namespace:
         default=False,
         help="Use deterministic algorithms for reproducibility",
     )
+    
+    # FST-specific arguments
+    parser.add_argument(
+        "--use_fst",
+        action="store_true",
+        default=False,
+        help="Use FST-enhanced model for improved style transfer",
+    )
+    parser.add_argument(
+        "--fst_ckpt_path",
+        type=str,
+        default=None,
+        help="Path to FST module checkpoint (optional)",
+    )
+    parser.add_argument(
+        "--fst_num_queries",
+        type=int,
+        default=256,
+        help="Number of learnable queries in FST module",
+    )
+    parser.add_argument(
+        "--fst_query_dim",
+        type=int,
+        default=128,
+        help="Dimension of FST queries",
+    )
+    parser.add_argument(
+        "--fst_num_scales",
+        type=int,
+        default=5,
+        help="Number of scales in MSSE",
+    )
+    
     args: Namespace = parser.parse_args()
 
     style_image_size: int = getattr(args, "style_image_size", 96)
@@ -303,16 +336,17 @@ def load_state_dict_auto(path: str):
         return torch.load(path, map_location="cpu")
 
 
-def load_fontdiffuser_pipeline(args: Namespace) -> FontDiffuserDPMPipeline:
+def load_fontdiffuser_pipeline(args: Namespace, use_fst: bool = False) -> FontDiffuserDPMPipeline:
     """Load Font Diffuser pipeline with optimizations
 
     Args:
         args (Namespace): Arguments namespace
+        use_fst (bool): Whether to use FST-enhanced model
 
     Returns:
         FontDiffuserDPMPipeline: Loaded FontDiffuserDPMPipeline instance
     """
-    logger.info("Loading FontDiffuser pipeline...")
+    logger.info(f"Loading FontDiffuser{'WithFST' if use_fst else ''} pipeline...")
 
     # Load the model state_dict
     unet: UNet = build_unet(args=args)
@@ -341,6 +375,7 @@ def load_fontdiffuser_pipeline(args: Namespace) -> FontDiffuserDPMPipeline:
 
     logger.info("✓ Loaded model state_dict successfully")
 
+    # Apply FP16 conversion if requested
     if args.fp16:
         logger.info("Converting to FP16 precision...")
         unet = unet.half()
@@ -363,10 +398,40 @@ def load_fontdiffuser_pipeline(args: Namespace) -> FontDiffuserDPMPipeline:
         content_encoder = torch.compile(content_encoder)
         logger.info("✓ Model compiled")
 
-    # Create model
-    model: FontDiffuserModelDPM = FontDiffuserModelDPM(
-        unet=unet, style_encoder=style_encoder, content_encoder=content_encoder
-    )
+    # Create model (FST or original)
+    if use_fst:
+        from src.model import FontDiffuserModelDPMWithFST
+        
+        model: FontDiffuserModelDPMWithFST = FontDiffuserModelDPMWithFST(
+            unet=unet,
+            style_encoder=style_encoder,
+            content_encoder=content_encoder,
+            feature_channels=getattr(args, "fst_feature_channels", None),
+            num_queries=getattr(args, "fst_num_queries", 256),
+            query_dim=getattr(args, "fst_query_dim", 128),
+            num_scales=getattr(args, "fst_num_scales", 5),
+        )
+        
+        # Load FST-specific weights if available
+        if hasattr(args, "fst_ckpt_path") and args.fst_ckpt_path:
+            logger.info(f"Loading FST weights from {args.fst_ckpt_path}...")
+            fst_state_dict = load_state_dict_auto(args.fst_ckpt_path)
+            # Load only FST-specific modules
+            model.mss_encoder.load_state_dict(
+                {k.replace("mss_encoder.", ""): v for k, v in fst_state_dict.items() 
+                 if k.startswith("mss_encoder.")},
+                strict=False
+            )
+            model.fst_module.load_state_dict(
+                {k.replace("fst_module.", ""): v for k, v in fst_state_dict.items() 
+                 if k.startswith("fst_module.")},
+                strict=False
+            )
+            logger.info("✓ Loaded FST weights successfully")
+    else:
+        model: FontDiffuserModelDPM = FontDiffuserModelDPM(
+            unet=unet, style_encoder=style_encoder, content_encoder=content_encoder
+        )
 
     # Move to device with proper dtype
     dtype: torch.dtype = torch.float16 if args.fp16 else torch.float32
@@ -374,6 +439,10 @@ def load_fontdiffuser_pipeline(args: Namespace) -> FontDiffuserDPMPipeline:
     model.eval()
 
     logger.info("✓ Model moved to device")
+    
+    # Log model info
+    if hasattr(model, "log_model_info"):
+        model.log_model_info()
 
     # Load the training ddpm_scheduler
     train_scheduler: Any = build_ddpm_scheduler(args=args)
