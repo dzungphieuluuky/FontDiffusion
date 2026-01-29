@@ -330,9 +330,9 @@ class FontDiffuserModel(ModelMixin, ConfigMixin):
         content_encoder: ContentEncoder,
     ):
         super().__init__()
-        self.unet = unet
-        self.style_encoder = style_encoder
-        self.content_encoder = content_encoder
+        self.unet: UNet = unet
+        self.style_encoder: StyleEncoder = style_encoder
+        self.content_encoder: ContentEncoder = content_encoder
 
     def log_model_info(self) -> None:
         """Log parameter information for the base FontDiffuser model."""
@@ -393,9 +393,9 @@ class FontDiffuserModelDPM(ModelMixin, ConfigMixin):
         content_encoder: ContentEncoder,
     ):
         super().__init__()
-        self.unet = unet
-        self.style_encoder = style_encoder
-        self.content_encoder = content_encoder
+        self.unet: UNet = unet
+        self.style_encoder: StyleEncoder = style_encoder
+        self.content_encoder: ContentEncoder = content_encoder
 
     def log_model_info(self) -> None:
         """Log parameter information for the DPM FontDiffuser model."""
@@ -481,13 +481,13 @@ class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
         super().__init__()
         
         # Assign all modules (no internal creation)
-        self.unet = unet
-        self.style_encoder = style_encoder
-        self.content_encoder = content_encoder
-        self.mss_encoder = mss_encoder
-        self.fst_module = fst_module
-        self.fst_projection = fst_projection
-        self.original_style_projection = original_style_projection
+        self.unet: UNet = unet
+        self.style_encoder: StyleEncoder = style_encoder
+        self.content_encoder: ContentEncoder = content_encoder
+        self.mss_encoder: MultiScaleStyleEncoder = mss_encoder
+        self.fst_module: FontStyleTransformationModule = fst_module
+        self.fst_projection: nn.Linear = fst_projection
+        self.original_style_projection: nn.Linear = original_style_projection
 
     def log_model_info(self) -> None:
         """Log parameter information for the DPM FST FontDiffuser model."""
