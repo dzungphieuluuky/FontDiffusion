@@ -2,7 +2,6 @@ from .model import (
     FontDiffuserModel,
     FontDiffuserModelDPM,
     FontDiffuserWithFST,
-    FontDiffuserWithFSTWrapper,
     FontStyleTransformationModule,
 )
 from .losses.criterion import ContentPerceptualLoss
