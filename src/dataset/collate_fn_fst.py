@@ -71,7 +71,7 @@ class CollateFN(object):
             result["neg_images"] = neg_imgs
 
         # Add consistency pairs if present
-        if "consistency_pairs" in batch[0]:
+        if "consistency_pairs" in batch[0] and batch[0]["consistency_pairs"]:
             # Each batch item has a list of (source_tensor, target_tensor) tuples
             # Each tensor is already (C, H, W)
             
@@ -87,20 +87,15 @@ class CollateFN(object):
                     targets = torch.stack([p[1] for p in pairs])  # (k, C, H, W)
                     consistency_sources.append(sources)
                     consistency_targets.append(targets)
-                else:
-                    # If no pairs, create dummy tensors to maintain batch structure
-                    # Use same shape as style images
-                    dummy_shape = batch[0]["style_image"].shape
-                    dummy_tensor = torch.zeros(1, *dummy_shape)
-                    consistency_sources.append(dummy_tensor)
-                    consistency_targets.append(dummy_tensor)
             
+            # Only add to result if we have valid pairs
             if consistency_sources:
                 # Stack across batch: (B, k, C, H, W)
                 result["consistency_source_images"] = torch.stack(consistency_sources)
                 result["consistency_target_images"] = torch.stack(consistency_targets)
 
         return result
+
     def _collate_neg_images(
         self, neg_image_tensors: list[torch.Tensor]
     ) -> torch.Tensor:
