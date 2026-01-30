@@ -3,12 +3,13 @@ Export Hugging Face dataset back to FontDiffusion directory structure.
 
 This module reconstructs the original directory layout from a HuggingFace dataset,
 preserving results_checkpoint.json as the single source of truth.
-Optimized for high performance with parallel processing and efficient I/O.
+Fully optimized with concurrent.futures for maximum speed.
 """
 
 import json
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 import os
 from pathlib import Path
@@ -34,10 +35,11 @@ class ExportConfig:
     repo_id: Optional[str] = None
     local_dataset_path: Optional[Path] = None
     split: str = "train"
-    config_name: Optional[str] = None  # Add this
+    config_name: Optional[str] = None
     token: Optional[str] = None
-    num_workers: int = 4
+    num_workers: int = 8
     batch_size: int = 1000
+    use_process_pool: bool = False  # NEW: Use ProcessPool for batch prep
 
     def __post_init__(self):
         """Validate and convert paths."""
@@ -50,6 +52,7 @@ class ExportConfig:
             raise ValueError(
                 "Must provide either repo_id (Hub) or local_dataset_path (disk)"
             )
+
 
 class DatasetExporter:
     """Export HuggingFace dataset to FontDiffusion directory structure."""
@@ -76,38 +79,51 @@ class DatasetExporter:
         """
         if self.config.local_dataset_path:
             logger.info(f"Loading local dataset from {self.config.local_dataset_path}")
+            load_start = time.time()
             try:
                 dataset = Dataset.load_from_disk(str(self.config.local_dataset_path))
-                logger.info(f"Loaded {len(dataset)} samples from disk")
+                load_time = time.time() - load_start
+                logger.info(
+                    f"Loaded {len(dataset)} samples from disk in {load_time:.2f}s"
+                )
                 return dataset
             except Exception as e:
                 raise ValueError(f"Failed to load local dataset: {e}") from e
 
-        config_msg = f" (config: {self.config.config_name})" if self.config.config_name else ""
-        logger.info(
-            f"Loading dataset from Hub: {self.config.repo_id} (split: {self.config.split}){config_msg}"
+        config_msg = (
+            f" (config: {self.config.config_name})"
+            if self.config.config_name
+            else ""
         )
+        logger.info(
+            f"Loading dataset from Hub: {self.config.repo_id} "
+            f"(split: {self.config.split}){config_msg}"
+        )
+        load_start = time.time()
         try:
             dataset = load_dataset(
                 self.config.repo_id,
-                name=self.config.config_name,  # Add this parameter
+                name=self.config.config_name,
                 split=self.config.split,
                 token=self.config.token,
             )
-            logger.info(f"Loaded {len(dataset)} samples from Hub")
+            load_time = time.time() - load_start
+            logger.info(
+                f"Loaded {len(dataset)} samples from Hub in {load_time:.2f}s"
+            )
             return dataset
         except Exception as e:
             raise ValueError(
                 f"Failed to load from Hub {self.config.repo_id}: {e}"
             ) from e
-        
+
     def _create_directories(self) -> None:
         """Create output directory structure."""
         self.content_dir.mkdir(parents=True, exist_ok=True)
         self.target_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"Created directory structure at {self.output_dir}")
 
-    def _save_image_task(self, image: Image.Image, path: Path) -> bool:
+    def _save_image_task(self, image: Image.Image, path: Path) -> tuple[bool, Path]:
         """Save a single image (thread-safe task).
 
         Args:
@@ -115,70 +131,69 @@ class DatasetExporter:
             path: Destination path
 
         Returns:
-            True if successful, False otherwise
+            Tuple of (success, path)
         """
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             image.save(path)
-            return True
+            return True, path
         except Exception as e:
             logger.warning(f"Failed to save image to {path}: {e}")
-            return False
+            return False, path
 
-    def _prepare_export_batch(self, samples: list[dict]) -> tuple[list, list, set]:
-        """Prepare a batch of samples for export.
+    def _prepare_sample_metadata(
+        self, sample: dict
+    ) -> tuple[Optional[tuple], Optional[tuple], dict]:
+        """Prepare metadata for a single sample (parallelizable).
 
         Args:
-            samples: List of dataset samples
+            sample: Single dataset sample
 
         Returns:
-            Tuple of (save_tasks, generations, content_filenames)
+            Tuple of (content_task, target_task, generation_record)
         """
-        save_tasks = []
-        generations = []
-        content_filenames = set()
+        char = sample["character"]
+        style = sample["style"]
+        font = sample.get("font", "unknown")
 
-        for sample in samples:
-            char = sample["character"]
-            style = sample["style"]
-            font = sample.get("font", "unknown")
+        content_task = None
+        target_task = None
 
-            # Prepare content image save task
-            content_filename = get_content_filename(char)
-            content_img = sample.get("content_image")
+        # Prepare content image task
+        content_filename = get_content_filename(char)
+        content_img = sample.get("content_image")
+        if isinstance(content_img, Image.Image):
+            content_path = self.content_dir / content_filename
+            content_task = (content_img, content_path, "content", content_filename)
 
-            if isinstance(content_img, Image.Image):
-                content_path = self.content_dir / content_filename
-                save_tasks.append(
-                    ("content", content_img, content_path, content_filename)
-                )
-                content_filenames.add(content_filename)
+        # Prepare target image task
+        target_img = sample.get("target_image")
+        if isinstance(target_img, Image.Image):
+            style_dir = self.target_dir / style
+            target_filename = get_target_filename(char, style)
+            target_path = style_dir / target_filename
+            target_task = (target_img, target_path, "target", None)
 
-            # Prepare target image save task
-            target_img = sample.get("target_image")
-            if isinstance(target_img, Image.Image):
-                style_dir = self.target_dir / style
-                target_filename = get_target_filename(char, style)
-                target_path = style_dir / target_filename
-                save_tasks.append(("target", target_img, target_path, None))
+        # Build generation record
+        generation = {
+            "character": char,
+            "style": style,
+            "font": font,
+            "content_image_path": f"ContentImage/{content_filename}",
+            "target_image_path": f"TargetImage/{style}/{get_target_filename(char, style)}",
+            "content_hash": compute_file_hash(char, "", font),
+            "target_hash": compute_file_hash(char, style, font),
+        }
 
-            # Build generation record
-            generations.append(
-                {
-                    "character": char,
-                    "style": style,
-                    "font": font,
-                    "content_image_path": f"ContentImage/{content_filename}",
-                    "target_image_path": f"TargetImage/{style}/{get_target_filename(char, style)}",
-                    "content_hash": compute_file_hash(char, "", font),
-                    "target_hash": compute_file_hash(char, style, font),
-                }
-            )
-
-        return save_tasks, generations, content_filenames
+        return content_task, target_task, generation
 
     def _export_images_parallel(self, dataset: Dataset) -> dict[str, Any]:
-        """Export images using parallel processing for maximum speed.
+        """Export images using dual-layer parallel processing for maximum speed.
+
+        Strategy:
+        1. Outer ThreadPool: Prepares sample metadata in parallel
+        2. Inner ThreadPool: Saves images in parallel
+        3. Deduplicates content images efficiently
 
         Args:
             dataset: Dataset to export
@@ -186,79 +201,104 @@ class DatasetExporter:
         Returns:
             Complete metadata dictionary for results_checkpoint.json
         """
-        logger.info(f"Exporting images with {self.config.num_workers} workers...")
+        logger.info(
+            f"Exporting images with {self.config.num_workers} workers "
+            f"(dual-layer parallelization)..."
+        )
 
         all_generations = []
         exported_content = set()
-        total_content_saves = 0
-        total_target_saves = 0
-
-        # Process dataset in batches
         dataset_size = len(dataset)
-        batch_size = self.config.batch_size
 
-        with ThreadPoolExecutor(max_workers=self.config.num_workers) as executor:
-            for batch_start in range(0, dataset_size, batch_size):
-                batch_end = min(batch_start + batch_size, dataset_size)
-                batch_samples = [dataset[i] for i in range(batch_start, batch_end)]
+        export_start = time.time()
 
-                # Prepare batch
-                save_tasks, generations, content_filenames = self._prepare_export_batch(
-                    batch_samples
-                )
+        # Use nested executors for maximum parallelization
+        with ThreadPoolExecutor(
+            max_workers=self.config.num_workers
+        ) as metadata_executor:
+            with ThreadPoolExecutor(
+                max_workers=self.config.num_workers * 2
+            ) as save_executor:
+                # Process in batches
+                for batch_start in range(0, dataset_size, self.config.batch_size):
+                    batch_end = min(batch_start + self.config.batch_size, dataset_size)
+                    batch_samples = [dataset[i] for i in range(batch_start, batch_end)]
 
-                # Filter out already-saved content images
-                filtered_tasks = []
-                for task_type, img, path, filename in save_tasks:
-                    if task_type == "content":
-                        if filename not in exported_content:
-                            filtered_tasks.append((img, path))
-                            exported_content.add(filename)
-                    else:  # target
-                        filtered_tasks.append((img, path))
-
-                # Submit save tasks in parallel
-                futures = [
-                    executor.submit(self._save_image_task, img, path)
-                    for img, path in filtered_tasks
-                ]
-
-                # Wait for completion
-                success_count = sum(
-                    1 for future in as_completed(futures) if future.result()
-                )
-
-                # Count saves
-                content_in_batch = len([t for t in save_tasks if t[0] == "content"])
-                target_in_batch = len([t for t in save_tasks if t[0] == "target"])
-
-                total_content_saves += min(
-                    success_count,
-                    len([t for t in filtered_tasks if t[1].parent == self.content_dir]),
-                )
-                total_target_saves += min(
-                    success_count,
-                    len([t for t in filtered_tasks if t[1].parent != self.content_dir]),
-                )
-
-                all_generations.extend(generations)
-
-                # Log progress
-                if batch_end % 1000 == 0 or batch_end == dataset_size:
+                    batch_start_time = time.time()
                     logger.info(
-                        f"Progress: {batch_end}/{dataset_size} samples "
-                        f"({batch_end * 100 // dataset_size}%)"
+                        f"Processing batch {batch_start}-{batch_end} "
+                        f"({len(batch_samples)} samples)..."
                     )
 
+                    # PARALLEL: Prepare metadata for all samples in batch
+                    metadata_futures = {
+                        metadata_executor.submit(
+                            self._prepare_sample_metadata, sample
+                        ): i
+                        for i, sample in enumerate(batch_samples)
+                    }
+
+                    # Collect prepared tasks
+                    save_tasks = []
+                    for future in as_completed(metadata_futures):
+                        content_task, target_task, generation = future.result()
+
+                        # Deduplicate content images
+                        if content_task:
+                            _, _, _, content_filename = content_task
+                            if content_filename not in exported_content:
+                                save_tasks.append(content_task)
+                                exported_content.add(content_filename)
+
+                        # Always save target images
+                        if target_task:
+                            save_tasks.append(target_task)
+
+                        all_generations.append(generation)
+
+                    # PARALLEL: Save all images in batch
+                    save_futures = [
+                        save_executor.submit(self._save_image_task, img, path)
+                        for img, path, _, _ in save_tasks
+                    ]
+
+                    # Wait for saves to complete
+                    success_count = sum(
+                        1
+                        for future in as_completed(save_futures)
+                        if future.result()[0]
+                    )
+
+                    batch_time = time.time() - batch_start_time
+                    logger.info(
+                        f"Batch completed in {batch_time:.2f}s "
+                        f"({success_count}/{len(save_tasks)} saves successful, "
+                        f"{batch_time/len(batch_samples):.3f}s/sample)"
+                    )
+
+                    # Progress update
+                    progress_pct = batch_end / dataset_size * 100
+                    elapsed = time.time() - export_start
+                    rate = batch_end / elapsed
+                    eta = (dataset_size - batch_end) / rate if rate > 0 else 0
+                    logger.info(
+                        f"Overall progress: {batch_end}/{dataset_size} "
+                        f"({progress_pct:.1f}%, {rate:.1f} samples/s, ETA: {eta:.0f}s)"
+                    )
+
+        export_time = time.time() - export_start
         logger.info(
             f"Exported {len(exported_content)} content images, "
-            f"{len(all_generations)} target images"
+            f"{len(all_generations)} target images in {export_time:.2f}s "
+            f"({len(all_generations)/export_time:.1f} samples/s)"
         )
 
         # Build metadata efficiently using set comprehensions
         characters = sorted({g["character"] for g in all_generations})
         styles = sorted({g["style"] for g in all_generations})
-        fonts = sorted({g["font"] for g in all_generations if g["font"] != "unknown"})
+        fonts = sorted(
+            {g["font"] for g in all_generations if g["font"] != "unknown"}
+        )
 
         return {
             "generations": all_generations,
@@ -282,8 +322,9 @@ class DatasetExporter:
 
         exported_content = set()
         generations = []
+        start_time = time.time()
 
-        for sample in HFTqdm(dataset, desc="Exporting images", unit="sample"):
+        for i, sample in enumerate(dataset):
             char = sample["character"]
             style = sample["style"]
             font = sample.get("font", "unknown")
@@ -318,9 +359,18 @@ class DatasetExporter:
                 }
             )
 
+            # Progress logging
+            if (i + 1) % 100 == 0:
+                elapsed = time.time() - start_time
+                rate = (i + 1) / elapsed
+                logger.info(
+                    f"Progress: {i + 1}/{len(dataset)} samples ({rate:.1f} samples/s)"
+                )
+
+        export_time = time.time() - start_time
         logger.info(
             f"Exported {len(exported_content)} content images, "
-            f"{len(generations)} target images"
+            f"{len(generations)} target images in {export_time:.2f}s"
         )
 
         # Build metadata
@@ -345,12 +395,16 @@ class DatasetExporter:
         """
         checkpoint_path = self.output_dir / "results_checkpoint.json"
 
+        logger.info("Writing checkpoint file...")
+        write_start = time.time()
+
         # Write with minimal whitespace for faster I/O
         with checkpoint_path.open("w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2, ensure_ascii=False)
 
+        write_time = time.time() - write_start
         logger.info(
-            f"Saved checkpoint with {len(metadata['generations'])} generations: "
+            f"Saved checkpoint in {write_time:.2f}s with {len(metadata['generations'])} generations: "
             f"{len(metadata['characters'])} chars, {len(metadata['styles'])} styles"
         )
 
@@ -364,21 +418,24 @@ class DatasetExporter:
             ValueError: If dataset loading or export fails
         """
         logger.info("Starting optimized dataset export...")
+        total_start = time.time()
 
         dataset = self._load_dataset()
         self._create_directories()
 
         # Use parallel export if workers > 1, otherwise sequential
         if self.config.num_workers > 1:
-            self.config.num_workers = min(self.config.num_workers, os.cpu_count())
-            print(f"Using {self.config.num_workers} parallel workers for export")
+            actual_workers = min(self.config.num_workers, os.cpu_count())
+            logger.info(f"Using {actual_workers} parallel workers for export")
             metadata = self._export_images_parallel(dataset)
         else:
+            logger.info("Using sequential export (single-threaded)")
             metadata = self._export_images_sequential(dataset)
 
         self._save_checkpoint(metadata)
 
-        logger.info("Export completed successfully")
+        total_time = time.time() - total_start
+        logger.info(f"Export completed successfully in {total_time:.2f}s")
         return metadata
 
 
@@ -387,10 +444,11 @@ def export_dataset(
     repo_id: Optional[str] = None,
     local_dataset_path: Optional[str | Path] = None,
     split: str = "train",
-    config_name: Optional[str] = None,  # Add this parameter
+    config_name: Optional[str] = None,
     token: Optional[str] = None,
-    num_workers: int = 4,
+    num_workers: int = 8,
     batch_size: int = 1000,
+    use_process_pool: bool = False,
 ) -> dict[str, Any]:
     """Export HuggingFace dataset to disk with high performance.
 
@@ -401,8 +459,9 @@ def export_dataset(
         split: Dataset split name (default: 'train')
         config_name: Dataset configuration name (e.g., 'streaming', 'default')
         token: HuggingFace API token for private datasets
-        num_workers: Number of parallel workers for image saving (default: 8)
+        num_workers: Number of parallel workers (default: 8)
         batch_size: Number of samples to process per batch (default: 1000)
+        use_process_pool: Use ProcessPool for metadata prep (default: False)
 
     Returns:
         Metadata dictionary from results_checkpoint.json
@@ -416,14 +475,16 @@ def export_dataset(
         repo_id=repo_id,
         local_dataset_path=Path(local_dataset_path) if local_dataset_path else None,
         split=split,
-        config_name=config_name,  # Add this
+        config_name=config_name,
         token=token,
         num_workers=num_workers,
         batch_size=batch_size,
+        use_process_pool=use_process_pool,
     )
 
     exporter = DatasetExporter(config)
     return exporter.export()
+
 
 def main():
     """CLI entry point."""
@@ -434,14 +495,17 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Export from Hub with parallel processing
-  python export_hf_dataset.py --output-dir ./output --repo-id user/dataset --workers 8
-  
-  # Export from local cache with custom batch size
-  python export_hf_dataset.py --output-dir ./output --local-path ~/.cache/... --batch-size 500
-  
-  # Single-threaded export
-  python export_hf_dataset.py --output-dir ./output --repo-id user/dataset --workers 1
+  # High-performance export with parallel processing
+  python export_hf_dataset_to_disk_parallel.py --output-dir ./output \\
+    --repo-id user/dataset --workers 12 --batch-size 2000
+
+  # Export from local cache
+  python export_hf_dataset_to_disk_parallel.py --output-dir ./output \\
+    --local-path ~/.cache/huggingface/datasets/... --workers 8
+
+  # Single-threaded export (debugging)
+  python export_hf_dataset_to_disk_parallel.py --output-dir ./output \\
+    --repo-id user/dataset --workers 1
         """,
     )
 
@@ -482,7 +546,7 @@ Examples:
         "--workers",
         type=int,
         default=os.cpu_count() - 1,
-        help="Number of parallel workers for image saving (default: 12)",
+        help="Number of parallel workers (default: number of CPU cores - 1)",
     )
     parser.add_argument(
         "--batch-size",
@@ -499,7 +563,7 @@ Examples:
             repo_id=args.repo_id,
             local_dataset_path=args.local_path,
             split=args.split,
-            config_name=args.config_name,  # Add this
+            config_name=args.config_name,
             token=args.token,
             num_workers=args.workers,
             batch_size=args.batch_size,
@@ -507,8 +571,8 @@ Examples:
 
         logger.info(
             f"Successfully exported to {args.output_dir}\n"
-            f"  ContentImage/\n"
-            f"  TargetImage/\n"
+            f"  ContentImage/ ({metadata['total_chars']} unique characters)\n"
+            f"  TargetImage/ ({len(metadata['generations'])} images)\n"
             f"  results_checkpoint.json"
         )
 

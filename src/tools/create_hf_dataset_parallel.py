@@ -1,17 +1,20 @@
 """
 Create Hugging Face dataset from generated FontDiffusion images with streaming support.
 
-Enhanced with multiprocessing for faster image processing and parallel I/O.
+Enhanced with two-phase parallelization: I/O-bound image loading (ThreadPoolExecutor)
+followed by CPU-bound image processing (ProcessPoolExecutor or threads).
+Maximizes throughput by separating concerns and avoiding context switching.
 """
 
 import json
 import logging
+import time
+import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Generator, Optional
-from multiprocessing import Pool, cpu_count
+from typing import Any, Generator, Optional, NamedTuple
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 from functools import partial, lru_cache
-from concurrent.futures import ThreadPoolExecutor
 
 from datasets import Dataset, Features, Image as HFImage, Value
 from PIL import Image
@@ -20,6 +23,18 @@ from utilities import HFTqdm
 from filename_utils import compute_file_hash
 
 logger = logging.getLogger(__name__)
+
+
+class LoadedImages(NamedTuple):
+    """Container for loaded images with metadata."""
+    content_img: Image.Image
+    style_img: Image.Image
+    target_img: Image.Image
+    character: str
+    style: str
+    font: str
+    content_path: str
+    target_path: str
 
 
 @dataclass
@@ -34,20 +49,26 @@ class DatasetConfig:
     push_to_hub: bool = True
     private: bool = False
     token: Optional[str] = None
-    batch_size: int = 100
+    batch_size: int = 500
     resize_height: int = 256
     spacing: int = 10
-    num_workers: int = None  # None = auto-detect
-    io_workers: int = 4  # NEW: Threads for parallel I/O within each process
+    io_workers: int = None  # None = auto-detect (CPU count * 2)
+    cpu_workers: int = None  # None = auto-detect (CPU count)
 
     def __post_init__(self):
-        """Convert paths to Path if they're strings."""
+        """Convert paths to Path if they're strings and set worker counts."""
         if isinstance(self.data_dir, str):
             self.data_dir = Path(self.data_dir)
         if isinstance(self.style_images_dir, str):
             self.style_images_dir = Path(self.style_images_dir)
-        if self.num_workers is None:
-            self.num_workers = max(1, cpu_count() - 1)
+        
+        cpu_count = os.cpu_count() or 4
+        if self.io_workers is None:
+            # I/O-bound: use many threads (2x CPU count, can go higher)
+            self.io_workers = cpu_count * 2
+        if self.cpu_workers is None:
+            # CPU-bound: use CPU count (diminishing returns beyond this)
+            self.cpu_workers = cpu_count
 
 
 # Cache style images to avoid re-loading
@@ -77,6 +98,81 @@ def _load_image_file(path: Path) -> Optional[Image.Image]:
         return Image.open(path).convert("RGB")
     except Exception as e:
         logger.warning(f"Failed to load {path}: {e}")
+        return None
+
+
+def _find_style_image(style_images_dir: Path, style: str) -> Optional[Path]:
+    """Find style image in the style images directory.
+
+    Args:
+        style_images_dir: Directory containing style images
+        style: Style name
+
+    Returns:
+        Path to style image or None if not found
+    """
+    for ext in [".png", ".jpg", ".jpeg"]:
+        style_path = style_images_dir / f"{style}{ext}"
+        if style_path.exists():
+            return style_path
+    return None
+
+
+def _load_images_for_sample(
+    gen: dict,
+    data_dir: Path,
+    style_images_dir: Path,
+) -> Optional[LoadedImages]:
+    """PHASE 1 (I/O-BOUND): Load all images for a single sample.
+    
+    This function only performs I/O operations - no CPU-intensive processing.
+    Designed to be called with high parallelism (many threads).
+
+    Args:
+        gen: Generation metadata dictionary
+        data_dir: Data directory path
+        style_images_dir: Style images directory path
+
+    Returns:
+        LoadedImages container or None if loading fails
+    """
+    char: str = gen.get("character", "")
+    style: str = gen.get("style", "")
+    font: str = gen.get("font", "unknown")
+
+    content_path: Path = data_dir / gen.get("content_image_path", "")
+    target_path: Path = data_dir / gen.get("target_image_path", "")
+    style_path: Optional[Path] = _find_style_image(style_images_dir, style)
+
+    # Validate paths
+    if not content_path.exists() or not target_path.exists():
+        return None
+    if style_path is None or not style_path.exists():
+        return None
+
+    try:
+        # Load all three images (pure I/O, no processing)
+        content_img = _load_image_file(content_path)
+        target_img = _load_image_file(target_path)
+        style_img = _load_cached_style_image(str(style_path))
+
+        # Validate all images loaded successfully
+        if content_img is None or target_img is None or style_img is None:
+            return None
+
+        return LoadedImages(
+            content_img=content_img,
+            style_img=style_img,
+            target_img=target_img,
+            character=char,
+            style=style,
+            font=font,
+            content_path=gen.get("content_image_path", ""),
+            target_path=gen.get("target_image_path", ""),
+        )
+
+    except Exception as e:
+        logger.warning(f"Failed to load images for {char}/{style}: {e}")
         return None
 
 
@@ -145,94 +241,44 @@ def _create_comparison_image(
         return None
 
 
-def _find_style_image(style_images_dir: Path, style: str) -> Optional[Path]:
-    """Find style image in the style images directory.
-
-    Args:
-        style_images_dir: Directory containing style images
-        style: Style name
-
-    Returns:
-        Path to style image or None if not found
-    """
-    for ext in [".png", ".jpg", ".jpeg"]:
-        style_path = style_images_dir / f"{style}{ext}"
-        if style_path.exists():
-            return style_path
-    return None
-
-
-def _process_single_sample(
-    gen: dict,
-    data_dir: Path,
-    style_images_dir: Path,
+def _process_loaded_sample(
+    loaded: LoadedImages,
     resize_height: int,
     spacing: int,
-    io_workers: int = 4,
 ) -> Optional[dict[str, Any]]:
-    """Process a single sample (load images, create comparison).
-
-    This function is designed to be called in parallel via multiprocessing.
-    Uses ThreadPoolExecutor for parallel image I/O within each process.
+    """PHASE 2 (CPU-BOUND): Process pre-loaded images into final sample.
+    
+    This function only performs CPU-intensive operations - no I/O.
+    Designed to be called with moderate parallelism (CPU count).
 
     Args:
-        gen: Generation metadata dictionary
-        data_dir: Data directory path
-        style_images_dir: Style images directory path
+        loaded: LoadedImages container with pre-loaded images
         resize_height: Height for comparison images
         spacing: Spacing between images
-        io_workers: Number of threads for parallel I/O
 
     Returns:
         Sample dictionary or None if processing fails
     """
-    char: str = gen.get("character", "")
-    style: str = gen.get("style", "")
-    font: str = gen.get("font", "unknown")
-
-    content_path: Path = data_dir / gen.get("content_image_path", "")
-    target_path: Path = data_dir / gen.get("target_image_path", "")
-    style_path: Optional[Path] = _find_style_image(style_images_dir, style)
-
-    # Validate paths
-    if not content_path.exists() or not target_path.exists():
-        return None
-    if style_path is None or not style_path.exists():
-        return None
-
     try:
-        # Load images in parallel using ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=io_workers) as executor:
-            # Submit all I/O tasks concurrently
-            content_future = executor.submit(_load_image_file, content_path)
-            target_future = executor.submit(_load_image_file, target_path)
-            # Use cached loading for style images (reduces repeated disk reads)
-            style_future = executor.submit(_load_cached_style_image, str(style_path))
-
-            # Wait for all loads to complete
-            content_img = content_future.result()
-            target_img = target_future.result()
-            style_img = style_future.result()
-
-        # Validate all images loaded successfully
-        if content_img is None or target_img is None or style_img is None:
-            return None
-
-        # Create comparison
+        # Create comparison (CPU-bound: resizing and compositing)
         comparison_img: Optional[Image.Image] = _create_comparison_image(
-            content_img, style_img, target_img, resize_height, spacing
+            loaded.content_img,
+            loaded.style_img,
+            loaded.target_img,
+            resize_height,
+            spacing,
         )
 
         # Build sample dict
         sample_dict = {
-            "character": char,
-            "style": style,
-            "font": font,
-            "content_image": content_img,
-            "style_image": style_img,
-            "target_image": target_img,
-            "content_hash": compute_file_hash(char, "", font),
-            "target_hash": compute_file_hash(char, style, font),
+            "character": loaded.character,
+            "style": loaded.style,
+            "font": loaded.font,
+            "content_image": loaded.content_img,
+            "style_image": loaded.style_img,
+            "target_image": loaded.target_img,
+            "content_hash": compute_file_hash(loaded.character, "", loaded.font),
+            "target_hash": compute_file_hash(loaded.character, loaded.style, loaded.font),
         }
 
         if comparison_img is not None:
@@ -241,12 +287,12 @@ def _process_single_sample(
         return sample_dict
 
     except Exception as e:
-        logger.warning(f"Failed to process sample {char}/{style}: {e}")
+        logger.warning(f"Failed to process sample {loaded.character}/{loaded.style}: {e}")
         return None
 
 
 class DatasetBuilder:
-    """Build FontDiffusion dataset in Hugging Face format with streaming."""
+    """Build FontDiffusion dataset in Hugging Face format with two-phase parallel processing."""
 
     REQUIRED_DIRS = ["ContentImage", "TargetImage"]
     CHECKPOINT_FILE = "results_checkpoint.json"
@@ -313,65 +359,140 @@ class DatasetBuilder:
 
         return data
 
-    def _generate_samples_parallel(self) -> Generator[dict[str, Any], None, None]:
-        """Generate dataset samples using multiprocessing.
+    def _generate_samples_two_phase(self) -> Generator[dict[str, Any], None, None]:
+        """Generate dataset samples using two-phase parallel processing.
+        
+        Phase 1 (I/O-bound): Load images with high parallelism (ThreadPoolExecutor)
+        Phase 2 (CPU-bound): Process images with moderate parallelism (ThreadPoolExecutor or ProcessPoolExecutor)
 
         Yields:
             Dictionary containing sample data with individual images and comparison
 
-        This generator uses multiprocessing to parallelize image loading and processing.
+        This approach maximizes throughput by:
+        1. Saturating I/O bandwidth with many concurrent reads
+        2. Avoiding context switching between I/O and CPU work
+        3. Using optimal worker count for each phase
         """
         checkpoint: dict = self._load_checkpoint()
         generations: list = checkpoint["generations"]
 
         logger.info(
-            f"Processing {len(generations)} samples with "
-            f"{self.config.num_workers} workers (IO threads per worker: {self.config.io_workers})..."
-        )
-
-        # Create partial function with fixed parameters
-        process_func = partial(
-            _process_single_sample,
-            data_dir=self.data_dir,
-            style_images_dir=self.style_images_dir,
-            resize_height=self.config.resize_height,
-            spacing=self.config.spacing,
-            io_workers=self.config.io_workers,
+            f"Processing {len(generations)} samples with two-phase parallelization:\n"
+            f"  Phase 1 (I/O): {self.config.io_workers} threads\n"
+            f"  Phase 2 (CPU): {self.config.cpu_workers} threads"
         )
 
         skipped: int = 0
         processed: int = 0
-
-        # Process in batches using multiprocessing
         batch_size = self.config.batch_size
+        total_batches = (len(generations) + batch_size - 1) // batch_size
 
-        with Pool(processes=self.config.num_workers) as pool:
-            for i in range(0, len(generations), batch_size):
-                batch = generations[i : i + batch_size]
+        start_time = time.time()
 
-                # Process batch in parallel
-                results = pool.map(process_func, batch)
+        # Process in batches
+        for batch_idx, i in enumerate(range(0, len(generations), batch_size), 1):
+            batch = generations[i : i + batch_size]
+            
+            logger.info(
+                f"Processing batch {batch_idx}/{total_batches} ({len(batch)} samples)..."
+            )
+            batch_start = time.time()
 
-                # Yield valid results
-                for sample in results:
-                    if sample is not None:
-                        yield sample
-                        processed += 1
+            # ===== PHASE 1: I/O-BOUND IMAGE LOADING (HIGH PARALLELISM) =====
+            logger.info(f"  Phase 1: Loading images with {self.config.io_workers} I/O threads...")
+            io_start = time.time()
+
+            loaded_samples: list[LoadedImages] = []
+            load_func = partial(
+                _load_images_for_sample,
+                data_dir=self.data_dir,
+                style_images_dir=self.style_images_dir,
+            )
+
+            # Use ThreadPoolExecutor with high worker count for I/O
+            with ThreadPoolExecutor(max_workers=self.config.io_workers) as io_executor:
+                io_futures = {io_executor.submit(load_func, gen): gen for gen in batch}
+                
+                for future in as_completed(io_futures):
+                    loaded = future.result()
+                    if loaded is not None:
+                        loaded_samples.append(loaded)
                     else:
                         skipped += 1
 
-                if processed % 100 == 0 and processed > 0:
-                    logger.info(f"Processed {processed} samples...")
+            io_time = time.time() - io_start
+            logger.info(
+                f"  Phase 1 completed: {len(loaded_samples)}/{len(batch)} loaded in {io_time:.2f}s "
+                f"({io_time/len(batch):.3f}s/sample)"
+            )
+
+            if not loaded_samples:
+                logger.warning(f"  Batch {batch_idx}: No valid samples loaded, skipping processing phase")
+                continue
+
+            # ===== PHASE 2: CPU-BOUND IMAGE PROCESSING (MODERATE PARALLELISM) =====
+            logger.info(f"  Phase 2: Processing images with {self.config.cpu_workers} CPU threads...")
+            cpu_start = time.time()
+
+            process_func = partial(
+                _process_loaded_sample,
+                resize_height=self.config.resize_height,
+                spacing=self.config.spacing,
+            )
+
+            batch_valid = 0
+            # Use ThreadPoolExecutor with CPU count for processing
+            # Note: Could use ProcessPoolExecutor here, but ThreadPoolExecutor avoids
+            # pickling overhead and is sufficient for PIL operations
+            with ThreadPoolExecutor(max_workers=self.config.cpu_workers) as cpu_executor:
+                cpu_futures = {cpu_executor.submit(process_func, loaded): loaded for loaded in loaded_samples}
+                
+                for future in as_completed(cpu_futures):
+                    sample = future.result()
+                    if sample is not None:
+                        yield sample
+                        processed += 1
+                        batch_valid += 1
+                    else:
+                        skipped += 1
+
+            cpu_time = time.time() - cpu_start
+            logger.info(
+                f"  Phase 2 completed: {batch_valid}/{len(loaded_samples)} processed in {cpu_time:.2f}s "
+                f"({cpu_time/len(loaded_samples):.3f}s/sample)"
+            )
+
+            # Log batch summary
+            batch_time = time.time() - batch_start
+            logger.info(
+                f"Batch {batch_idx}/{total_batches} completed in {batch_time:.2f}s "
+                f"(I/O: {io_time:.2f}s, CPU: {cpu_time:.2f}s, total: {batch_valid} valid)"
+            )
+
+            # Overall progress
+            if processed > 0:
+                elapsed = time.time() - start_time
+                rate = (processed + skipped) / elapsed
+                progress_pct = (processed + skipped) / len(generations) * 100
+                eta = (len(generations) - processed - skipped) / rate if rate > 0 else 0
+                logger.info(
+                    f"Overall progress: {processed}/{len(generations)} "
+                    f"({progress_pct:.1f}%, {rate:.1f} samples/s, ETA: {eta:.0f}s)"
+                )
 
         if processed == 0:
             raise ValueError("No valid samples found")
 
         if skipped > 0:
-            logger.warning(f"Skipped {skipped} invalid samples")
+            logger.warning(f"Skipped {skipped}/{len(generations)} invalid samples")
 
-        logger.info(f"Successfully processed {processed} samples")
+        total_time = time.time() - start_time
+        logger.info(
+            f"Successfully processed {processed} samples in {total_time:.2f}s "
+            f"({processed/total_time:.1f} samples/s)"
+        )
 
-    def _generate_samples(self) -> Generator[dict[str, Any], None, None]:
+    def _generate_samples_single_threaded(self) -> Generator[dict[str, Any], None, None]:
         """Generate dataset samples one at a time (single-threaded fallback).
 
         Yields:
@@ -380,17 +501,29 @@ class DatasetBuilder:
         checkpoint: dict = self._load_checkpoint()
         generations: list = checkpoint["generations"]
 
+        logger.info(f"Processing {len(generations)} samples (single-threaded)...")
+
         skipped: int = 0
         processed: int = 0
+        start_time = time.time()
 
         for gen in generations:
-            sample = _process_single_sample(
+            # Phase 1: Load images
+            loaded = _load_images_for_sample(
                 gen,
                 self.data_dir,
                 self.style_images_dir,
+            )
+
+            if loaded is None:
+                skipped += 1
+                continue
+
+            # Phase 2: Process images
+            sample = _process_loaded_sample(
+                loaded,
                 self.config.resize_height,
                 self.config.spacing,
-                self.config.io_workers,
             )
 
             if sample is not None:
@@ -399,8 +532,13 @@ class DatasetBuilder:
             else:
                 skipped += 1
 
-            if processed % 100 == 0 and processed > 0:
-                logger.info(f"Processed {processed} samples...")
+            if (processed + skipped) % 100 == 0:
+                elapsed = time.time() - start_time
+                rate = (processed + skipped) / elapsed
+                logger.info(
+                    f"Processed {processed} samples ({skipped} skipped) "
+                    f"at {rate:.1f} samples/s"
+                )
 
         if processed == 0:
             raise ValueError("No valid samples found")
@@ -408,13 +546,17 @@ class DatasetBuilder:
         if skipped > 0:
             logger.warning(f"Skipped {skipped} invalid samples")
 
-        logger.info(f"Successfully processed {processed} samples")
+        total_time = time.time() - start_time
+        logger.info(
+            f"Successfully processed {processed} samples in {total_time:.2f}s "
+            f"({processed/total_time:.1f} samples/s)"
+        )
 
-    def build_streaming(self, use_multiprocessing: bool = True) -> Dataset:
+    def build_streaming(self, use_parallel: bool = True) -> Dataset:
         """Build dataset using streaming to minimize memory usage.
 
         Args:
-            use_multiprocessing: Whether to use multiprocessing for speed
+            use_parallel: Whether to use two-phase parallel processing (default: True)
 
         Returns:
             HuggingFace Dataset created from generator
@@ -422,9 +564,8 @@ class DatasetBuilder:
         Raises:
             ValueError: If no valid samples are found
         """
-        logger.info(
-            f"Building dataset with streaming (multiprocessing={use_multiprocessing})..."
-        )
+        mode = "two-phase parallel" if use_parallel else "single-threaded"
+        logger.info(f"Building dataset with streaming ({mode})...")
 
         features = Features(
             {
@@ -440,24 +581,34 @@ class DatasetBuilder:
             }
         )
 
+        # Select generator based on parallelization strategy
         generator_func = (
-            self._generate_samples_parallel
-            if use_multiprocessing
-            else self._generate_samples
+            self._generate_samples_two_phase
+            if use_parallel
+            else self._generate_samples_single_threaded
         )
+
+        logger.info("Converting samples to Arrow format (this may take a while)...")
+        conversion_start = time.time()
 
         dataset = Dataset.from_generator(
             generator_func,
             features=features,
         )
 
+        conversion_time = time.time() - conversion_start
+        logger.info(
+            f"Dataset conversion completed in {conversion_time:.2f}s "
+            f"({len(dataset)} samples)"
+        )
+
         return dataset
 
-    def build_batched(self, use_multiprocessing: bool = True) -> Dataset:
+    def build_batched(self, use_parallel: bool = True) -> Dataset:
         """Build dataset in batches for better control over memory usage.
 
         Args:
-            use_multiprocessing: Whether to use multiprocessing for speed
+            use_parallel: Whether to use two-phase parallel processing
 
         Returns:
             HuggingFace Dataset created from batched processing
@@ -465,9 +616,8 @@ class DatasetBuilder:
         Raises:
             ValueError: If no valid samples are found
         """
-        logger.info(
-            f"Building dataset with batching (multiprocessing={use_multiprocessing})..."
-        )
+        mode = "two-phase parallel" if use_parallel else "single-threaded"
+        logger.info(f"Building dataset with batching ({mode})...")
 
         features = Features(
             {
@@ -497,10 +647,12 @@ class DatasetBuilder:
         }
 
         sample_count = 0
+        
+        # Select generator based on parallelization strategy
         generator_func = (
-            self._generate_samples_parallel
-            if use_multiprocessing
-            else self._generate_samples
+            self._generate_samples_two_phase
+            if use_parallel
+            else self._generate_samples_single_threaded
         )
 
         for sample in generator_func():
@@ -530,7 +682,7 @@ class DatasetBuilder:
         return dataset
 
     def push_streaming(self, dataset: Dataset) -> None:
-        """Push dataset to Hugging Face Hub with streaming.
+        """Push dataset to Hugging Face Hub with streaming and detailed logging.
 
         Args:
             dataset: Dataset to push
@@ -540,19 +692,27 @@ class DatasetBuilder:
             return
 
         logger.info(f"Pushing dataset to {self.config.repo_id} with streaming...")
+        logger.info("Authenticating with Hugging Face Hub...")
+        
+        push_start = time.time()
 
-        dataset.push_to_hub(
-            repo_id=self.config.repo_id,
-            split=self.config.split,
-            config_name=self.config.config_name,
-            private=self.config.private,
-            token=self.config.token,
-            max_shard_size="500MB",
-        )
+        try:
+            dataset.push_to_hub(
+                repo_id=self.config.repo_id,
+                split=self.config.split,
+                config_name=self.config.config_name,
+                private=self.config.private,
+                token=self.config.token,
+            )
 
-        logger.info(
-            f"Successfully pushed to https://huggingface.co/datasets/{self.config.repo_id}"
-        )
+            push_time = time.time() - push_start
+            logger.info(
+                f"Successfully pushed to https://huggingface.co/datasets/{self.config.repo_id} "
+                f"in {push_time:.2f}s"
+            )
+        except Exception as e:
+            logger.error(f"Push failed after {time.time() - push_start:.2f}s: {e}")
+            raise
 
     def save_local_streaming(self, dataset: Dataset, output_path: Path) -> None:
         """Save dataset to local disk with streaming.
@@ -562,13 +722,14 @@ class DatasetBuilder:
             output_path: Local directory path
         """
         logger.info(f"Saving dataset to {output_path} with streaming...")
+        save_start = time.time()
 
         dataset.save_to_disk(
             str(output_path),
-            max_shard_size="500MB",
         )
 
-        logger.info("Dataset saved successfully")
+        save_time = time.time() - save_start
+        logger.info(f"Dataset saved successfully in {save_time:.2f}s")
 
 
 def create_dataset(
@@ -581,13 +742,13 @@ def create_dataset(
     private: bool = False,
     token: Optional[str] = None,
     local_save_path: Optional[str | Path] = None,
-    batch_size: int = 100,
+    batch_size: int = 500,
     use_streaming: bool = True,
     resize_height: int = 256,
     spacing: int = 10,
-    num_workers: Optional[int] = None,
-    io_workers: int = 4,
-    use_multiprocessing: bool = True,
+    io_workers: Optional[int] = None,
+    cpu_workers: Optional[int] = None,
+    use_parallel: bool = True,
 ) -> Dataset:
     """Create and optionally push dataset to Hub with streaming support.
 
@@ -601,13 +762,13 @@ def create_dataset(
         private: Whether to make the repository private (default: False)
         token: HuggingFace API token (optional)
         local_save_path: Local path to save dataset (optional)
-        batch_size: Number of samples per batch (default: 100)
+        batch_size: Number of samples per batch (default: 500)
         use_streaming: Use streaming mode (True) or batched mode (False)
         resize_height: Height for comparison images (default: 256)
         spacing: Spacing between images in comparison (default: 10)
-        num_workers: Number of worker processes (default: CPU count - 1)
-        io_workers: Number of I/O threads per worker (default: 4)
-        use_multiprocessing: Whether to use multiprocessing (default: True)
+        io_workers: Number of I/O threads (default: CPU count * 2)
+        cpu_workers: Number of CPU threads (default: CPU count)
+        use_parallel: Whether to use two-phase parallel processing (default: True)
 
     Returns:
         Created Dataset object
@@ -627,16 +788,16 @@ def create_dataset(
         batch_size=batch_size,
         resize_height=resize_height,
         spacing=spacing,
-        num_workers=num_workers,
         io_workers=io_workers,
+        cpu_workers=cpu_workers,
     )
 
     builder = DatasetBuilder(config)
 
     if use_streaming:
-        dataset = builder.build_streaming(use_multiprocessing=use_multiprocessing)
+        dataset = builder.build_streaming(use_parallel=use_parallel)
     else:
-        dataset = builder.build_batched(use_multiprocessing=use_multiprocessing)
+        dataset = builder.build_batched(use_parallel=use_parallel)
 
     if local_save_path:
         builder.save_local_streaming(dataset, Path(local_save_path))
@@ -652,18 +813,27 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Create HuggingFace dataset from FontDiffusion images with streaming",
+        description="Create HuggingFace dataset from FontDiffusion images with two-phase parallel processing",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Standard with parallel I/O
-  python create_hf_dataset_parallel.py --data-dir my_dataset/train \\
+  # Standard (recommended - automatic worker tuning)
+  python tools/create_hf_dataset_parallel.py --data-dir my_dataset/train \\
     --style-images-dir style_images/ --repo-id user/dataset
 
-  # High-performance mode
-  python create_hf_dataset_parallel.py --data-dir my_dataset/train \\
+  # High-performance mode (manual tuning)
+  python tools/create_hf_dataset_parallel.py --data-dir my_dataset/train \\
     --style-images-dir style_images/ --repo-id user/dataset \\
-    --num-workers 12 --io-workers 8 --batch-size 200
+    --io-workers 32 --cpu-workers 16 --batch-size 1000
+
+  # Single-threaded (debugging)
+  python tools/create_hf_dataset_parallel.py --data-dir my_dataset/train \\
+    --style-images-dir style_images/ --repo-id user/dataset \\
+    --no-parallel
+
+Two-phase processing maximizes throughput by:
+1. Phase 1 (I/O): Saturate disk bandwidth with many concurrent reads
+2. Phase 2 (CPU): Process images with optimal CPU utilization
         """,
     )
     parser.add_argument(
@@ -685,16 +855,16 @@ Examples:
         help="HuggingFace repository ID (username/dataset-name)",
     )
     parser.add_argument(
-        "--split",
-        type=str,
-        default="train",
-        help="Dataset split name (default: train)",
-    )
-    parser.add_argument(
         "--config-name",
         type=str,
         default=None,
         help="Dataset configuration name (e.g., 'streaming', 'default')",
+    )
+    parser.add_argument(
+        "--split",
+        type=str,
+        default="train",
+        help="Dataset split name (default: train)",
     )
     parser.add_argument(
         "--private",
@@ -719,8 +889,8 @@ Examples:
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=200,
-        help="Batch size for processing (default: 200)",
+        default=500,
+        help="Batch size for processing (default: 500)",
     )
     parser.add_argument(
         "--use-batched",
@@ -741,23 +911,22 @@ Examples:
         help="Spacing between images in comparison (default: 10)",
     )
     parser.add_argument(
-        "--num-workers",
-        type=int,
-        default=None,
-        help="Number of worker processes (default: CPU count - 1)",
-    )
-    parser.add_argument(
         "--io-workers",
         type=int,
-        default=8,
-        help="Number of I/O threads per worker (default: 8)",
+        default=os.cpu_count() * 2,
+        help="Number of I/O threads (default: CPU count * 2)",
     )
     parser.add_argument(
-        "--no-multiprocessing",
-        action="store_true",
-        help="Disable multiprocessing (use single-threaded processing)",
+        "--cpu-workers",
+        type=int,
+        default=os.cpu_count() - 1,
+        help="Number of CPU threads (default: CPU count - 1)",
     )
-
+    parser.add_argument(
+        "--no-parallel",
+        action="store_true",
+        help="Disable parallel processing (use single-threaded)",
+    )
     args = parser.parse_args()
 
     try:
@@ -775,9 +944,9 @@ Examples:
             use_streaming=not args.use_batched,
             resize_height=args.resize_height,
             spacing=args.spacing,
-            num_workers=args.num_workers,
             io_workers=args.io_workers,
-            use_multiprocessing=not args.no_multiprocessing,
+            cpu_workers=args.cpu_workers,
+            use_parallel=not args.no_parallel,
         )
         logger.info("Dataset creation completed successfully")
 
