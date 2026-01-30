@@ -1,3 +1,4 @@
+import argparse
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 import torch 
 from torch import nn
@@ -7,7 +8,7 @@ from src import ContentEncoder, StyleEncoder, UNet, SCR
 from src.model import FontStyleTransformationModule
 from src.model import MultiScaleStyleEncoder
 
-def build_unet(args):
+def build_unet(args: argparse.Namespace) -> UNet:
     unet = UNet(
         sample_size=args.resolution,
         in_channels=3,
@@ -44,7 +45,7 @@ def build_unet(args):
     return unet
 
 
-def build_style_encoder(args):
+def build_style_encoder(args: argparse.Namespace) -> StyleEncoder:
     style_image_encoder = StyleEncoder(
         G_ch=args.style_start_channel, resolution=args.style_image_size[0]
     )
@@ -52,7 +53,7 @@ def build_style_encoder(args):
     return style_image_encoder
 
 
-def build_content_encoder(args):
+def build_content_encoder(args: argparse.Namespace) -> ContentEncoder:
     content_image_encoder = ContentEncoder(
         G_ch=args.content_start_channel, resolution=args.content_image_size[0]
     )
@@ -60,7 +61,7 @@ def build_content_encoder(args):
     return content_image_encoder
 
 
-def build_scr(args):
+def build_scr(args: argparse.Namespace) -> SCR:
     scr = SCR(
         temperature=args.temperature, mode=args.mode, image_size=args.scr_image_size
     )
@@ -68,7 +69,7 @@ def build_scr(args):
     return scr
 
 
-def build_ddpm_scheduler(args):
+def build_ddpm_scheduler(args: argparse.Namespace) -> DDPMScheduler:
     ddpm_scheduler = DDPMScheduler(
         num_train_timesteps=1000,
         beta_start=0.0001,
@@ -80,7 +81,7 @@ def build_ddpm_scheduler(args):
     )
     return ddpm_scheduler
 
-def build_fst(args):
+def build_fst(args: argparse.Namespace) -> FontStyleTransformationModule:
     """Build Font Style Transformation module."""
     # Parse feature channels if string
     feature_channels = args.fst_feature_channels
@@ -97,7 +98,7 @@ def build_fst(args):
     return fst_module
 
 
-def build_mss_encoder(args):
+def build_mss_encoder(args: argparse.Namespace) -> MultiScaleStyleEncoder:
     """Build Multi-Scale Style Encoder."""
     num_scales = getattr(args, 'mss_num_scales', None) or getattr(args, 'fst_num_scales', 5)
     base_channels = getattr(args, 'mss_base_channels', 64)

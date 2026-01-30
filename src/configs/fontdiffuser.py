@@ -530,14 +530,14 @@ def get_parser():
     fst_group.add_argument(
         "--fst_num_queries",
         type=int,
-        default=220,
-        help="Number of learnable queries in FST (default 220 for 256 total)",
+        default=256,
+        help="Number of learnable queries in FST",
     )
     fst_group.add_argument(
         "--fst_query_dim",
         type=int,
-        default=128,
-        help="Dimension of query vectors in FST",
+        default=256,
+        help="Dimension of query vectors in FST, must be divisible by num_heads",
     )
     fst_group.add_argument(
         "--fst_num_scales",
@@ -572,7 +572,7 @@ def get_parser():
     fst_group.add_argument(
         "--mss_num_scales",
         type=int,
-        default=None,
+        default=5,
         help="Number of scales in MSSE (if None, uses fst_num_scales)",
     )
 
