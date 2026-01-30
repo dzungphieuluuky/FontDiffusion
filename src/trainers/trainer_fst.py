@@ -491,8 +491,8 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             consistency_target = samples.get("consistency_target_images")
             
             if consistency_source is not None and consistency_target is not None:
-                # Check if we have valid consistency pairs (not just dummy tensors)
-                if consistency_source.shape[1] > 1 or consistency_source.abs().sum() > 0:
+                # Verify we have actual consistency pairs (not empty batch dimension)
+                if consistency_source.shape[0] > 0 and consistency_source.shape[1] > 0:
                     # Get the actual model (unwrap if using DDP/accelerate)
                     model = self.accelerator.unwrap_model(self.model) if hasattr(self.model, "module") else self.model
                     
@@ -506,7 +506,6 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                     loss_dict["weighted_consistency_loss"] = (
                         self.consistency_loss_weight * consistency_loss.item()
                     )
-
         return total_loss, loss_dict    
 
     def save_checkpoint(self, is_final: bool = False):
