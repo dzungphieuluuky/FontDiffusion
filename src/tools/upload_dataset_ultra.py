@@ -1,7 +1,9 @@
 """
-Create Hugging Face dataset from FontDiffusion images with ultra-parallel processing.
+Create Hugging Face dataset from FontDiffusion images with three-stage pipeline.
 
-Auto-tuned for maximum speed - just provide essential arguments!
+Stage 1: Bulk I/O (ThreadPoolExecutor, high parallelism)
+Stage 2: CPU processing (ProcessPoolExecutor/ThreadPool, moderate parallelism)
+Stage 3: Streaming upload (as samples are ready)
 """
 
 import json
@@ -11,9 +13,9 @@ import os
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Generator, Optional
+from typing import Any, Generator, Optional, NamedTuple
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
-from functools import partial, lru_cache
+from functools import lru_cache
 
 from datasets import Dataset, Features, Image as HFImage, Value
 from PIL import Image
@@ -24,9 +26,19 @@ from filename_utils import compute_file_hash
 logger = logging.getLogger(__name__)
 
 
+class LoadedImages(NamedTuple):
+    """Container for loaded images (I/O stage output)."""
+    content_img: Image.Image
+    style_img: Image.Image
+    target_img: Image.Image
+    char: str
+    style: str
+    font: str
+
+
 @dataclass
 class DatasetConfig:
-    """Configuration for dataset creation - simplified!"""
+    """Configuration for dataset creation."""
     data_dir: Path
     style_images_dir: Path
     repo_id: str
@@ -37,205 +49,280 @@ class DatasetConfig:
     token: Optional[str] = None
 
     def __post_init__(self):
-        """Convert paths to Path if they're strings."""
+        """Convert paths to Path."""
         if isinstance(self.data_dir, str):
             self.data_dir = Path(self.data_dir)
         if isinstance(self.style_images_dir, str):
             self.style_images_dir = Path(self.style_images_dir)
 
 
-# Cache style images to avoid re-loading
-@lru_cache(maxsize=256)
-def _load_cached_style_image(style_path: str) -> Image.Image:
-    """Load and cache style images to avoid repeated disk reads."""
-    return Image.open(style_path).convert("RGB")
-
-
-def _load_image_file(path: Path) -> Optional[Image.Image]:
-    """Load a single image file with error handling."""
-    try:
-        return Image.open(path).convert("RGB")
-    except Exception as e:
-        logger.warning(f"Failed to load {path}: {e}")
-        return None
-
-
-def _find_style_image(style_images_dir: Path, style: str) -> Optional[Path]:
-    """Find style image in the style images directory."""
-    for ext in [".png", ".jpg", ".jpeg"]:
-        style_path = style_images_dir / f"{style}{ext}"
-        if style_path.exists():
-            return style_path
-    return None
-
-
-class UltraParallelDatasetBuilder:
-    """Ultra-parallel dataset builder with auto-tuned performance."""
+class ThreeStageBuilder:
+    """Three-stage pipeline: I/O → CPU → Yield."""
     
     REQUIRED_DIRS = ["ContentImage", "TargetImage"]
     CHECKPOINT_FILE = "results_checkpoint.json"
     
     def __init__(self, config: DatasetConfig):
-        """Initialize with auto-tuned performance settings."""
+        """Initialize with optimized three-stage pipeline."""
         self.config = config
         self.data_dir = config.data_dir
         self.style_images_dir = config.style_images_dir
         
-        # Auto-tune performance parameters
+        # Auto-tune workers
         self.cpu_count = os.cpu_count() or 4
-        self.io_workers = max(1, self.cpu_count * 4)  # Many I/O threads
-        self.cpu_workers = max(1, self.cpu_count)     # CPU count for processing
-        self.batch_size = 1000  # Optimal batch size
+        self.io_workers = self.cpu_count * 8   # Saturate I/O
+        self.cpu_workers = self.cpu_count      # CPU-bound work
+        
+        # Pipeline batch sizes
+        self.io_batch_size = 500    # I/O stage (large batches)
+        self.cpu_batch_size = 100   # CPU stage (smaller for pipelining)
+        
+        # Image params
         self.resize_height = 256
         self.spacing = 10
         
-        logger.info(f"Auto-tuned: {self.io_workers} I/O workers, "
-                   f"{self.cpu_workers} CPU workers, batch_size={self.batch_size}")
+        logger.info(f"Three-stage pipeline: I/O workers={self.io_workers}, CPU workers={self.cpu_workers}")
         
+        # Pre-build caches (runs once at startup)
         self._validate_structure()
+        self._preload_styles()
+        self._build_path_cache()
 
     def _validate_structure(self) -> None:
-        """Validate that all required directories and files exist."""
+        """Validate directory structure."""
         for dir_name in self.REQUIRED_DIRS:
-            dir_path = self.data_dir / dir_name
-            if not dir_path.exists():
-                raise ValueError(f"Required directory not found: {dir_path}")
-
-        checkpoint_path = self.data_dir / self.CHECKPOINT_FILE
-        if not checkpoint_path.exists():
-            raise ValueError(f"Checkpoint file not found: {checkpoint_path}")
-
+            if not (self.data_dir / dir_name).exists():
+                raise ValueError(f"Required directory not found: {self.data_dir / dir_name}")
+        if not (self.data_dir / self.CHECKPOINT_FILE).exists():
+            raise ValueError(f"Checkpoint not found: {self.data_dir / self.CHECKPOINT_FILE}")
         if not self.style_images_dir.exists():
             raise ValueError(f"Style images directory not found: {self.style_images_dir}")
+        logger.info("Directory structure validated")
 
-        logger.info("Directory structure validated successfully")
+    def _preload_styles(self) -> None:
+        """Preload ALL style images into memory (runs once)."""
+        logger.info("Preloading style images...")
+        start = time.time()
+        
+        self.style_cache: dict[str, Image.Image] = {}
+        for ext in [".png", ".jpg", ".jpeg"]:
+            for style_file in self.style_images_dir.glob(f"*{ext}"):
+                try:
+                    self.style_cache[style_file.stem] = Image.open(style_file).convert("RGB")
+                except Exception as e:
+                    logger.warning(f"Failed to load style {style_file}: {e}")
+        
+        elapsed = time.time() - start
+        logger.info(f"Preloaded {len(self.style_cache)} style images in {elapsed:.2f}s")
 
-    def _load_checkpoint(self) -> dict:
-        """Load and validate results checkpoint."""
+    def _build_path_cache(self) -> None:
+        """Build path lookup cache (runs once)."""
+        logger.info("Building path cache...")
+        start = time.time()
+        
+        # Content paths: char → path
+        self.content_paths: dict[str, Path] = {}
+        content_dir = self.data_dir / "ContentImage"
+        for img_file in content_dir.glob("*"):
+            if img_file.suffix.lower() in ['.png', '.jpg', '.jpeg']:
+                self.content_paths[img_file.stem] = img_file
+        
+        # Target paths: style → {char → path}
+        self.target_paths: dict[str, dict[str, Path]] = {}
+        target_dir = self.data_dir / "TargetImage"
+        for style_dir in target_dir.iterdir():
+            if not style_dir.is_dir():
+                continue
+            
+            style = style_dir.name
+            style_paths = {}
+            for img_file in style_dir.glob("*"):
+                if img_file.suffix.lower() in ['.png', '.jpg', '.jpeg']:
+                    # Extract char from filename (assumes format: char_style.ext or char.ext)
+                    char = img_file.stem.split('_')[0]
+                    style_paths[char] = img_file
+            self.target_paths[style] = style_paths
+        
+        elapsed = time.time() - start
+        total_targets = sum(len(v) for v in self.target_paths.values())
+        logger.info(f"Built path cache: {len(self.content_paths)} content, {total_targets} target in {elapsed:.2f}s")
+
+    def _load_checkpoint(self) -> list[dict]:
+        """Load checkpoint generations."""
         checkpoint_path = self.data_dir / self.CHECKPOINT_FILE
-
-        with checkpoint_path.open("r", encoding="utf-8") as f:
+        
+        with open(checkpoint_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-
+        
         generations = data.get("generations", [])
         if not generations:
             raise ValueError("No generations found in checkpoint")
+        
+        logger.info(f"Loaded {len(generations)} generations from checkpoint")
+        return generations
 
-        logger.info(f"Loaded checkpoint: {len(generations)} generations, "
-                   f"{len(data.get('characters', []))} characters, "
-                   f"{len(data.get('styles', []))} styles")
-
-        return data
-
-    def _load_and_process_sample(self, gen: dict) -> Optional[dict]:
-        """Load and process a single sample - optimized for parallel execution."""
+    # ===== STAGE 1: I/O (Bulk Image Loading) =====
+    def _load_images_io_stage(self, gen: dict) -> Optional[LoadedImages]:
+        """Stage 1: Load images only (pure I/O, no CPU work)."""
+        char = gen.get("character", "")
+        style = gen.get("style", "")
+        font = gen.get("font", "unknown")
+        
+        # Fast path lookup (no disk I/O)
+        content_path = self.content_paths.get(char)
+        target_path = self.target_paths.get(style, {}).get(char)
+        style_img = self.style_cache.get(style)
+        
+        if not all([content_path, target_path, style_img]):
+            return None
+        
         try:
-            # Extract metadata
-            char = gen.get("character", "")
-            style = gen.get("style", "")
-            font = gen.get("font", "unknown")
+            # Only I/O here - no resizing
+            content_img = Image.open(content_path).convert("RGB")
+            target_img = Image.open(target_path).convert("RGB")
             
-            # Build paths
-            content_path = self.data_dir / gen.get("content_image_path", "")
-            target_path = self.data_dir / gen.get("target_image_path", "")
-            style_path = _find_style_image(self.style_images_dir, style)
-            
-            # Validate paths
-            if not content_path.exists() or not target_path.exists() or not style_path:
-                return None
-            
-            # Load images
-            content_img = _load_image_file(content_path)
-            target_img = _load_image_file(target_path)
-            style_img = _load_cached_style_image(str(style_path))
-            
-            if not all([content_img, target_img, style_img]):
-                return None
-            
-            # Create comparison image
-            def resize_image(img, height):
+            return LoadedImages(
+                content_img=content_img,
+                style_img=style_img,
+                target_img=target_img,
+                char=char,
+                style=style,
+                font=font,
+            )
+        except Exception as e:
+            logger.debug(f"Failed to load {char}/{style}: {e}")
+            return None
+
+    # ===== STAGE 2: CPU (Image Processing) =====
+    def _process_images_cpu_stage(self, loaded: LoadedImages) -> Optional[dict]:
+        """Stage 2: Process loaded images (CPU-bound: resize, composite)."""
+        try:
+            # Resize helper
+            def resize_img(img: Image.Image, height: int) -> Image.Image:
                 aspect = img.width / img.height
                 new_width = int(height * aspect)
                 return img.resize((new_width, height), Image.Resampling.LANCZOS)
             
-            content_resized = resize_image(content_img, self.resize_height)
-            style_resized = resize_image(style_img, self.resize_height)
-            target_resized = resize_image(target_img, self.resize_height)
+            # CPU-bound resizing
+            content_resized = resize_img(loaded.content_img, self.resize_height)
+            style_resized = resize_img(loaded.style_img, self.resize_height)
+            target_resized = resize_img(loaded.target_img, self.resize_height)
             
-            total_width = content_resized.width + style_resized.width + target_resized.width + 2 * self.spacing
+            # CPU-bound compositing
+            total_width = (content_resized.width + style_resized.width + 
+                          target_resized.width + 2 * self.spacing)
             comparison = Image.new("RGB", (total_width, self.resize_height), color=(255, 255, 255))
             
-            x_offset = 0
-            comparison.paste(content_resized, (x_offset, 0))
-            x_offset += content_resized.width + self.spacing
-            comparison.paste(style_resized, (x_offset, 0))
-            x_offset += style_resized.width + self.spacing
-            comparison.paste(target_resized, (x_offset, 0))
+            comparison.paste(content_resized, (0, 0))
+            comparison.paste(style_resized, (content_resized.width + self.spacing, 0))
+            comparison.paste(target_resized, 
+                           (content_resized.width + style_resized.width + 2 * self.spacing, 0))
             
-            # Build sample
             return {
-                "character": char,
-                "style": style,
-                "font": font,
-                "content_image": content_img,
-                "style_image": style_img,
-                "target_image": target_img,
+                "character": loaded.char,
+                "style": loaded.style,
+                "font": loaded.font,
+                "content_image": loaded.content_img,
+                "style_image": loaded.style_img,
+                "target_image": loaded.target_img,
                 "comparison_image": comparison,
-                "content_hash": compute_file_hash(char, "", font),
-                "target_hash": compute_file_hash(char, style, font),
+                "content_hash": compute_file_hash(loaded.char, "", loaded.font),
+                "target_hash": compute_file_hash(loaded.char, loaded.style, loaded.font),
             }
-            
         except Exception as e:
-            logger.debug(f"Failed to process {gen.get('character', '')}/{gen.get('style', '')}: {e}")
+            logger.debug(f"Failed to process {loaded.char}/{loaded.style}: {e}")
             return None
 
-    def _generate_samples_ultra_parallel(self) -> Generator[dict, None, None]:
-        """Generate samples using ultra-parallel processing."""
-        checkpoint = self._load_checkpoint()
-        generations = checkpoint["generations"]
+    def _generate_samples_pipeline(self) -> Generator[dict, None, None]:
+        """Three-stage pipeline with pipelining."""
+        generations = self._load_checkpoint()
+        total = len(generations)
         
-        logger.info(f"Processing {len(generations)} samples with ultra-parallel mode...")
-        logger.info(f"Using {self.io_workers} workers for maximum throughput")
-        
+        logger.info(f"Starting three-stage pipeline for {total} samples")
         start_time = time.time()
-        total_batches = (len(generations) + self.batch_size - 1) // self.batch_size
         
-        # Process batches in parallel
-        for batch_idx in range(total_batches):
-            batch_start = batch_idx * self.batch_size
-            batch_end = min(batch_start + self.batch_size, len(generations))
-            batch = generations[batch_start:batch_end]
+        # Create executors
+        io_executor = ThreadPoolExecutor(max_workers=self.io_workers)
+        cpu_executor = ThreadPoolExecutor(max_workers=self.cpu_workers)
+        
+        try:
+            processed = 0
+            valid = 0
             
-            logger.info(f"Processing batch {batch_idx + 1}/{total_batches} ({len(batch)} samples)...")
-            batch_start_time = time.time()
-            
-            # Process entire batch in parallel
-            with ThreadPoolExecutor(max_workers=self.io_workers) as executor:
-                futures = {executor.submit(self._load_and_process_sample, gen): gen for gen in batch}
+            # Process in I/O batches
+            for io_batch_start in range(0, total, self.io_batch_size):
+                io_batch_end = min(io_batch_start + self.io_batch_size, total)
+                io_batch = generations[io_batch_start:io_batch_end]
                 
-                valid_samples = 0
-                for future in as_completed(futures):
-                    sample = future.result()
-                    if sample:
-                        yield sample
-                        valid_samples += 1
+                logger.info(f"I/O batch {io_batch_start}-{io_batch_end} ({len(io_batch)} samples)")
+                io_start = time.time()
+                
+                # ===== STAGE 1: Bulk I/O =====
+                io_futures = {io_executor.submit(self._load_images_io_stage, gen): gen 
+                             for gen in io_batch}
+                
+                loaded_samples: list[LoadedImages] = []
+                for future in as_completed(io_futures):
+                    loaded = future.result()
+                    if loaded:
+                        loaded_samples.append(loaded)
+                
+                io_time = time.time() - io_start
+                logger.info(f"  I/O stage: {len(loaded_samples)}/{len(io_batch)} loaded in {io_time:.2f}s")
+                
+                if not loaded_samples:
+                    continue
+                
+                # ===== STAGE 2: CPU Processing (in smaller batches for pipelining) =====
+                cpu_start = time.time()
+                
+                for cpu_batch_start in range(0, len(loaded_samples), self.cpu_batch_size):
+                    cpu_batch_end = min(cpu_batch_start + self.cpu_batch_size, len(loaded_samples))
+                    cpu_batch = loaded_samples[cpu_batch_start:cpu_batch_end]
+                    
+                    cpu_futures = {cpu_executor.submit(self._process_images_cpu_stage, loaded): loaded 
+                                  for loaded in cpu_batch}
+                    
+                    # ===== STAGE 3: Yield as ready =====
+                    for future in as_completed(cpu_futures):
+                        sample = future.result()
+                        if sample:
+                            yield sample
+                            valid += 1
+                
+                cpu_time = time.time() - cpu_start
+                processed = io_batch_end
+                
+                # Progress
+                elapsed = time.time() - start_time
+                rate = processed / elapsed if elapsed > 0 else 0
+                progress_pct = processed / total * 100
+                eta = (total - processed) / rate if rate > 0 else 0
+                
+                logger.info(f"  CPU stage: {valid} valid samples processed in {cpu_time:.2f}s")
+                logger.info(f"Progress: {progress_pct:.1f}%, {rate:.1f} samples/s, "
+                          f"Valid: {valid}/{processed}, ETA: {eta:.0f}s")
             
-            batch_time = time.time() - batch_start_time
-            elapsed = time.time() - start_time
-            processed = batch_end
-            rate = processed / elapsed if elapsed > 0 else 0
-            progress_pct = processed / len(generations) * 100
-            eta = (len(generations) - processed) / rate if rate > 0 else 0
-            
-            logger.info(f"Batch {batch_idx + 1}: {valid_samples}/{len(batch)} valid in {batch_time:.2f}s")
-            logger.info(f"Overall: {progress_pct:.1f}%, {rate:.1f} samples/s, ETA: {eta:.0f}s")
+            # Final stats
+            total_time = time.time() - start_time
+            if valid > 0:
+                logger.info(f"Pipeline completed: {valid} samples in {total_time:.2f}s "
+                          f"({valid/total_time:.1f} samples/s)")
+            else:
+                raise ValueError(
+                    f"No valid samples from {total} attempts. Check:\n"
+                    f"  - ContentImage/ and TargetImage/ have images\n"
+                    f"  - Style images exist\n"
+                    f"  - results_checkpoint.json matches actual files"
+                )
         
-        total_time = time.time() - start_time
-        logger.info(f"Processing completed in {total_time:.2f}s")
+        finally:
+            io_executor.shutdown(wait=True)
+            cpu_executor.shutdown(wait=True)
 
     def build(self) -> Dataset:
-        """Build dataset with ultra-parallel processing."""
-        logger.info("Building dataset with ultra-parallel processing...")
+        """Build dataset with three-stage pipeline."""
+        logger.info("Building dataset with three-stage pipeline...")
         
         features = Features({
             "character": Value("string"),
@@ -249,27 +336,29 @@ class UltraParallelDatasetBuilder:
             "target_hash": Value("string"),
         })
         
-        logger.info("Converting samples to Arrow format...")
-        start_time = time.time()
+        logger.info("Converting to Arrow format...")
+        start = time.time()
         
         dataset = Dataset.from_generator(
-            self._generate_samples_ultra_parallel,
+            self._generate_samples_pipeline,
             features=features,
         )
         
-        conversion_time = time.time() - start_time
-        logger.info(f"Dataset created: {len(dataset)} samples in {conversion_time:.2f}s")
+        elapsed = time.time() - start
         
+        if len(dataset) == 0:
+            raise ValueError("Dataset is empty. Check logs for errors.")
+        
+        logger.info(f"Dataset created: {len(dataset)} samples in {elapsed:.2f}s")
         return dataset
 
     def push_to_hub(self, dataset: Dataset) -> None:
-        """Push dataset to Hugging Face Hub."""
+        """Push to HuggingFace Hub."""
         if not self.config.push_to_hub:
-            logger.info("Skipping push to Hub")
             return
         
-        logger.info(f"Pushing dataset to {self.config.repo_id}...")
-        push_start = time.time()
+        logger.info(f"Pushing to {self.config.repo_id}...")
+        start = time.time()
         
         try:
             dataset.push_to_hub(
@@ -280,23 +369,20 @@ class UltraParallelDatasetBuilder:
                 token=self.config.token,
             )
             
-            push_time = time.time() - push_start
-            logger.info(f"Successfully pushed in {push_time:.2f}s")
-            logger.info(f"Dataset available at: https://huggingface.co/datasets/{self.config.repo_id}")
-            
+            elapsed = time.time() - start
+            logger.info(f"Pushed in {elapsed:.2f}s")
+            logger.info(f"Dataset: https://huggingface.co/datasets/{self.config.repo_id}")
         except Exception as e:
             logger.error(f"Push failed: {e}")
             raise
 
     def save_local(self, dataset: Dataset, output_path: Path) -> None:
-        """Save dataset to local disk."""
-        logger.info(f"Saving dataset to {output_path}...")
-        save_start = time.time()
-        
+        """Save locally."""
+        logger.info(f"Saving to {output_path}...")
+        start = time.time()
         dataset.save_to_disk(str(output_path))
-        
-        save_time = time.time() - save_start
-        logger.info(f"Dataset saved in {save_time:.2f}s")
+        elapsed = time.time() - start
+        logger.info(f"Saved in {elapsed:.2f}s")
 
 
 def create_dataset_ultra_fast(
@@ -310,24 +396,7 @@ def create_dataset_ultra_fast(
     token: Optional[str] = None,
     local_save_path: Optional[str | Path] = None,
 ) -> Dataset:
-    """Create dataset with ultra-fast parallel processing.
-    
-    Just provide essential arguments - performance is auto-tuned!
-    
-    Args:
-        data_dir: Path to data directory (must contain ContentImage/ and TargetImage/)
-        style_images_dir: Path to style images directory
-        repo_id: HuggingFace repository ID (e.g., 'username/dataset-name')
-        split: Dataset split name
-        config_name: Dataset configuration name
-        push_to_hub: Whether to push to HuggingFace Hub
-        private: Whether to make repository private
-        token: HuggingFace API token
-        local_save_path: Local path to save dataset
-    
-    Returns:
-        Created Dataset object
-    """
+    """Create dataset with three-stage pipeline (auto-tuned)."""
     config = DatasetConfig(
         data_dir=Path(data_dir),
         style_images_dir=Path(style_images_dir),
@@ -339,7 +408,7 @@ def create_dataset_ultra_fast(
         token=token,
     )
     
-    builder = UltraParallelDatasetBuilder(config)
+    builder = ThreeStageBuilder(config)
     dataset = builder.build()
     
     if local_save_path:
@@ -352,104 +421,31 @@ def create_dataset_ultra_fast(
 
 
 def main():
-    """Simple CLI - just provide essential arguments!"""
+    """CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="Ultra-fast HuggingFace dataset creator from FontDiffusion images",
+        description="Ultra-fast three-stage HuggingFace dataset creator",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Ultra-fast dataset creation (auto-tuned for max speed)
-  python create_ultra_fast.py --data-dir ./my_dataset \\
-    --style-images-dir ./style_images --repo-id username/dataset-name
-  
-  # Create but don't push to Hub
-  python create_ultra_fast.py --data-dir ./my_dataset \\
-    --style-images-dir ./style_images --repo-id username/dataset-name --no-push
-  
-  # Create private dataset
-  python create_ultra_fast.py --data-dir ./my_dataset \\
-    --style-images-dir ./style_images --repo-id username/dataset-name --private
-  
-  # Save locally as well
-  python create_ultra_fast.py --data-dir ./my_dataset \\
-    --style-images-dir ./style_images --repo-id username/dataset-name \\
-    --local-save ./local_dataset
-  
-  # Use specific split and config
-  python create_ultra_fast.py --data-dir ./my_dataset \\
-    --style-images-dir ./style_images --repo-id username/dataset-name \\
-    --split test --config-name v2
-
-Performance features:
-  • Auto-tuned parallelization based on CPU cores
-  • Intelligent batching for optimal throughput
-  • Combined I/O and CPU processing in single pass
-  • No manual tuning needed - just works fast!
-        """,
     )
     
-    # Essential arguments
-    parser.add_argument(
-        "--data-dir",
-        required=True,
-        help="Path to data directory (must contain ContentImage/ and TargetImage/)"
-    )
-    parser.add_argument(
-        "--style-images-dir",
-        required=True,
-        help="Path to directory containing style images"
-    )
-    parser.add_argument(
-        "--repo-id",
-        required=True,
-        help="HuggingFace repository ID (username/dataset-name)"
-    )
-    
-    # Optional arguments
-    parser.add_argument(
-        "--split",
-        default="train",
-        help="Dataset split name (default: train)"
-    )
-    parser.add_argument(
-        "--config-name",
-        help="Dataset configuration name"
-    )
-    parser.add_argument(
-        "--no-push",
-        action="store_true",
-        help="Skip pushing to HuggingFace Hub"
-    )
-    parser.add_argument(
-        "--private",
-        action="store_true",
-        help="Make repository private"
-    )
-    parser.add_argument(
-        "--local-save",
-        help="Save dataset locally to this path"
-    )
-    parser.add_argument(
-        "--token",
-        help="HuggingFace API token for private datasets"
-    )
-    parser.add_argument(
-        "--verbose",
-        action="store_true",
-        help="Enable verbose logging"
-    )
+    parser.add_argument("--data-dir", required=True, help="Data directory")
+    parser.add_argument("--style-images-dir", required=True, help="Style images directory")
+    parser.add_argument("--repo-id", required=True, help="HuggingFace repo ID")
+    parser.add_argument("--split", default="train", help="Dataset split")
+    parser.add_argument("--config-name", help="Dataset config name")
+    parser.add_argument("--no-push", action="store_true", help="Skip push to Hub")
+    parser.add_argument("--private", action="store_true", help="Private repo")
+    parser.add_argument("--local-save", help="Save locally")
+    parser.add_argument("--token", help="HuggingFace token")
+    parser.add_argument("--verbose", action="store_true", help="Verbose logging")
     
     args = parser.parse_args()
     
-    # Setup logging
-    log_level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(
-        level=log_level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s'
     )
     
     try:
-        # Run ultra-fast dataset creation
         dataset = create_dataset_ultra_fast(
             data_dir=args.data_dir,
             style_images_dir=args.style_images_dir,
@@ -462,23 +458,15 @@ Performance features:
             local_save_path=args.local_save,
         )
         
-        # Success summary
-        print(f"\n✅ Dataset creation completed successfully!")
-        print(f"📊 Samples: {len(dataset)}")
+        print(f"\n✅ Success: {len(dataset)} samples")
         print(f"🔤 Characters: {len(set(dataset['character']))}")
         print(f"🎨 Styles: {len(set(dataset['style']))}")
         
         if not args.no_push:
-            print(f"🌐 Uploaded to: https://huggingface.co/datasets/{args.repo_id}")
+            print(f"🌐 Hub: https://huggingface.co/datasets/{args.repo_id}")
         
-        if args.local_save:
-            print(f"💾 Local copy: {args.local_save}")
-        
-    except KeyboardInterrupt:
-        logger.warning("Dataset creation interrupted by user")
-        raise SystemExit(130)
     except Exception as e:
-        logger.exception(f"Dataset creation failed: {e}")
+        logger.exception(f"Failed: {e}")
         raise SystemExit(1)
 
 
