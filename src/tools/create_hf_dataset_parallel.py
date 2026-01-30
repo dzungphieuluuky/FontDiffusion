@@ -5,19 +5,23 @@ This module builds datasets from FontDiffusion outputs using streaming to preven
 RAM overflow, especially useful in constrained environments like Colab or Kaggle.
 Includes comparison image generation for visual inspection.
 
-Enhanced with multiprocessing for faster image processing.
+Enhanced with multiprocessing for faster image processing and parallel upload.
 """
 
 import json
 import logging
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from typing import Any, Generator, Optional
 from multiprocessing import Pool, cpu_count
 from functools import partial
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import tempfile
 
 from datasets import Dataset, Features, Image as HFImage, Value
 from PIL import Image
+from huggingface_hub import HfApi
 
 from utilities import HFTqdm
 from filename_utils import compute_file_hash
@@ -41,6 +45,8 @@ class DatasetConfig:
     spacing: int = 10
     num_workers: int = None  # None = auto-detect
     config_name: str = None
+    max_shard_size: str = "500MB"
+    parallel_upload_workers: int = 4  # Parallel shard upload workers
 
     def __post_init__(self):
         """Convert paths to Path if they're strings."""
@@ -501,11 +507,123 @@ class DatasetBuilder:
             config_name=self.config.config_name,
             private=self.config.private,
             token=self.config.token,
-            max_shard_size="500MB",
+            max_shard_size=self.config.max_shard_size,
+            num_proc=self.config.num_workers,  # Parallel shard writing
         )
 
         logger.info(
             f"Successfully pushed to https://huggingface.co/datasets/{self.config.repo_id}"
+        )
+
+    def push_parallel(self, dataset: Dataset) -> None:
+        """Push dataset to Hub with parallel shard uploads for maximum speed.
+
+        This method manually manages shard creation and parallel uploads using
+        concurrent.futures for improved upload performance.
+
+        Args:
+            dataset: Dataset to push
+        """
+        if not self.config.push_to_hub:
+            logger.info("Skipping push to Hub")
+            return
+
+        logger.info(
+            f"Pushing dataset to {self.config.repo_id} with parallel uploads "
+            f"({self.config.parallel_upload_workers} workers)..."
+        )
+
+        api = HfApi(token=self.config.token)
+
+        # Create repository if it doesn't exist
+        try:
+            api.create_repo(
+                repo_id=self.config.repo_id,
+                repo_type="dataset",
+                private=self.config.private,
+                exist_ok=True,
+            )
+        except Exception as e:
+            logger.warning(f"Repository creation warning: {e}")
+
+        # Save shards to temporary directory
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+
+            logger.info("Saving dataset shards locally...")
+            dataset.save_to_disk(
+                str(tmp_path),
+                max_shard_size=self.config.max_shard_size,
+                num_proc=self.config.num_workers,
+            )
+
+            # Get all shard files
+            shard_files = list(tmp_path.glob("**/*"))
+            shard_files = [f for f in shard_files if f.is_file()]
+
+            logger.info(
+                f"Uploading {len(shard_files)} files in parallel "
+                f"(max {self.config.parallel_upload_workers} concurrent uploads)..."
+            )
+
+            # Upload shards in parallel using ThreadPoolExecutor
+            def upload_file(file_path: Path) -> tuple[str, bool]:
+                """Upload a single file to the Hub.
+
+                Args:
+                    file_path: Path to file to upload
+
+                Returns:
+                    Tuple of (relative_path, success)
+                """
+                try:
+                    relative_path = file_path.relative_to(tmp_path)
+                    path_in_repo = f"{self.config.split}/{relative_path}"
+
+                    api.upload_file(
+                        path_or_fileobj=str(file_path),
+                        path_in_repo=path_in_repo,
+                        repo_id=self.config.repo_id,
+                        repo_type="dataset",
+                        token=self.config.token,
+                    )
+                    return str(relative_path), True
+                except Exception as e:
+                    logger.error(f"Failed to upload {file_path.name}: {e}")
+                    return str(file_path.name), False
+
+            # Use ThreadPoolExecutor for parallel uploads
+            uploaded = 0
+            failed = 0
+
+            with ThreadPoolExecutor(
+                max_workers=self.config.parallel_upload_workers
+            ) as executor:
+                # Submit all upload tasks
+                futures = {
+                    executor.submit(upload_file, shard_path): shard_path
+                    for shard_path in shard_files
+                }
+
+                # Process completed uploads
+                for future in as_completed(futures):
+                    relative_path, success = future.result()
+                    if success:
+                        uploaded += 1
+                        if uploaded % 10 == 0 or uploaded == len(shard_files):
+                            logger.info(
+                                f"Upload progress: {uploaded}/{len(shard_files)} "
+                                f"({uploaded * 100 // len(shard_files)}%)"
+                            )
+                    else:
+                        failed += 1
+
+        if failed > 0:
+            logger.warning(f"Failed to upload {failed} files")
+
+        logger.info(
+            f"Successfully pushed {uploaded} files to "
+            f"https://huggingface.co/datasets/{self.config.repo_id}"
         )
 
     def save_local_streaming(self, dataset: Dataset, output_path: Path) -> None:
@@ -519,7 +637,8 @@ class DatasetBuilder:
 
         dataset.save_to_disk(
             str(output_path),
-            max_shard_size="500MB",
+            max_shard_size=self.config.max_shard_size,
+            num_proc=self.config.num_workers,
         )
 
         logger.info("Dataset saved successfully")
@@ -541,6 +660,9 @@ def create_dataset(
     spacing: int = 10,
     num_workers: Optional[int] = None,
     use_multiprocessing: bool = True,
+    max_shard_size: str = "500MB",
+    parallel_upload: bool = True,
+    parallel_upload_workers: int = 4,
 ) -> Dataset:
     """Create and optionally push dataset to Hub with streaming support.
 
@@ -550,6 +672,7 @@ def create_dataset(
         repo_id: HuggingFace repository ID (e.g., 'username/dataset-name')
         split: Dataset split name (default: 'train')
         push_to_hub: Whether to push to HuggingFace Hub (default: True)
+        config_name: Dataset configuration name (default: 'streaming')
         private: Whether to make the repository private (default: False)
         token: HuggingFace API token (optional)
         local_save_path: Local path to save dataset (optional)
@@ -559,6 +682,9 @@ def create_dataset(
         spacing: Spacing between images in comparison (default: 10)
         num_workers: Number of worker processes (default: CPU count - 1)
         use_multiprocessing: Whether to use multiprocessing (default: True)
+        max_shard_size: Maximum shard size (default: '500MB')
+        parallel_upload: Use parallel shard uploads (default: True)
+        parallel_upload_workers: Number of parallel upload workers (default: 4)
 
     Returns:
         Created Dataset object
@@ -579,6 +705,8 @@ def create_dataset(
         spacing=spacing,
         num_workers=num_workers,
         config_name=config_name,
+        max_shard_size=max_shard_size,
+        parallel_upload_workers=parallel_upload_workers,
     )
 
     builder = DatasetBuilder(config)
@@ -592,7 +720,10 @@ def create_dataset(
         builder.save_local_streaming(dataset, Path(local_save_path))
 
     if push_to_hub:
-        builder.push_streaming(dataset)
+        if parallel_upload:
+            builder.push_parallel(dataset)
+        else:
+            builder.push_streaming(dataset)
 
     return dataset
 
@@ -602,7 +733,25 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Create HuggingFace dataset from FontDiffusion images with streaming"
+        description="Create HuggingFace dataset from FontDiffusion images with streaming",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Standard streaming with parallel upload
+  python create_hf_dataset_streaming.py --data-dir my_dataset/train \\
+    --style-images-dir style_images/ --repo-id user/dataset \\
+    --parallel-upload --parallel-upload-workers 4
+
+  # High-speed processing and upload
+  python create_hf_dataset_streaming.py --data-dir my_dataset/train \\
+    --style-images-dir style_images/ --repo-id user/dataset \\
+    --num-workers 12 --batch-size 200 --parallel-upload-workers 6
+  
+  # Local save only (no upload)
+  python create_hf_dataset_streaming.py --data-dir my_dataset/train \\
+    --style-images-dir style_images/ --repo-id user/dataset \\
+    --no-push --local-save ./output
+        """,
     )
     parser.add_argument(
         "--data-dir",
@@ -691,6 +840,24 @@ def main():
         default="streaming",
         help="Dataset config name (default: streaming)",
     )
+    parser.add_argument(
+        "--max-shard-size",
+        type=str,
+        default="500MB",
+        help="Maximum shard size (default: 500MB)",
+    )
+    parser.add_argument(
+        "--parallel-upload",
+        action="store_true",
+        default=True,
+        help="Use parallel shard uploads for faster pushing",
+    )
+    parser.add_argument(
+        "--parallel-upload-workers",
+        type=int,
+        default=os.cpu_count() - 1,
+        help="Number of parallel upload workers (default: CPU count - 1)",
+    )
 
     args = parser.parse_args()
 
@@ -711,6 +878,9 @@ def main():
             spacing=args.spacing,
             num_workers=args.num_workers,
             use_multiprocessing=not args.no_multiprocessing,
+            max_shard_size=args.max_shard_size,
+            parallel_upload=args.parallel_upload,
+            parallel_upload_workers=args.parallel_upload_workers,
         )
         logger.info("Dataset creation completed successfully")
 
