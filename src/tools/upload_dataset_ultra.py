@@ -311,8 +311,8 @@ class UltraFastDatasetBuilder:
 
     def _process_moderate_dataset(self, generations: list, batch_count: int, start_time: float) -> Generator:
         """Process moderate-sized datasets with full parallelism."""
-        # Use ProcessPoolExecutor with aggressive worker count
-        with ProcessPoolExecutor(max_workers=self.total_workers) as executor:
+        # Use ThreadPoolExecutor with aggressive worker count
+        with ThreadPoolExecutor(max_workers=self.total_workers) as executor:
             futures = []
             
             # Submit all batches at once
@@ -362,7 +362,7 @@ class UltraFastDatasetBuilder:
             chunk_start_time = time.time()
             
             # Process this chunk in parallel
-            with ProcessPoolExecutor(max_workers=self.total_workers) as executor:
+            with ThreadPoolExecutor(max_workers=self.total_workers) as executor:
                 futures = []
                 
                 for i in range(chunk_start, chunk_end):
