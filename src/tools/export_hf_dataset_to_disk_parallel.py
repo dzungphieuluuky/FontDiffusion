@@ -34,9 +34,10 @@ class ExportConfig:
     repo_id: Optional[str] = None
     local_dataset_path: Optional[Path] = None
     split: str = "train"
+    config_name: Optional[str] = None  # Add this
     token: Optional[str] = None
-    num_workers: int = 4  # Parallel workers for image saving
-    batch_size: int = 1000  # Process images in batches
+    num_workers: int = 4
+    batch_size: int = 1000
 
     def __post_init__(self):
         """Validate and convert paths."""
@@ -49,7 +50,6 @@ class ExportConfig:
             raise ValueError(
                 "Must provide either repo_id (Hub) or local_dataset_path (disk)"
             )
-
 
 class DatasetExporter:
     """Export HuggingFace dataset to FontDiffusion directory structure."""
@@ -83,12 +83,14 @@ class DatasetExporter:
             except Exception as e:
                 raise ValueError(f"Failed to load local dataset: {e}") from e
 
+        config_msg = f" (config: {self.config.config_name})" if self.config.config_name else ""
         logger.info(
-            f"Loading dataset from Hub: {self.config.repo_id} (split: {self.config.split})"
+            f"Loading dataset from Hub: {self.config.repo_id} (split: {self.config.split}){config_msg}"
         )
         try:
             dataset = load_dataset(
                 self.config.repo_id,
+                name=self.config.config_name,  # Add this parameter
                 split=self.config.split,
                 token=self.config.token,
             )
@@ -98,7 +100,7 @@ class DatasetExporter:
             raise ValueError(
                 f"Failed to load from Hub {self.config.repo_id}: {e}"
             ) from e
-
+        
     def _create_directories(self) -> None:
         """Create output directory structure."""
         self.content_dir.mkdir(parents=True, exist_ok=True)
@@ -385,6 +387,7 @@ def export_dataset(
     repo_id: Optional[str] = None,
     local_dataset_path: Optional[str | Path] = None,
     split: str = "train",
+    config_name: Optional[str] = None,  # Add this parameter
     token: Optional[str] = None,
     num_workers: int = 4,
     batch_size: int = 1000,
@@ -396,6 +399,7 @@ def export_dataset(
         repo_id: HuggingFace repository ID (e.g., 'username/dataset-name')
         local_dataset_path: Local dataset path (alternative to repo_id)
         split: Dataset split name (default: 'train')
+        config_name: Dataset configuration name (e.g., 'streaming', 'default')
         token: HuggingFace API token for private datasets
         num_workers: Number of parallel workers for image saving (default: 8)
         batch_size: Number of samples to process per batch (default: 1000)
@@ -412,6 +416,7 @@ def export_dataset(
         repo_id=repo_id,
         local_dataset_path=Path(local_dataset_path) if local_dataset_path else None,
         split=split,
+        config_name=config_name,  # Add this
         token=token,
         num_workers=num_workers,
         batch_size=batch_size,
@@ -419,7 +424,6 @@ def export_dataset(
 
     exporter = DatasetExporter(config)
     return exporter.export()
-
 
 def main():
     """CLI entry point."""
@@ -464,6 +468,12 @@ Examples:
         help="Dataset split name (default: train)",
     )
     parser.add_argument(
+        "--config-name",
+        type=str,
+        default=None,
+        help="Dataset configuration name (e.g., 'streaming', 'default')",
+    )
+    parser.add_argument(
         "--token",
         type=str,
         help="HuggingFace API token for private datasets",
@@ -471,7 +481,7 @@ Examples:
     parser.add_argument(
         "--workers",
         type=int,
-        default=12,
+        default=os.cpu_count() - 1,
         help="Number of parallel workers for image saving (default: 12)",
     )
     parser.add_argument(
@@ -489,6 +499,7 @@ Examples:
             repo_id=args.repo_id,
             local_dataset_path=args.local_path,
             split=args.split,
+            config_name=args.config_name,  # Add this
             token=args.token,
             num_workers=args.workers,
             batch_size=args.batch_size,
