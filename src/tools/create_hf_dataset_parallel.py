@@ -719,8 +719,8 @@ Examples:
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=100,
-        help="Batch size for processing (default: 100)",
+        default=200,
+        help="Batch size for processing (default: 200)",
     )
     parser.add_argument(
         "--use-batched",
@@ -749,8 +749,8 @@ Examples:
     parser.add_argument(
         "--io-workers",
         type=int,
-        default=4,
-        help="Number of I/O threads per worker (default: 4)",
+        default=8,
+        help="Number of I/O threads per worker (default: 8)",
     )
     parser.add_argument(
         "--no-multiprocessing",
