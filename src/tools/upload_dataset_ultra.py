@@ -138,8 +138,8 @@ class ThreeStageBuilder:
             style_paths = {}
             for img_file in style_dir.glob("*"):
                 if img_file.suffix.lower() in ['.png', '.jpg', '.jpeg']:
-                    # Extract char from filename (assumes format: char_style.ext or char.ext)
-                    char = img_file.stem.split('_')[0]
+                    # Extract char from filename (assumes format: style+char.ext)
+                    char = img_file.stem.split('+')[1]
                     style_paths[char] = img_file
             self.target_paths[style] = style_paths
         
