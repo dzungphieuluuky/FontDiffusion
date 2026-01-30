@@ -22,49 +22,6 @@ logger = logging.getLogger(__name__)
 def get_args():
     """Parse command line arguments with FST-specific options."""
     parser = get_parser()
-
-    # Add FSTDiff-specific arguments
-    parser.add_argument(
-        "--use_fst",
-        action="store_true",
-        help="Use FSTDiff enhancement with MSSE and FST modules",
-    )
-    parser.add_argument(
-        "--fst_feature_channels",
-        type=str,
-        default="64,128,256,512,1024",
-        help="Feature channels for FST module (comma-separated)",
-    )
-    parser.add_argument(
-        "--fst_num_queries",
-        type=int,
-        default=220,
-        help="Number of learnable queries in FST (default 220 for 256 total)",
-    )
-    parser.add_argument(
-        "--fst_query_dim",
-        type=int,
-        default=128,
-        help="Dimension of query vectors in FST",
-    )
-    parser.add_argument(
-        "--fst_num_scales",
-        type=int,
-        default=5,
-        help="Number of multi-scale features in MSSE",
-    )
-    parser.add_argument(
-        "--style_source_same_prob",
-        type=float,
-        default=0.5,
-        help="Probability that source and target style use same font style",
-    )
-    parser.add_argument(
-        "--freeze_original_encoders",
-        action="store_true",
-        help="Freeze original style and content encoders during training",
-    )
-
     args = parser.parse_args()
 
     # Handle local rank for distributed training
