@@ -11,15 +11,10 @@ import logging
 import time
 import os
 import argparse
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Generator, Optional, List, Dict, Tuple
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed, wait, FIRST_COMPLETED
-from functools import lru_cache
-import queue
-from queue import Queue
-from threading import Lock
-import multiprocessing as mp
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 
 from datasets import Dataset, Features, Image as HFImage, Value
 from PIL import Image, ImageFile
@@ -78,29 +73,29 @@ class ThreeStageParallelBuilder:
         self.cpu_count = os.cpu_count() or 4
         
         # Stage 1: I/O - many threads for disk operations
-        self.io_workers = max(1, self.cpu_count * 8)  # Lots of threads for I/O
+        self.io_workers = max(1, self.cpu_count * 8)
         
         # Stage 2: CPU - processes for heavy computation
-        self.cpu_workers = max(1, self.cpu_count)  # One process per CPU core
+        self.cpu_workers = max(1, self.cpu_count)
         
         # Stage 3: Upload - threads for network I/O
-        self.upload_workers = max(1, self.cpu_count * 4)  # Many threads for network
+        self.upload_workers = max(1, self.cpu_count * 4)
         
         # Batch sizes
-        self.load_batch_size = 500   # Images to load per batch
-        self.process_batch_size = 100  # Images to process per batch
-        self.upload_batch_size = 50   # Samples to upload per batch
+        self.load_batch_size = 500
+        self.process_batch_size = 100
+        self.upload_batch_size = 50
         
         # Image parameters
         self.resize_height = 256
         self.spacing = 10
         
         # Cache for style images (loaded once, used many times)
-        self.style_cache: Dict[str, Image.Image] = {}
+        self.style_cache: dict[str, Image.Image] = {}
         self._preload_style_images()
         
         # Path cache
-        self.path_cache: Dict[str, Dict[str, Path]] = {}
+        self.path_cache: dict[str, dict[str, Path]] = {}
         self._build_path_cache()
         
         logger.info(f"Three-stage pipeline initialized:")
@@ -176,7 +171,7 @@ class ThreeStageParallelBuilder:
 
         logger.info("Directory structure validated")
 
-    def _load_checkpoint(self) -> Tuple[List[Dict], Dict]:
+    def _load_checkpoint(self) -> tuple[list[dict], dict]:
         """Load checkpoint with metadata."""
         checkpoint_path = self.data_dir / self.CHECKPOINT_FILE
         
@@ -198,7 +193,7 @@ class ThreeStageParallelBuilder:
         return generations, metadata
 
     # ===== STAGE 1: I/O - Image Loading =====
-    def _load_images_batch(self, batch: List[Dict]) -> List[Optional[Dict]]:
+    def _load_images_batch(self, batch: list[dict]) -> list[Optional[dict]]:
         """Load images for a batch of samples (I/O-bound)."""
         loaded_batch = []
         
@@ -237,7 +232,7 @@ class ThreeStageParallelBuilder:
         return loaded_batch
 
     # ===== STAGE 2: CPU - Image Processing =====
-    def _process_images_batch(self, batch: List[Dict]) -> List[Optional[Dict]]:
+    def _process_images_batch(self, batch: list[dict]) -> list[Optional[dict]]:
         """Process a batch of loaded images (CPU-bound)."""
         processed_batch = []
         
@@ -301,7 +296,7 @@ class ThreeStageParallelBuilder:
         
         return processed_batch
 
-    def _generate_samples_pipeline(self) -> Generator[Dict, None, None]:
+    def _generate_samples_pipeline(self) -> Generator[dict, None, None]:
         """Generate samples using three-stage pipeline."""
         generations, metadata = self._load_checkpoint()
         total_samples = len(generations)
@@ -374,11 +369,23 @@ class ThreeStageParallelBuilder:
                 logger.info(f"Progress: {progress_pct:.1f}%, {rate:.1f} samples/s, "
                           f"Valid: {valid_count}/{processed_count}, ETA: {eta:.0f}s")
             
-            # Final statistics
+            # Final statistics (with zero-division protection)
             total_time = time.time() - start_time
             logger.info(f"Pipeline completed in {total_time:.2f}s")
-            logger.info(f"Statistics: {valid_count} valid samples, "
-                      f"{loaded_count} images loaded, {total_time/valid_count:.3f}s/sample")
+            
+            if valid_count > 0:
+                avg_time_per_sample = total_time / valid_count
+                logger.info(f"Statistics: {valid_count} valid samples, "
+                          f"{loaded_count} images loaded, {avg_time_per_sample:.3f}s/sample")
+            else:
+                logger.warning(f"No valid samples generated from {total_samples} attempts")
+                logger.warning(f"Loaded {loaded_count} images but all processing failed")
+                raise ValueError(
+                    f"No valid samples found. Check that:\n"
+                    f"  1. ContentImage/ and TargetImage/ directories contain images\n"
+                    f"  2. Style images exist in {self.style_images_dir}\n"
+                    f"  3. results_checkpoint.json has valid generation entries"
+                )
             
         finally:
             # Cleanup
@@ -411,12 +418,29 @@ class ThreeStageParallelBuilder:
         )
         
         conversion_time = time.time() - start_time
+        
+        if len(dataset) == 0:
+            raise ValueError(
+                "Dataset is empty after generation. Check logs above for errors.\n"
+                "Common issues:\n"
+                "  - Missing image files in ContentImage/ or TargetImage/\n"
+                "  - Missing style images\n"
+                "  - Corrupted images\n"
+                "  - Mismatch between checkpoint and actual files"
+            )
+        
         logger.info(f"Dataset created: {len(dataset)} samples in {conversion_time:.2f}s")
         
         return dataset
 
     # ===== STAGE 3: Parallel Upload =====
-    def _upload_chunk(self, chunk: List[Dict], chunk_id: int, repo_id: str, token: Optional[str]) -> Tuple[int, bool]:
+    def _upload_chunk(
+        self, 
+        chunk: list[dict], 
+        chunk_id: int, 
+        repo_id: str, 
+        token: Optional[str]
+    ) -> tuple[int, bool]:
         """Upload a chunk of samples in parallel."""
         try:
             # Create a temporary dataset from the chunk
@@ -496,14 +520,14 @@ class ThreeStageParallelBuilder:
                 futures.append((future, chunk_id, len(chunk)))
             
             # Monitor progress
-            for future, chunk_id, chunk_size in futures:
+            for future, chunk_id, chunk_size_val in futures:
                 try:
                     uploaded_count, success = future.result(timeout=300)  # 5-minute timeout
                     completed += uploaded_count
                     
                     if success:
                         successful += 1
-                        logger.info(f"Chunk {chunk_id} uploaded successfully ({chunk_size} samples)")
+                        logger.info(f"Chunk {chunk_id} uploaded successfully ({chunk_size_val} samples)")
                     else:
                         logger.warning(f"Chunk {chunk_id} failed")
                     
@@ -616,19 +640,19 @@ def main():
         epilog="""
 Examples:
   # Three-stage parallel processing
-  python create_three_stage.py --data-dir ./my_dataset \\
+  python upload_dataset_ultra.py --data-dir ./my_dataset \\
     --style-images-dir ./style_images --repo-id username/dataset-name
   
   # Create but don't push to Hub
-  python create_three_stage.py --data-dir ./my_dataset \\
+  python upload_dataset_ultra.py --data-dir ./my_dataset \\
     --style-images-dir ./style_images --repo-id username/dataset-name --no-push
   
   # Create private dataset
-  python create_three_stage.py --data-dir ./my_dataset \\
+  python upload_dataset_ultra.py --data-dir ./my_dataset \\
     --style-images-dir ./style_images --repo-id username/dataset-name --private
   
   # Save locally as well
-  python create_three_stage.py --data-dir ./my_dataset \\
+  python upload_dataset_ultra.py --data-dir ./my_dataset \\
     --style-images-dir ./style_images --repo-id username/dataset-name \\
     --local-save ./local_dataset
 
