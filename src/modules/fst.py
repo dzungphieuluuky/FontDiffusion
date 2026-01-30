@@ -253,7 +253,7 @@ class FontStyleTransformationModule(nn.Module):
             L_concat = block(L_concat)
 
         # MLP to adjust channel size to c_{n_s} (1024)
-        L_transformed = self.mlp_channel_adjust(L_concat)  # (B, N_L, 1024)
+        L_transformed = self.projection(L_concat)  # (B, N_L, 1024)
 
         # Residual connection: concatenate with last-scale target feature (Eq. 9)
         last_feature = target_features[-1]  # f_{y_r}^{s,n_s}
@@ -292,7 +292,9 @@ class TransformerBlock(nn.Module):
 
         self.norm2 = nn.LayerNorm(dim)
         self.ffn = nn.Sequential(
-            nn.Linear(dim, dim * 4), nn.GELU(), nn.Linear(dim * 4, dim)
+            nn.Linear(dim, dim * 4), 
+            nn.GELU(), 
+            nn.Linear(dim * 4, dim)
         )
 
     def forward(
@@ -312,12 +314,12 @@ class TransformerBlock(nn.Module):
 class SelfAttention(nn.Module):
     """Standard multi-head self-attention."""
 
-    def __init__(self, dim: int, num_heads: int = 8):
+    def __init__(self, dim: int, num_heads: int = 8, use_flash_attn: bool = True):
         super().__init__()
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
         self.scale = self.head_dim**-0.5
-
+        self.use_flash_attn = use_flash_attn and hasattr(F, 'scaled_dot_product_attention')
         self.to_qkv = nn.Linear(dim, dim * 3)
         self.proj = nn.Linear(dim, dim)
 
@@ -328,23 +330,31 @@ class SelfAttention(nn.Module):
             .reshape(B, N, 3, self.num_heads, self.head_dim)
             .permute(2, 0, 3, 1, 4)
         )
-        q, k, v = qkv[0], qkv[1], qkv[2]
-
-        attn = (q @ k.transpose(-2, -1)) * self.scale
-        attn = attn.softmax(dim=-1)
-
-        out = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        q, k, v = qkv[0], qkv[1], qkv[2]  # Each: (B, num_heads, N, head_dim)
+        
+        if self.use_flash_attn:
+            out = F.scaled_dot_product_attention(
+                q, k, v,
+                dropout_p=0.0,
+                scale=self.scale
+            )  # (B, num_heads, N, head_dim)
+            out = out.transpose(1, 2).reshape(B, N, C)  # FIX: Add reshape
+        else:
+            attn = (q @ k.transpose(-2, -1)) * self.scale
+            attn = attn.softmax(dim=-1)
+            out = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        
         return self.proj(out)
-
 
 class CrossAttention(nn.Module):
     """Multi-head cross-attention."""
 
-    def __init__(self, dim: int, num_heads: int = 8):
+    def __init__(self, dim: int, num_heads: int = 8, use_flash_attn: bool = True):
         super().__init__()
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
         self.scale = self.head_dim**-0.5
+        self.use_flash_attn = use_flash_attn and hasattr(F, 'scaled_dot_product_attention')
 
         self.to_q = nn.Linear(dim, dim)
         self.to_k = nn.Linear(dim, dim)
@@ -364,20 +374,28 @@ class CrossAttention(nn.Module):
             self.to_q(x)
             .reshape(B, N, self.num_heads, self.head_dim)
             .permute(0, 2, 1, 3)
-        )
+        )  # (B, num_heads, N, head_dim)
         k = (
             self.to_k(context)
             .reshape(B, M, self.num_heads, self.head_dim)
             .permute(0, 2, 1, 3)
-        )
+        )  # (B, num_heads, M, head_dim)
         v = (
             self.to_v(value)
             .reshape(B, M, self.num_heads, self.head_dim)
             .permute(0, 2, 1, 3)
-        )
-
-        attn = (q @ k.transpose(-2, -1)) * self.scale
-        attn = attn.softmax(dim=-1)
-
-        out = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        )  # (B, num_heads, M, head_dim)
+        
+        if self.use_flash_attn:
+            out = F.scaled_dot_product_attention(
+                q, k, v,
+                dropout_p=0.0,
+                scale=self.scale
+            )  # (B, num_heads, N, head_dim)
+            out = out.transpose(1, 2).reshape(B, N, C)  # FIX: Add reshape
+        else:
+            attn = (q @ k.transpose(-2, -1)) * self.scale
+            attn = attn.softmax(dim=-1)
+            out = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        
         return self.proj(out)
