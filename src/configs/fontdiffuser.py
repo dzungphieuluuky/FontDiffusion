@@ -530,27 +530,37 @@ def get_parser():
     fst_group.add_argument(
         "--fst_num_queries",
         type=int,
-        default=256,
-        help="Number of learnable queries in FST",
+        default=220,
+        help="Number of learnable queries in FST (default 220 for 256 total)",
     )
     fst_group.add_argument(
         "--fst_query_dim",
         type=int,
         default=128,
-        help="Dimension of FST queries",
+        help="Dimension of query vectors in FST",
     )
     fst_group.add_argument(
         "--fst_num_scales",
         type=int,
         default=5,
-        help="Number of scales in MSSE and FST",
+        help="Number of multi-scale features in MSSE",
     )
     fst_group.add_argument(
         "--fst_feature_channels",
-        type=int,
-        nargs="+",
-        default=None,
-        help="FST feature channel dimensions (auto if None)",
+        type=str,
+        default="64,128,256,512,1024",
+        help="Feature channels for FST module (comma-separated)",
+    )
+    fst_group.add_argument(
+        "--style_source_same_prob",
+        type=float,
+        default=0.5,
+        help="Probability that source and target style use same font style",
+    )
+    fst_group.add_argument(
+        "--freeze_original_encoders",
+        action="store_true",
+        help="Freeze original style and content encoders during training",
     )
     # MSS Encoder specific
     fst_group.add_argument(

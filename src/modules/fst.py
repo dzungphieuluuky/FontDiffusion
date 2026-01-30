@@ -14,32 +14,32 @@ class CrossAttentionBlock(nn.Module):
         value_dim: int,
         num_heads: int = 8,
         dropout: float = 0.1,
-        use_flash_attn: bool = False,
+        use_flash_attn: bool = True,
     ):
         super().__init__()
-        self.num_heads = num_heads
-        self.head_dim = query_dim // num_heads
-        self.scale = self.head_dim ** -0.5
+        self.num_heads: int = num_heads
+        self.head_dim: int = query_dim // num_heads
+        self.scale: float = self.head_dim ** -0.5
         
         # Project K/V to query_dim ONCE (not per-head)
-        self.to_q = nn.Linear(query_dim, query_dim, bias=False)
-        self.to_k = nn.Linear(key_dim, query_dim, bias=False)
-        self.to_v = nn.Linear(value_dim, query_dim, bias=False)
+        self.to_q: nn.Linear = nn.Linear(query_dim, query_dim, bias=False)
+        self.to_k: nn.Linear = nn.Linear(key_dim, query_dim, bias=False)
+        self.to_v: nn.Linear = nn.Linear(value_dim, query_dim, bias=False)
         
-        self.proj_out = nn.Linear(query_dim, query_dim)
-        self.dropout = nn.Dropout(dropout)
+        self.proj_out: nn.Linear = nn.Linear(query_dim, query_dim)
+        self.dropout: nn.Dropout = nn.Dropout(dropout)
         
         # Use Flash Attention if available
-        self.use_flash_attn = use_flash_attn and hasattr(F, 'scaled_dot_product_attention')
+        self.use_flash_attn: bool = use_flash_attn and hasattr(F, 'scaled_dot_product_attention')
         
     def forward(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
         B, N_q, C = query.shape
         _, N_kv, _ = key.shape
         
         # Project
-        q = self.to_q(query).reshape(B, N_q, self.num_heads, self.head_dim).transpose(1, 2)
-        k = self.to_k(key).reshape(B, N_kv, self.num_heads, self.head_dim).transpose(1, 2)
-        v = self.to_v(value).reshape(B, N_kv, self.num_heads, self.head_dim).transpose(1, 2)
+        q: torch.Tensor = self.to_q(query).reshape(B, N_q, self.num_heads, self.head_dim).transpose(1, 2)
+        k: torch.Tensor = self.to_k(key).reshape(B, N_kv, self.num_heads, self.head_dim).transpose(1, 2)
+        v: torch.Tensor = self.to_v(value).reshape(B, N_kv, self.num_heads, self.head_dim).transpose(1, 2)
         
         if self.use_flash_attn:
             # Use PyTorch 2.0+ Flash Attention (faster + less memory)
