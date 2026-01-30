@@ -196,39 +196,43 @@ class FontDataset(Dataset):
         source_style: str,
         exclude_content: str,
         num_pairs: int
-    ) -> list[tuple[Image.Image, Image.Image]]:
+    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
         """
         Get k pairs of images for consistency loss.
         
-        Each pair contains:
-        - Image with same content in source_style
-        - Image with same content in target_style
+        Each pair contains the SAME content in source→target style transformation:
+        - pair 1: char A in source_style → char A in target_style
+        - pair 2: char B in source_style → char B in target_style
+        - pair 3: char C in source_style → char C in target_style
         
-        All pairs should have different content from each other and from exclude_content.
+        All pairs use the SAME style transformation (source_style → target_style)
+        but with DIFFERENT characters.
         
         Args:
-            target_style: Target style name
-            source_style: Source style name  
+            target_style: Target style name (e.g., "style2")
+            source_style: Source style name (e.g., "style1")
             exclude_content: Content to exclude (the main training sample)
             num_pairs: Number of pairs to return (k)
             
         Returns:
-            List of (source_image, target_image) tuples
+            List of (source_image, target_image) tuples, each already transformed
         """
         pairs = []
         
-        # Find available contents that exist in both styles
+        # Find contents that exist in BOTH source_style AND target_style
         available_contents = []
         for content, styles_dict in self.content_to_images.items():
             if content == exclude_content:
                 continue
+            # Content must exist in both styles
             if source_style in styles_dict and target_style in styles_dict:
                 available_contents.append(content)
         
         if not available_contents:
             logger.warning(
                 f"No available contents for consistency pairs "
-                f"(source={source_style}, target={target_style})"
+                f"(source_style={source_style}, target_style={target_style}, "
+                f"exclude_content={exclude_content})"
             )
             return pairs
         
@@ -238,21 +242,32 @@ class FontDataset(Dataset):
             min(num_pairs, len(available_contents))
         )
         
+        # Build pairs: each pair has same content, different styles
         for content in selected_contents:
-            # Get source style image
+            # Source image: content in source_style
             source_candidates = self.content_to_images[content][source_style]
             source_image_path = random.choice(source_candidates)
             source_image = Image.open(source_image_path).convert("RGB")
             
-            # Get target style image  
+            # Target image: SAME content in target_style
             target_candidates = self.content_to_images[content][target_style]
             target_image_path = random.choice(target_candidates)
             target_image = Image.open(target_image_path).convert("RGB")
             
+            # Apply transforms if available
+            if self.transforms is not None:
+                source_image = self.transforms[1](source_image)  # Style transform
+                target_image = self.transforms[1](target_image)  # Style transform
+            
             pairs.append((source_image, target_image))
         
+        logger.debug(
+            f"Created {len(pairs)} consistency pairs with contents={selected_contents}, "
+            f"source_style={source_style}, target_style={target_style}"
+        )
+        
         return pairs
-
+    
     def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
         """
         Get a sample from the dataset.
@@ -323,9 +338,13 @@ class FontDataset(Dataset):
         }
 
         # Add source style image for FST
+        source_style = None  # Track source style for consistency pairs
         if self.use_fst:
-            style_source_image = self.get_style_source_image(
-                target_style=style, content=content, target_image_path=target_image_path
+            # Get source style image AND track which style it came from
+            source_style, style_source_image = self.get_style_source_image_with_name(
+                target_style=style, 
+                content=content, 
+                target_image_path=target_image_path
             )
 
             if self.transforms is not None:
@@ -335,46 +354,26 @@ class FontDataset(Dataset):
 
         # Add consistency pairs for FST consistency loss
         if self.num_consistency_pairs > 0:
-            # Determine source style from the style_source_image path
-            # We need to extract which style the source image came from
-            # This requires tracking the source style in get_style_source_image
-            
-            # For now, we'll infer it from the sampling strategy:
-            # If same_style was used, source_style = target_style
-            # If different_style was used, we need to find which style was selected
-            
-            # To properly implement this, we need to modify get_style_source_image
-            # to return both the image and the source style name
-            
-            # Get source style name by re-sampling with same logic
-            use_same_style = random.random() < self.style_source_same_prob
-            
-            if use_same_style:
-                source_style = style  # Same as target
-            else:
-                # Need to determine which different style was chosen
-                # We'll modify get_style_source_image to return style name
-                source_style, style_source_image_resampled = self.get_style_source_image_with_name(
-                    target_style=style, 
-                    content=content, 
-                    target_image_path=target_image_path
+            # If FST not enabled, we can't create consistency pairs
+            if source_style is None:
+                logger.warning(
+                    "num_consistency_pairs > 0 but use_fst=False. "
+                    "Consistency pairs require FST mode. Skipping consistency pairs."
                 )
-                # Use the resampled image (with known style)
-                if self.transforms is not None:
-                    style_source_image = self.transforms[1](style_source_image_resampled)
-                sample["style_source_image"] = style_source_image
-            
-            # Get consistency pairs: same source→target style, different contents
-            consistency_pairs = self.get_consistency_pairs(
-                target_style=style,
-                source_style=source_style,
-                exclude_content=content,
-                num_pairs=self.num_consistency_pairs
-            )
-            
-            sample["consistency_pairs"] = consistency_pairs
-
-
+                # Don't add empty list to sample - omit the key entirely
+            else:
+                # Get consistency pairs: same source→target style transformation, different contents
+                consistency_pairs = self.get_consistency_pairs(
+                    target_style=style,
+                    source_style=source_style,
+                    exclude_content=content,
+                    num_pairs=self.num_consistency_pairs
+                )
+                
+                # Only add to sample if we got valid pairs
+                if consistency_pairs:
+                    sample["consistency_pairs"] = consistency_pairs
+                    
         # Add negative samples for SCR loss
         if self.scr:
             style_list = list(self.style_to_images.keys())
@@ -427,7 +426,7 @@ class FontDataset(Dataset):
             sample["neg_images"] = neg_images
 
         return sample
-
+    
     def get_style_source_image_with_name(
         self, target_style: str, content: str, target_image_path: str
     ) -> tuple[str, Image.Image]:
