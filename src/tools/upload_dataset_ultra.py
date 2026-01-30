@@ -1,18 +1,21 @@
 """
-Create Hugging Face dataset from FontDiffusion images with ultra-parallel processing.
+Create Hugging Face dataset from generated FontDiffusion images with streaming support.
 
-Auto-tuned for maximum speed - just provide essential arguments!
+This module builds datasets from FontDiffusion outputs using streaming to prevent
+RAM overflow, especially useful in constrained environments like Colab or Kaggle.
+Includes comparison image generation for visual inspection.
+
+Enhanced with auto-tuned multiprocessing for maximum speed.
 """
 
 import json
 import logging
-import time
 import os
-import argparse
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Generator, Optional
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
+from multiprocessing import Pool, cpu_count
 from functools import partial, lru_cache
 
 from datasets import Dataset, Features, Image as HFImage, Value
@@ -21,42 +24,97 @@ from PIL import Image
 from utilities import HFTqdm
 from filename_utils import compute_file_hash
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("DatasetCreator")
 
 
 @dataclass
 class DatasetConfig:
-    """Configuration for dataset creation - simplified!"""
+    """Configuration for dataset creation."""
+
     data_dir: Path
     style_images_dir: Path
     repo_id: str
     split: str = "train"
-    config_name: Optional[str] = None
     push_to_hub: bool = True
     private: bool = False
     token: Optional[str] = None
+    batch_size: int = None  # Auto-tuned if None
+    resize_height: int = 256
+    spacing: int = 10
+    num_workers: int = None  # Auto-tuned if None
 
     def __post_init__(self):
-        """Convert paths to Path if they're strings."""
+        """Convert paths to Path and auto-tune performance parameters."""
         if isinstance(self.data_dir, str):
             self.data_dir = Path(self.data_dir)
         if isinstance(self.style_images_dir, str):
             self.style_images_dir = Path(self.style_images_dir)
+        
+        # Auto-tune performance parameters based on system
+        cpu_cores = cpu_count() or 4
+        
+        if self.num_workers is None:
+            # Use all cores for CPU-bound image processing
+            self.num_workers = max(1, cpu_cores)
+        
+        if self.batch_size is None:
+            # Larger batches for better throughput, scaled by CPU count
+            # More CPUs = can handle larger batches efficiently
+            self.batch_size = min(1000, max(100, cpu_cores * 100))
+        
+        logger.info(f"Auto-tuned: {self.num_workers} workers, batch_size={self.batch_size}")
 
 
-# Cache style images to avoid re-loading
+# Cache style images to avoid re-loading same styles multiple times
 @lru_cache(maxsize=256)
 def _load_cached_style_image(style_path: str) -> Image.Image:
     """Load and cache style images to avoid repeated disk reads."""
     return Image.open(style_path).convert("RGB")
 
 
-def _load_image_file(path: Path) -> Optional[Image.Image]:
-    """Load a single image file with error handling."""
+def _resize_image(image: Image.Image, target_height: int) -> Image.Image:
+    """Resize image to target height while maintaining aspect ratio."""
+    aspect_ratio = image.width / image.height
+    new_width = int(target_height * aspect_ratio)
+    return image.resize((new_width, target_height), Image.Resampling.LANCZOS)
+
+
+def _create_comparison_image(
+    content_img: Image.Image,
+    style_img: Image.Image,
+    target_img: Image.Image,
+    resize_height: int,
+    spacing: int,
+) -> Optional[Image.Image]:
+    """Create side-by-side comparison image (content | style | target)."""
     try:
-        return Image.open(path).convert("RGB")
+        content_resized = _resize_image(content_img, resize_height)
+        style_resized = _resize_image(style_img, resize_height)
+        target_resized = _resize_image(target_img, resize_height)
+
+        total_width = (
+            content_resized.width
+            + style_resized.width
+            + target_resized.width
+            + 2 * spacing
+        )
+        total_height = resize_height
+
+        comparison = Image.new(
+            "RGB", (total_width, total_height), color=(255, 255, 255)
+        )
+
+        x_offset = 0
+        comparison.paste(content_resized, (x_offset, 0))
+        x_offset += content_resized.width + spacing
+        comparison.paste(style_resized, (x_offset, 0))
+        x_offset += style_resized.width + spacing
+        comparison.paste(target_resized, (x_offset, 0))
+
+        return comparison
+
     except Exception as e:
-        logger.warning(f"Failed to load {path}: {e}")
+        logger.warning(f"Failed to create comparison image: {e}")
         return None
 
 
@@ -69,29 +127,76 @@ def _find_style_image(style_images_dir: Path, style: str) -> Optional[Path]:
     return None
 
 
-class UltraParallelDatasetBuilder:
-    """Ultra-parallel dataset builder with auto-tuned performance."""
+def _process_single_sample(
+    gen: dict,
+    data_dir: Path,
+    style_images_dir: Path,
+    resize_height: int,
+    spacing: int,
+) -> Optional[dict[str, Any]]:
+    """Process a single sample (load images, create comparison).
     
+    This function is designed to be called in parallel via multiprocessing.
+    Uses cached style image loading for better performance.
+    """
+    char: str = gen.get("character", "")
+    style: str = gen.get("style", "")
+    font: str = gen.get("font", "unknown")
+
+    content_path: Path = data_dir / gen.get("content_image_path", "")
+    target_path: Path = data_dir / gen.get("target_image_path", "")
+    style_path: Optional[Path] = _find_style_image(style_images_dir, style)
+
+    # Validate paths
+    if not content_path.exists() or not target_path.exists():
+        return None
+    if style_path is None or not style_path.exists():
+        return None
+
+    try:
+        # Load images - use cache for style images
+        content_img: Image.Image = Image.open(content_path).convert("RGB")
+        target_img: Image.Image = Image.open(target_path).convert("RGB")
+        style_img: Image.Image = _load_cached_style_image(str(style_path))
+
+        # Create comparison
+        comparison_img: Optional[Image.Image] = _create_comparison_image(
+            content_img, style_img, target_img, resize_height, spacing
+        )
+
+        # Build sample dict
+        sample_dict = {
+            "character": char,
+            "style": style,
+            "font": font,
+            "content_image": content_img,
+            "style_image": style_img,
+            "target_image": target_img,
+            "content_hash": compute_file_hash(char, "", font),
+            "target_hash": compute_file_hash(char, style, font),
+        }
+
+        if comparison_img is not None:
+            sample_dict["comparison_image"] = comparison_img
+
+        return sample_dict
+
+    except Exception as e:
+        logger.warning(f"Failed to process sample {char}/{style}: {e}")
+        return None
+
+
+class DatasetBuilder:
+    """Build FontDiffusion dataset in Hugging Face format with streaming."""
+
     REQUIRED_DIRS = ["ContentImage", "TargetImage"]
     CHECKPOINT_FILE = "results_checkpoint.json"
-    
+
     def __init__(self, config: DatasetConfig):
-        """Initialize with auto-tuned performance settings."""
+        """Initialize the dataset builder."""
         self.config = config
         self.data_dir = config.data_dir
         self.style_images_dir = config.style_images_dir
-        
-        # Auto-tune performance parameters
-        self.cpu_count = os.cpu_count() or 4
-        self.io_workers = max(1, self.cpu_count * 4)  # Many I/O threads
-        self.cpu_workers = max(1, self.cpu_count)     # CPU count for processing
-        self.batch_size = 1000  # Optimal batch size
-        self.resize_height = 256
-        self.spacing = 10
-        
-        logger.info(f"Auto-tuned: {self.io_workers} I/O workers, "
-                   f"{self.cpu_workers} CPU workers, batch_size={self.batch_size}")
-        
         self._validate_structure()
 
     def _validate_structure(self) -> None:
@@ -115,368 +220,442 @@ class UltraParallelDatasetBuilder:
         checkpoint_path = self.data_dir / self.CHECKPOINT_FILE
 
         with checkpoint_path.open("r", encoding="utf-8") as f:
-            data = json.load(f)
+            data: dict = json.load(f)
 
-        generations = data.get("generations", [])
+        generations: list = data.get("generations", [])
         if not generations:
             raise ValueError("No generations found in checkpoint")
 
-        logger.info(f"Loaded checkpoint: {len(generations)} generations, "
-                   f"{len(data.get('characters', []))} characters, "
-                   f"{len(data.get('styles', []))} styles")
+        logger.info(
+            f"Loaded checkpoint: {len(generations)} generations, "
+            f"{len(data.get('characters', []))} characters, "
+            f"{len(data.get('styles', []))} styles"
+        )
 
         return data
 
-    def _load_and_process_sample(self, gen: dict) -> Optional[dict]:
-        """Load and process a single sample - optimized for parallel execution."""
-        try:
-            # Extract metadata
-            char = gen.get("character", "")
-            style = gen.get("style", "")
-            font = gen.get("font", "unknown")
-            
-            # Build paths
-            content_path = self.data_dir / gen.get("content_image_path", "")
-            target_path = self.data_dir / gen.get("target_image_path", "")
-            style_path = _find_style_image(self.style_images_dir, style)
-            
-            # Validate paths
-            if not content_path.exists() or not target_path.exists() or not style_path:
-                return None
-            
-            # Load images
-            content_img = _load_image_file(content_path)
-            target_img = _load_image_file(target_path)
-            style_img = _load_cached_style_image(str(style_path))
-            
-            if not all([content_img, target_img, style_img]):
-                return None
-            
-            # Create comparison image
-            def resize_image(img, height):
-                aspect = img.width / img.height
-                new_width = int(height * aspect)
-                return img.resize((new_width, height), Image.Resampling.LANCZOS)
-            
-            content_resized = resize_image(content_img, self.resize_height)
-            style_resized = resize_image(style_img, self.resize_height)
-            target_resized = resize_image(target_img, self.resize_height)
-            
-            total_width = content_resized.width + style_resized.width + target_resized.width + 2 * self.spacing
-            comparison = Image.new("RGB", (total_width, self.resize_height), color=(255, 255, 255))
-            
-            x_offset = 0
-            comparison.paste(content_resized, (x_offset, 0))
-            x_offset += content_resized.width + self.spacing
-            comparison.paste(style_resized, (x_offset, 0))
-            x_offset += style_resized.width + self.spacing
-            comparison.paste(target_resized, (x_offset, 0))
-            
-            # Build sample
-            return {
-                "character": char,
-                "style": style,
-                "font": font,
-                "content_image": content_img,
-                "style_image": style_img,
-                "target_image": target_img,
-                "comparison_image": comparison,
-                "content_hash": compute_file_hash(char, "", font),
-                "target_hash": compute_file_hash(char, style, font),
-            }
-            
-        except Exception as e:
-            logger.debug(f"Failed to process {gen.get('character', '')}/{gen.get('style', '')}: {e}")
-            return None
+    def _generate_samples_parallel(self) -> Generator[dict[str, Any], None, None]:
+        """Generate dataset samples using multiprocessing with progress tracking."""
+        checkpoint: dict = self._load_checkpoint()
+        generations: list = checkpoint["generations"]
 
-    def _generate_samples_ultra_parallel(self) -> Generator[dict, None, None]:
-        """Generate samples using ultra-parallel processing."""
-        checkpoint = self._load_checkpoint()
-        generations = checkpoint["generations"]
-        
-        logger.info(f"Processing {len(generations)} samples with ultra-parallel mode...")
-        logger.info(f"Using {self.io_workers} workers for maximum throughput")
-        
+        logger.info(
+            f"Processing {len(generations)} samples with {self.config.num_workers} workers..."
+        )
+
+        # Create partial function with fixed parameters
+        process_func = partial(
+            _process_single_sample,
+            data_dir=self.data_dir,
+            style_images_dir=self.style_images_dir,
+            resize_height=self.config.resize_height,
+            spacing=self.config.spacing,
+        )
+
+        skipped: int = 0
+        processed: int = 0
         start_time = time.time()
-        total_batches = (len(generations) + self.batch_size - 1) // self.batch_size
-        
-        # Process batches in parallel
-        for batch_idx in range(total_batches):
-            batch_start = batch_idx * self.batch_size
-            batch_end = min(batch_start + self.batch_size, len(generations))
-            batch = generations[batch_start:batch_end]
-            
-            logger.info(f"Processing batch {batch_idx + 1}/{total_batches} ({len(batch)} samples)...")
-            batch_start_time = time.time()
-            
-            # Process entire batch in parallel
-            with ProcessPoolExecutor(max_workers=self.io_workers) as executor:
-                futures = {executor.submit(self._load_and_process_sample, gen): gen for gen in batch}
+        batch_size = self.config.batch_size
+        total_batches = (len(generations) + batch_size - 1) // batch_size
+
+        # Process in batches using multiprocessing
+        with Pool(processes=self.config.num_workers) as pool:
+            for batch_idx in range(total_batches):
+                batch_start = batch_idx * batch_size
+                batch_end = min(batch_start + batch_size, len(generations))
+                batch = generations[batch_start:batch_end]
                 
-                valid_samples = 0
-                for future in as_completed(futures):
-                    sample = future.result()
-                    if sample:
-                        yield sample
-                        valid_samples += 1
-            
-            batch_time = time.time() - batch_start_time
-            elapsed = time.time() - start_time
-            processed = batch_end
-            rate = processed / elapsed if elapsed > 0 else 0
-            progress_pct = processed / len(generations) * 100
-            eta = (len(generations) - processed) / rate if rate > 0 else 0
-            
-            logger.info(f"Batch {batch_idx + 1}: {valid_samples}/{len(batch)} valid in {batch_time:.2f}s")
-            logger.info(f"Overall: {progress_pct:.1f}%, {rate:.1f} samples/s, ETA: {eta:.0f}s")
-        
-        total_time = time.time() - start_time
-        logger.info(f"Processing completed in {total_time:.2f}s")
+                batch_start_time = time.time()
 
-    def build(self) -> Dataset:
-        """Build dataset with ultra-parallel processing."""
-        logger.info("Building dataset with ultra-parallel processing...")
-        
-        features = Features({
-            "character": Value("string"),
-            "style": Value("string"),
-            "font": Value("string"),
-            "content_image": HFImage(),
-            "style_image": HFImage(),
-            "target_image": HFImage(),
-            "comparison_image": HFImage(),
-            "content_hash": Value("string"),
-            "target_hash": Value("string"),
-        })
-        
-        logger.info("Converting samples to Arrow format...")
+                # Process batch in parallel
+                results = pool.map(process_func, batch)
+
+                # Yield valid results
+                batch_valid = 0
+                for sample in results:
+                    if sample is not None:
+                        yield sample
+                        processed += 1
+                        batch_valid += 1
+                    else:
+                        skipped += 1
+
+                # Progress reporting
+                batch_time = time.time() - batch_start_time
+                elapsed = time.time() - start_time
+                rate = processed / elapsed if elapsed > 0 else 0
+                progress_pct = batch_end / len(generations) * 100
+                eta = (len(generations) - batch_end) / rate if rate > 0 else 0
+                
+                logger.info(
+                    f"Batch {batch_idx + 1}/{total_batches}: {batch_valid}/{len(batch)} valid "
+                    f"in {batch_time:.2f}s | Progress: {progress_pct:.1f}% | "
+                    f"Rate: {rate:.1f} samples/s | ETA: {eta:.0f}s"
+                )
+
+        total_time = time.time() - start_time
+        if processed == 0:
+            raise ValueError("No valid samples found")
+
+        if skipped > 0:
+            logger.warning(f"Skipped {skipped} invalid samples")
+
+        logger.info(
+            f"Successfully processed {processed} samples in {total_time:.2f}s "
+            f"({processed/total_time:.1f} samples/s)"
+        )
+
+    def _generate_samples(self) -> Generator[dict[str, Any], None, None]:
+        """Generate dataset samples one at a time (single-threaded fallback)."""
+        checkpoint: dict = self._load_checkpoint()
+        generations: list = checkpoint["generations"]
+
+        skipped: int = 0
+        processed: int = 0
         start_time = time.time()
-        
+
+        for gen in generations:
+            sample = _process_single_sample(
+                gen,
+                self.data_dir,
+                self.style_images_dir,
+                self.config.resize_height,
+                self.config.spacing,
+            )
+
+            if sample is not None:
+                yield sample
+                processed += 1
+            else:
+                skipped += 1
+
+            if processed % 100 == 0 and processed > 0:
+                elapsed = time.time() - start_time
+                rate = processed / elapsed if elapsed > 0 else 0
+                logger.info(f"Processed {processed} samples ({rate:.1f} samples/s)...")
+
+        total_time = time.time() - start_time
+        if processed == 0:
+            raise ValueError("No valid samples found")
+
+        if skipped > 0:
+            logger.warning(f"Skipped {skipped} invalid samples")
+
+        logger.info(
+            f"Successfully processed {processed} samples in {total_time:.2f}s "
+            f"({processed/total_time:.1f} samples/s)"
+        )
+
+    def build_streaming(self, use_multiprocessing: bool = True) -> Dataset:
+        """Build dataset using streaming to minimize memory usage."""
+        logger.info(
+            f"Building dataset with streaming (multiprocessing={use_multiprocessing})..."
+        )
+
+        features = Features(
+            {
+                "character": Value("string"),
+                "style": Value("string"),
+                "font": Value("string"),
+                "content_image": HFImage(),
+                "style_image": HFImage(),
+                "target_image": HFImage(),
+                "comparison_image": HFImage(),
+                "content_hash": Value("string"),
+                "target_hash": Value("string"),
+            }
+        )
+
+        generator_func = (
+            self._generate_samples_parallel
+            if use_multiprocessing
+            else self._generate_samples
+        )
+
         dataset = Dataset.from_generator(
-            self._generate_samples_ultra_parallel,
+            generator_func,
             features=features,
         )
-        
-        conversion_time = time.time() - start_time
-        logger.info(f"Dataset created: {len(dataset)} samples in {conversion_time:.2f}s")
-        
+
         return dataset
 
-    def push_to_hub(self, dataset: Dataset) -> None:
-        """Push dataset to Hugging Face Hub."""
+    def build_batched(self, use_multiprocessing: bool = True) -> Dataset:
+        """Build dataset in batches for better control over memory usage."""
+        logger.info(
+            f"Building dataset with batching (multiprocessing={use_multiprocessing})..."
+        )
+
+        features = Features(
+            {
+                "character": Value("string"),
+                "style": Value("string"),
+                "font": Value("string"),
+                "content_image": HFImage(),
+                "style_image": HFImage(),
+                "target_image": HFImage(),
+                "comparison_image": HFImage(),
+                "content_hash": Value("string"),
+                "target_hash": Value("string"),
+            }
+        )
+
+        batch_datasets = []
+        current_batch = {
+            "character": [],
+            "style": [],
+            "font": [],
+            "content_image": [],
+            "style_image": [],
+            "target_image": [],
+            "comparison_image": [],
+            "content_hash": [],
+            "target_hash": [],
+        }
+
+        sample_count = 0
+        generator_func = (
+            self._generate_samples_parallel
+            if use_multiprocessing
+            else self._generate_samples
+        )
+
+        for sample in generator_func():
+            for key, value in sample.items():
+                current_batch[key].append(value)
+
+            sample_count += 1
+
+            if sample_count % self.config.batch_size == 0:
+                batch_ds = Dataset.from_dict(current_batch, features=features)
+                batch_datasets.append(batch_ds)
+                current_batch = {key: [] for key in current_batch}
+                logger.info(f"Completed batch {len(batch_datasets)}")
+
+        if current_batch["character"]:
+            batch_ds = Dataset.from_dict(current_batch, features=features)
+            batch_datasets.append(batch_ds)
+
+        if not batch_datasets:
+            raise ValueError("No valid samples found")
+
+        logger.info(f"Concatenating {len(batch_datasets)} batches...")
+        from datasets import concatenate_datasets
+
+        dataset = concatenate_datasets(batch_datasets)
+
+        return dataset
+
+    def push_streaming(self, dataset: Dataset) -> None:
+        """Push dataset to Hugging Face Hub with streaming."""
         if not self.config.push_to_hub:
             logger.info("Skipping push to Hub")
             return
-        
-        logger.info(f"Pushing dataset to {self.config.repo_id}...")
-        push_start = time.time()
-        
-        try:
-            dataset.push_to_hub(
-                repo_id=self.config.repo_id,
-                split=self.config.split,
-                config_name=self.config.config_name,
-                private=self.config.private,
-                token=self.config.token,
-            )
-            
-            push_time = time.time() - push_start
-            logger.info(f"Successfully pushed in {push_time:.2f}s")
-            logger.info(f"Dataset available at: https://huggingface.co/datasets/{self.config.repo_id}")
-            
-        except Exception as e:
-            logger.error(f"Push failed: {e}")
-            raise
 
-    def save_local(self, dataset: Dataset, output_path: Path) -> None:
-        """Save dataset to local disk."""
-        logger.info(f"Saving dataset to {output_path}...")
-        save_start = time.time()
-        
-        dataset.save_to_disk(str(output_path))
-        
-        save_time = time.time() - save_start
-        logger.info(f"Dataset saved in {save_time:.2f}s")
+        logger.info(f"Pushing dataset to {self.config.repo_id} with streaming...")
+
+        dataset.push_to_hub(
+            repo_id=self.config.repo_id,
+            split=self.config.split,
+            private=self.config.private,
+            token=self.config.token,
+            max_shard_size="500MB",
+        )
+
+        logger.info(
+            f"Successfully pushed to https://huggingface.co/datasets/{self.config.repo_id}"
+        )
+
+    def save_local_streaming(self, dataset: Dataset, output_path: Path) -> None:
+        """Save dataset to local disk with streaming."""
+        logger.info(f"Saving dataset to {output_path} with streaming...")
+
+        dataset.save_to_disk(
+            str(output_path),
+            max_shard_size="500MB",
+        )
+
+        logger.info("Dataset saved successfully")
 
 
-def create_dataset_ultra_fast(
+def create_dataset(
     data_dir: str | Path,
     style_images_dir: str | Path,
     repo_id: str,
     split: str = "train",
-    config_name: Optional[str] = None,
     push_to_hub: bool = True,
     private: bool = False,
     token: Optional[str] = None,
     local_save_path: Optional[str | Path] = None,
+    batch_size: int = None,  # Auto-tuned if None
+    use_streaming: bool = True,
+    resize_height: int = 256,
+    spacing: int = 10,
+    num_workers: Optional[int] = None,  # Auto-tuned if None
+    use_multiprocessing: bool = True,
 ) -> Dataset:
-    """Create dataset with ultra-fast parallel processing.
-    
-    Just provide essential arguments - performance is auto-tuned!
-    
+    """Create and optionally push dataset to Hub with streaming support.
+
     Args:
-        data_dir: Path to data directory (must contain ContentImage/ and TargetImage/)
-        style_images_dir: Path to style images directory
+        data_dir: Path to data directory containing ContentImage/ and TargetImage/
+        style_images_dir: Path to directory containing style images
         repo_id: HuggingFace repository ID (e.g., 'username/dataset-name')
-        split: Dataset split name
-        config_name: Dataset configuration name
-        push_to_hub: Whether to push to HuggingFace Hub
-        private: Whether to make repository private
-        token: HuggingFace API token
-        local_save_path: Local path to save dataset
-    
+        split: Dataset split name (default: 'train')
+        push_to_hub: Whether to push to HuggingFace Hub (default: True)
+        private: Whether to make the repository private (default: False)
+        token: HuggingFace API token (optional)
+        local_save_path: Local path to save dataset (optional)
+        batch_size: Number of samples per batch (default: auto-tuned)
+        use_streaming: Use streaming mode (True) or batched mode (False)
+        resize_height: Height for comparison images (default: 256)
+        spacing: Spacing between images in comparison (default: 10)
+        num_workers: Number of worker processes (default: auto-tuned to CPU count)
+        use_multiprocessing: Whether to use multiprocessing (default: True)
+
     Returns:
         Created Dataset object
+
+    Raises:
+        ValueError: If data directory structure is invalid or no samples found
     """
     config = DatasetConfig(
         data_dir=Path(data_dir),
         style_images_dir=Path(style_images_dir),
         repo_id=repo_id,
         split=split,
-        config_name=config_name,
         push_to_hub=push_to_hub,
         private=private,
         token=token,
+        batch_size=batch_size,
+        resize_height=resize_height,
+        spacing=spacing,
+        num_workers=num_workers,
     )
-    
-    builder = UltraParallelDatasetBuilder(config)
-    dataset = builder.build()
-    
+
+    builder = DatasetBuilder(config)
+
+    if use_streaming:
+        dataset = builder.build_streaming(use_multiprocessing=use_multiprocessing)
+    else:
+        dataset = builder.build_batched(use_multiprocessing=use_multiprocessing)
+
     if local_save_path:
-        builder.save_local(dataset, Path(local_save_path))
-    
+        builder.save_local_streaming(dataset, Path(local_save_path))
+
     if push_to_hub:
-        builder.push_to_hub(dataset)
-    
+        builder.push_streaming(dataset)
+
     return dataset
 
 
 def main():
-    """Simple CLI - just provide essential arguments!"""
-    parser = argparse.ArgumentParser(
-        description="Ultra-fast HuggingFace dataset creator from FontDiffusion images",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Ultra-fast dataset creation (auto-tuned for max speed)
-  python create_ultra_fast.py --data-dir ./my_dataset \\
-    --style-images-dir ./style_images --repo-id username/dataset-name
-  
-  # Create but don't push to Hub
-  python create_ultra_fast.py --data-dir ./my_dataset \\
-    --style-images-dir ./style_images --repo-id username/dataset-name --no-push
-  
-  # Create private dataset
-  python create_ultra_fast.py --data-dir ./my_dataset \\
-    --style-images-dir ./style_images --repo-id username/dataset-name --private
-  
-  # Save locally as well
-  python create_ultra_fast.py --data-dir ./my_dataset \\
-    --style-images-dir ./style_images --repo-id username/dataset-name \\
-    --local-save ./local_dataset
-  
-  # Use specific split and config
-  python create_ultra_fast.py --data-dir ./my_dataset \\
-    --style-images-dir ./style_images --repo-id username/dataset-name \\
-    --split test --config-name v2
+    """CLI entry point."""
+    import argparse
 
-Performance features:
-  • Auto-tuned parallelization based on CPU cores
-  • Intelligent batching for optimal throughput
-  • Combined I/O and CPU processing in single pass
-  • No manual tuning needed - just works fast!
-        """,
+    parser = argparse.ArgumentParser(
+        description="Create HuggingFace dataset from FontDiffusion images with streaming"
     )
-    
-    # Essential arguments
     parser.add_argument(
         "--data-dir",
+        type=str,
         required=True,
-        help="Path to data directory (must contain ContentImage/ and TargetImage/)"
+        help="Path to data directory (with ContentImage/ and TargetImage/)",
     )
     parser.add_argument(
         "--style-images-dir",
+        type=str,
         required=True,
-        help="Path to directory containing style images"
+        help="Path to directory containing style images",
     )
     parser.add_argument(
         "--repo-id",
+        type=str,
         required=True,
-        help="HuggingFace repository ID (username/dataset-name)"
+        help="HuggingFace repository ID (username/dataset-name)",
     )
-    
-    # Optional arguments
     parser.add_argument(
         "--split",
+        type=str,
         default="train",
-        help="Dataset split name (default: train)"
-    )
-    parser.add_argument(
-        "--config-name",
-        help="Dataset configuration name"
-    )
-    parser.add_argument(
-        "--no-push",
-        action="store_true",
-        help="Skip pushing to HuggingFace Hub"
+        help="Dataset split name (default: train)",
     )
     parser.add_argument(
         "--private",
         action="store_true",
-        help="Make repository private"
+        help="Make repository private",
+    )
+    parser.add_argument(
+        "--no-push",
+        action="store_true",
+        help="Skip pushing to Hub",
     )
     parser.add_argument(
         "--local-save",
-        help="Save dataset locally to this path"
+        type=str,
+        help="Save dataset locally to this path",
     )
     parser.add_argument(
         "--token",
-        help="HuggingFace API token for private datasets"
+        type=str,
+        help="HuggingFace API token",
     )
     parser.add_argument(
-        "--verbose",
+        "--batch-size",
+        type=int,
+        default=None,
+        help="Batch size for processing (default: auto-tuned)",
+    )
+    parser.add_argument(
+        "--use-batched",
         action="store_true",
-        help="Enable verbose logging"
+        default=False,
+        help="Use batched mode instead of streaming",
     )
-    
+    parser.add_argument(
+        "--resize-height",
+        type=int,
+        default=256,
+        help="Height for comparison images (default: 256)",
+    )
+    parser.add_argument(
+        "--spacing",
+        type=int,
+        default=10,
+        help="Spacing between images in comparison (default: 10)",
+    )
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=None,
+        help="Number of worker processes (default: auto-tuned to CPU count)",
+    )
+    parser.add_argument(
+        "--no-multiprocessing",
+        action="store_true",
+        help="Disable multiprocessing (use single-threaded processing)",
+    )
+
     args = parser.parse_args()
-    
-    # Setup logging
-    log_level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(
-        level=log_level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
+
     try:
-        # Run ultra-fast dataset creation
-        dataset = create_dataset_ultra_fast(
+        dataset = create_dataset(
             data_dir=args.data_dir,
             style_images_dir=args.style_images_dir,
             repo_id=args.repo_id,
             split=args.split,
-            config_name=args.config_name,
             push_to_hub=not args.no_push,
             private=args.private,
             token=args.token,
             local_save_path=args.local_save,
+            batch_size=args.batch_size,
+            use_streaming=not args.use_batched,
+            resize_height=args.resize_height,
+            spacing=args.spacing,
+            num_workers=args.num_workers,
+            use_multiprocessing=not args.no_multiprocessing,
         )
-        
-        # Success summary
-        print(f"\n✅ Dataset creation completed successfully!")
-        print(f"📊 Samples: {len(dataset)}")
-        print(f"🔤 Characters: {len(set(dataset['character']))}")
-        print(f"🎨 Styles: {len(set(dataset['style']))}")
-        
-        if not args.no_push:
-            print(f"🌐 Uploaded to: https://huggingface.co/datasets/{args.repo_id}")
-        
-        if args.local_save:
-            print(f"💾 Local copy: {args.local_save}")
-        
-    except KeyboardInterrupt:
-        logger.warning("Dataset creation interrupted by user")
-        raise SystemExit(130)
+        logger.info("Dataset creation completed successfully")
+        logger.info(f"Total samples: {len(dataset)}")
+
     except Exception as e:
         logger.exception(f"Dataset creation failed: {e}")
         raise SystemExit(1)
