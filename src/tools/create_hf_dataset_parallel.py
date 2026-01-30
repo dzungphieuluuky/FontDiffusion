@@ -5,28 +5,24 @@ This module builds datasets from FontDiffusion outputs using streaming to preven
 RAM overflow, especially useful in constrained environments like Colab or Kaggle.
 Includes comparison image generation for visual inspection.
 
-Enhanced with multiprocessing for faster image processing and parallel upload.
+Enhanced with multiprocessing for faster image processing.
 """
 
 import json
 import logging
 from dataclasses import dataclass
-import os
 from pathlib import Path
 from typing import Any, Generator, Optional
 from multiprocessing import Pool, cpu_count
 from functools import partial
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import tempfile
 
 from datasets import Dataset, Features, Image as HFImage, Value
 from PIL import Image
-from huggingface_hub import HfApi
 
 from utilities import HFTqdm
 from filename_utils import compute_file_hash
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("DatasetCreator")
 
 
 @dataclass
@@ -37,6 +33,7 @@ class DatasetConfig:
     style_images_dir: Path
     repo_id: str
     split: str = "train"
+    config_name: Optional[str] = None  # Add this
     push_to_hub: bool = True
     private: bool = False
     token: Optional[str] = None
@@ -44,9 +41,6 @@ class DatasetConfig:
     resize_height: int = 256
     spacing: int = 10
     num_workers: int = None  # None = auto-detect
-    config_name: str = None
-    max_shard_size: str = "500MB"
-    parallel_upload_workers: int = 4  # Parallel shard upload workers
 
     def __post_init__(self):
         """Convert paths to Path if they're strings."""
@@ -57,17 +51,8 @@ class DatasetConfig:
         if self.num_workers is None:
             self.num_workers = max(1, cpu_count() - 1)
 
-
 def _resize_image(image: Image.Image, target_height: int) -> Image.Image:
-    """Resize image to target height while maintaining aspect ratio.
-
-    Args:
-        image: PIL Image to resize
-        target_height: Target height in pixels
-
-    Returns:
-        Resized PIL Image
-    """
+    """Resize image to target height while maintaining aspect ratio."""
     aspect_ratio = image.width / image.height
     new_width = int(target_height * aspect_ratio)
     return image.resize((new_width, target_height), Image.Resampling.LANCZOS)
@@ -80,18 +65,7 @@ def _create_comparison_image(
     resize_height: int,
     spacing: int,
 ) -> Optional[Image.Image]:
-    """Create side-by-side comparison image (content | style | target).
-
-    Args:
-        content_img: Content/character image
-        style_img: Style image
-        target_img: Target image
-        resize_height: Target height for resizing
-        spacing: Spacing between images
-
-    Returns:
-        Comparison PIL Image or None if creation fails
-    """
+    """Create side-by-side comparison image (content | style | target)."""
     try:
         content_resized = _resize_image(content_img, resize_height)
         style_resized = _resize_image(style_img, resize_height)
@@ -124,15 +98,7 @@ def _create_comparison_image(
 
 
 def _find_style_image(style_images_dir: Path, style: str) -> Optional[Path]:
-    """Find style image in the style images directory.
-
-    Args:
-        style_images_dir: Directory containing style images
-        style: Style name
-
-    Returns:
-        Path to style image or None if not found
-    """
+    """Find style image in the style images directory."""
     for ext in [".png", ".jpg", ".jpeg"]:
         style_path = style_images_dir / f"{style}{ext}"
         if style_path.exists():
@@ -148,18 +114,8 @@ def _process_single_sample(
     spacing: int,
 ) -> Optional[dict[str, Any]]:
     """Process a single sample (load images, create comparison).
-
+    
     This function is designed to be called in parallel via multiprocessing.
-
-    Args:
-        gen: Generation metadata dictionary
-        data_dir: Data directory path
-        style_images_dir: Style images directory path
-        resize_height: Height for comparison images
-        spacing: Spacing between images
-
-    Returns:
-        Sample dictionary or None if processing fails
     """
     char: str = gen.get("character", "")
     style: str = gen.get("style", "")
@@ -215,25 +171,14 @@ class DatasetBuilder:
     CHECKPOINT_FILE = "results_checkpoint.json"
 
     def __init__(self, config: DatasetConfig):
-        """Initialize the dataset builder.
-
-        Args:
-            config: Dataset configuration
-
-        Raises:
-            ValueError: If directory structure is invalid
-        """
+        """Initialize the dataset builder."""
         self.config = config
         self.data_dir = config.data_dir
         self.style_images_dir = config.style_images_dir
         self._validate_structure()
 
     def _validate_structure(self) -> None:
-        """Validate that all required directories and files exist.
-
-        Raises:
-            ValueError: If any required directory or file is missing
-        """
+        """Validate that all required directories and files exist."""
         for dir_name in self.REQUIRED_DIRS:
             dir_path = self.data_dir / dir_name
             if not dir_path.exists():
@@ -244,21 +189,12 @@ class DatasetBuilder:
             raise ValueError(f"Checkpoint file not found: {checkpoint_path}")
 
         if not self.style_images_dir.exists():
-            raise ValueError(
-                f"Style images directory not found: {self.style_images_dir}"
-            )
+            raise ValueError(f"Style images directory not found: {self.style_images_dir}")
 
         logger.info("Directory structure validated successfully")
 
     def _load_checkpoint(self) -> dict:
-        """Load and validate results checkpoint.
-
-        Returns:
-            Checkpoint data dictionary
-
-        Raises:
-            ValueError: If checkpoint is invalid or empty
-        """
+        """Load and validate results checkpoint."""
         checkpoint_path = self.data_dir / self.CHECKPOINT_FILE
 
         with checkpoint_path.open("r", encoding="utf-8") as f:
@@ -277,13 +213,7 @@ class DatasetBuilder:
         return data
 
     def _generate_samples_parallel(self) -> Generator[dict[str, Any], None, None]:
-        """Generate dataset samples using multiprocessing.
-
-        Yields:
-            Dictionary containing sample data with individual images and comparison
-
-        This generator uses multiprocessing to parallelize image loading and processing.
-        """
+        """Generate dataset samples using multiprocessing."""
         checkpoint: dict = self._load_checkpoint()
         generations: list = checkpoint["generations"]
 
@@ -333,11 +263,7 @@ class DatasetBuilder:
         logger.info(f"Successfully processed {processed} samples")
 
     def _generate_samples(self) -> Generator[dict[str, Any], None, None]:
-        """Generate dataset samples one at a time (single-threaded fallback).
-
-        Yields:
-            Dictionary containing sample data with individual images and comparison
-        """
+        """Generate dataset samples one at a time (single-threaded fallback)."""
         checkpoint: dict = self._load_checkpoint()
         generations: list = checkpoint["generations"]
 
@@ -371,17 +297,7 @@ class DatasetBuilder:
         logger.info(f"Successfully processed {processed} samples")
 
     def build_streaming(self, use_multiprocessing: bool = True) -> Dataset:
-        """Build dataset using streaming to minimize memory usage.
-
-        Args:
-            use_multiprocessing: Whether to use multiprocessing for speed
-
-        Returns:
-            HuggingFace Dataset created from generator
-
-        Raises:
-            ValueError: If no valid samples are found
-        """
+        """Build dataset using streaming to minimize memory usage."""
         logger.info(
             f"Building dataset with streaming (multiprocessing={use_multiprocessing})..."
         )
@@ -414,17 +330,7 @@ class DatasetBuilder:
         return dataset
 
     def build_batched(self, use_multiprocessing: bool = True) -> Dataset:
-        """Build dataset in batches for better control over memory usage.
-
-        Args:
-            use_multiprocessing: Whether to use multiprocessing for speed
-
-        Returns:
-            HuggingFace Dataset created from batched processing
-
-        Raises:
-            ValueError: If no valid samples are found
-        """
+        """Build dataset in batches for better control over memory usage."""
         logger.info(
             f"Building dataset with batching (multiprocessing={use_multiprocessing})..."
         )
@@ -490,11 +396,7 @@ class DatasetBuilder:
         return dataset
 
     def push_streaming(self, dataset: Dataset) -> None:
-        """Push dataset to Hugging Face Hub with streaming.
-
-        Args:
-            dataset: Dataset to push
-        """
+        """Push dataset to Hugging Face Hub with streaming."""
         if not self.config.push_to_hub:
             logger.info("Skipping push to Hub")
             return
@@ -504,141 +406,22 @@ class DatasetBuilder:
         dataset.push_to_hub(
             repo_id=self.config.repo_id,
             split=self.config.split,
-            config_name=self.config.config_name,
+            config_name=self.config.config_name,  # Add this
             private=self.config.private,
             token=self.config.token,
-            max_shard_size=self.config.max_shard_size,
-            num_proc=self.config.num_workers,  # Parallel shard writing
+            max_shard_size="500MB",
         )
 
         logger.info(
             f"Successfully pushed to https://huggingface.co/datasets/{self.config.repo_id}"
         )
-
-    def push_parallel(self, dataset: Dataset) -> None:
-        """Push dataset to Hub with parallel shard uploads for maximum speed.
-
-        This method manually manages shard creation and parallel uploads using
-        concurrent.futures for improved upload performance.
-
-        Args:
-            dataset: Dataset to push
-        """
-        if not self.config.push_to_hub:
-            logger.info("Skipping push to Hub")
-            return
-
-        logger.info(
-            f"Pushing dataset to {self.config.repo_id} with parallel uploads "
-            f"({self.config.parallel_upload_workers} workers)..."
-        )
-
-        api = HfApi(token=self.config.token)
-
-        # Create repository if it doesn't exist
-        try:
-            api.create_repo(
-                repo_id=self.config.repo_id,
-                repo_type="dataset",
-                private=self.config.private,
-                exist_ok=True,
-            )
-        except Exception as e:
-            logger.warning(f"Repository creation warning: {e}")
-
-        # Save shards to temporary directory
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_path = Path(tmp_dir)
-
-            logger.info("Saving dataset shards locally...")
-            dataset.save_to_disk(
-                str(tmp_path),
-                max_shard_size=self.config.max_shard_size,
-                num_proc=self.config.num_workers,
-            )
-
-            # Get all shard files
-            shard_files = list(tmp_path.glob("**/*"))
-            shard_files = [f for f in shard_files if f.is_file()]
-
-            logger.info(
-                f"Uploading {len(shard_files)} files in parallel "
-                f"(max {self.config.parallel_upload_workers} concurrent uploads)..."
-            )
-
-            # Upload shards in parallel using ThreadPoolExecutor
-            def upload_file(file_path: Path) -> tuple[str, bool]:
-                """Upload a single file to the Hub.
-
-                Args:
-                    file_path: Path to file to upload
-
-                Returns:
-                    Tuple of (relative_path, success)
-                """
-                try:
-                    relative_path = file_path.relative_to(tmp_path)
-                    path_in_repo = f"{self.config.split}/{relative_path}"
-
-                    api.upload_file(
-                        path_or_fileobj=str(file_path),
-                        path_in_repo=path_in_repo,
-                        repo_id=self.config.repo_id,
-                        repo_type="dataset",
-                        token=self.config.token,
-                    )
-                    return str(relative_path), True
-                except Exception as e:
-                    logger.error(f"Failed to upload {file_path.name}: {e}")
-                    return str(file_path.name), False
-
-            # Use ThreadPoolExecutor for parallel uploads
-            uploaded = 0
-            failed = 0
-
-            with ThreadPoolExecutor(
-                max_workers=self.config.parallel_upload_workers
-            ) as executor:
-                # Submit all upload tasks
-                futures = {
-                    executor.submit(upload_file, shard_path): shard_path
-                    for shard_path in shard_files
-                }
-
-                # Process completed uploads
-                for future in as_completed(futures):
-                    relative_path, success = future.result()
-                    if success:
-                        uploaded += 1
-                        if uploaded % 10 == 0 or uploaded == len(shard_files):
-                            logger.info(
-                                f"Upload progress: {uploaded}/{len(shard_files)} "
-                                f"({uploaded * 100 // len(shard_files)}%)"
-                            )
-                    else:
-                        failed += 1
-
-        if failed > 0:
-            logger.warning(f"Failed to upload {failed} files")
-
-        logger.info(
-            f"Successfully pushed {uploaded} files to "
-            f"https://huggingface.co/datasets/{self.config.repo_id}"
-        )
-
     def save_local_streaming(self, dataset: Dataset, output_path: Path) -> None:
-        """Save dataset to local disk with streaming.
-
-        Args:
-            dataset: Dataset to save
-            output_path: Local directory path
-        """
+        """Save dataset to local disk with streaming."""
         logger.info(f"Saving dataset to {output_path} with streaming...")
 
         dataset.save_to_disk(
             str(output_path),
-            max_shard_size=self.config.max_shard_size,
-            num_proc=self.config.num_workers,
+            max_shard_size="500MB",
         )
 
         logger.info("Dataset saved successfully")
@@ -649,8 +432,8 @@ def create_dataset(
     style_images_dir: str | Path,
     repo_id: str,
     split: str = "train",
+    config_name: Optional[str] = None,  # Add this parameter
     push_to_hub: bool = True,
-    config_name: str = "streaming",
     private: bool = False,
     token: Optional[str] = None,
     local_save_path: Optional[str | Path] = None,
@@ -660,9 +443,6 @@ def create_dataset(
     spacing: int = 10,
     num_workers: Optional[int] = None,
     use_multiprocessing: bool = True,
-    max_shard_size: str = "500MB",
-    parallel_upload: bool = True,
-    parallel_upload_workers: int = 4,
 ) -> Dataset:
     """Create and optionally push dataset to Hub with streaming support.
 
@@ -671,8 +451,8 @@ def create_dataset(
         style_images_dir: Path to directory containing style images
         repo_id: HuggingFace repository ID (e.g., 'username/dataset-name')
         split: Dataset split name (default: 'train')
+        config_name: Dataset configuration name (e.g., 'streaming', 'default')
         push_to_hub: Whether to push to HuggingFace Hub (default: True)
-        config_name: Dataset configuration name (default: 'streaming')
         private: Whether to make the repository private (default: False)
         token: HuggingFace API token (optional)
         local_save_path: Local path to save dataset (optional)
@@ -682,9 +462,6 @@ def create_dataset(
         spacing: Spacing between images in comparison (default: 10)
         num_workers: Number of worker processes (default: CPU count - 1)
         use_multiprocessing: Whether to use multiprocessing (default: True)
-        max_shard_size: Maximum shard size (default: '500MB')
-        parallel_upload: Use parallel shard uploads (default: True)
-        parallel_upload_workers: Number of parallel upload workers (default: 4)
 
     Returns:
         Created Dataset object
@@ -697,6 +474,7 @@ def create_dataset(
         style_images_dir=Path(style_images_dir),
         repo_id=repo_id,
         split=split,
+        config_name=config_name,  # Add this
         push_to_hub=push_to_hub,
         private=private,
         token=token,
@@ -704,9 +482,6 @@ def create_dataset(
         resize_height=resize_height,
         spacing=spacing,
         num_workers=num_workers,
-        config_name=config_name,
-        max_shard_size=max_shard_size,
-        parallel_upload_workers=parallel_upload_workers,
     )
 
     builder = DatasetBuilder(config)
@@ -720,13 +495,9 @@ def create_dataset(
         builder.save_local_streaming(dataset, Path(local_save_path))
 
     if push_to_hub:
-        if parallel_upload:
-            builder.push_parallel(dataset)
-        else:
-            builder.push_streaming(dataset)
+        builder.push_streaming(dataset)
 
     return dataset
-
 
 def main():
     """CLI entry point."""
@@ -737,20 +508,19 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Standard streaming with parallel upload
-  python create_hf_dataset_streaming.py --data-dir my_dataset/train \\
-    --style-images-dir style_images/ --repo-id user/dataset \\
-    --parallel-upload --parallel-upload-workers 4
+  # Upload to default config
+  python create_hf_dataset_parallel.py --data-dir my_dataset/train \\
+    --style-images-dir style_images/ --repo-id user/dataset
 
-  # High-speed processing and upload
-  python create_hf_dataset_streaming.py --data-dir my_dataset/train \\
+  # Upload to specific config
+  python create_hf_dataset_parallel.py --data-dir my_dataset/train \\
     --style-images-dir style_images/ --repo-id user/dataset \\
-    --num-workers 12 --batch-size 200 --parallel-upload-workers 6
-  
-  # Local save only (no upload)
-  python create_hf_dataset_streaming.py --data-dir my_dataset/train \\
+    --config-name streaming
+
+  # Upload high-resolution variant
+  python create_hf_dataset_parallel.py --data-dir my_dataset/train \\
     --style-images-dir style_images/ --repo-id user/dataset \\
-    --no-push --local-save ./output
+    --config-name high_res --resize-height 512
         """,
     )
     parser.add_argument(
@@ -778,6 +548,12 @@ Examples:
         help="Dataset split name (default: train)",
     )
     parser.add_argument(
+        "--config-name",
+        type=str,
+        default=None,
+        help="Dataset configuration name (e.g., 'streaming', 'default')",
+    )
+    parser.add_argument(
         "--private",
         action="store_true",
         help="Make repository private",
@@ -785,7 +561,6 @@ Examples:
     parser.add_argument(
         "--no-push",
         action="store_true",
-        default=False,
         help="Skip pushing to Hub",
     )
     parser.add_argument(
@@ -831,32 +606,7 @@ Examples:
     parser.add_argument(
         "--no-multiprocessing",
         action="store_true",
-        default=False,
         help="Disable multiprocessing (use single-threaded processing)",
-    )
-    parser.add_argument(
-        "--config-name",
-        type=str,
-        default="streaming",
-        help="Dataset config name (default: streaming)",
-    )
-    parser.add_argument(
-        "--max-shard-size",
-        type=str,
-        default="500MB",
-        help="Maximum shard size (default: 500MB)",
-    )
-    parser.add_argument(
-        "--parallel-upload",
-        action="store_true",
-        default=True,
-        help="Use parallel shard uploads for faster pushing",
-    )
-    parser.add_argument(
-        "--parallel-upload-workers",
-        type=int,
-        default=os.cpu_count() - 1,
-        help="Number of parallel upload workers (default: CPU count - 1)",
     )
 
     args = parser.parse_args()
@@ -867,8 +617,8 @@ Examples:
             style_images_dir=args.style_images_dir,
             repo_id=args.repo_id,
             split=args.split,
+            config_name=args.config_name,  # Add this
             push_to_hub=not args.no_push,
-            config_name=args.config_name,
             private=args.private,
             token=args.token,
             local_save_path=args.local_save,
@@ -878,16 +628,12 @@ Examples:
             spacing=args.spacing,
             num_workers=args.num_workers,
             use_multiprocessing=not args.no_multiprocessing,
-            max_shard_size=args.max_shard_size,
-            parallel_upload=args.parallel_upload,
-            parallel_upload_workers=args.parallel_upload_workers,
         )
         logger.info("Dataset creation completed successfully")
 
     except Exception as e:
         logger.exception(f"Dataset creation failed: {e}")
         raise SystemExit(1)
-
 
 if __name__ == "__main__":
     main()
