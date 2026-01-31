@@ -19,25 +19,24 @@ class TestFSTModuleIntegration:
 
     def test_fst_forward_backward_flow(self, device):
         """Test complete forward and backward pass through FST."""
-        feature_channels = [64, 128, 256, 512, 1024]
+        # MSSE output channels (matches paper architecture)
+        msse_output_channels = [64, 128, 256, 512, 1024]
         batch_size = 2
 
         fst = FontStyleTransformationModule(
-            feature_channels=feature_channels,
-            num_queries=128,
+            msse_output_channels=msse_output_channels,
+            num_queries=220,  # Paper default: 220 learnable + 36 spatial = 256 total
             query_dim=128,
-            num_scale_features=5,
             num_cross_attn_blocks=2,
             num_self_attn_blocks=2,
         ).to(device)
 
-        # Create input features
+        # Create input features matching MSSE output structure
         source_features = []
         target_features = []
-        spatial_size = 96
+        spatial_size = 48  # Start at 48 (MSSE uses AdaptiveAvgPool2d)
 
-        for ch in feature_channels:
-            spatial_size = spatial_size // 2
+        for ch in msse_output_channels:
             src = torch.randn(
                 batch_size,
                 ch,
@@ -56,6 +55,7 @@ class TestFSTModuleIntegration:
             )
             source_features.append(src)
             target_features.append(tgt)
+            spatial_size = spatial_size // 2  # Downsample for next scale
 
         # Forward pass
         output = fst(source_features, target_features)
@@ -64,9 +64,11 @@ class TestFSTModuleIntegration:
         loss = output.sum()
         loss.backward()
 
-        # Verify output shape
+        # Verify output shape: (B, N_L + H*W, C_last)
+        # N_L = 220, last spatial = 3x3 = 9, C_last = 1024
         assert output.shape[0] == batch_size
-        assert output.shape[2] == 1024
+        assert output.shape[1] == 220 + 9  # 229 total tokens
+        assert output.shape[2] == 1024  # Last scale channels
 
         # Verify gradients exist
         assert fst.learnable_queries.grad is not None
@@ -79,28 +81,29 @@ class TestFSTModuleIntegration:
         [
             (64, 64),
             (128, 128),
-            (256, 128),
+            (220, 128),  # Paper default
         ],
     )
     def test_fst_variable_configs(self, device, num_queries: int, query_dim: int):
         """Test FST with different configurations."""
+        msse_output_channels = [64, 128, 256, 512, 1024]
+        
         fst = FontStyleTransformationModule(
-            feature_channels=[64, 128, 256, 512, 1024],
+            msse_output_channels=msse_output_channels,
             num_queries=num_queries,
             query_dim=query_dim,
-            num_scale_features=5,
         ).to(device)
 
         source_features = []
         target_features = []
-        spatial_size = 96
+        spatial_size = 48
 
-        for ch in [64, 128, 256, 512, 1024]:
-            spatial_size = spatial_size // 2
+        for ch in msse_output_channels:
             src = torch.randn(2, ch, spatial_size, spatial_size, device=device)
             tgt = torch.randn(2, ch, spatial_size, spatial_size, device=device)
             source_features.append(src)
             target_features.append(tgt)
+            spatial_size = spatial_size // 2
 
         with torch.no_grad():
             output = fst(source_features, target_features)
@@ -154,7 +157,7 @@ class TestMSSEIntegration:
         all_same = all(
             torch.allclose(features_list[0], f, atol=1e-6) for f in features_list[1:]
         )
-        # In training mode with batch norm, we expect some variance
+        # In training mode with instance norm, we expect some variance
         # But we don't assert this strictly as it depends on architecture
 
 
@@ -167,11 +170,13 @@ class TestFSTWithMSSEPipeline:
             device
         )
 
+        # Get actual output channels from MSSE
+        msse_output_channels = msse.get_output_channels()
+
         fst = FontStyleTransformationModule(
-            feature_channels=[64, 128, 256, 512, 1024],
-            num_queries=128,
+            msse_output_channels=msse_output_channels,
+            num_queries=220,
             query_dim=128,
-            num_scale_features=5,
         ).to(device)
 
         # Source and target style images
@@ -184,11 +189,18 @@ class TestFSTWithMSSEPipeline:
             source_features = msse(style_source)
             target_features = msse(style_target)
 
+        # Verify feature channel dimensions match expectations
+        for i, (feat, expected_ch) in enumerate(zip(source_features, msse_output_channels)):
+            assert feat.shape[1] == expected_ch, (
+                f"Scale {i}: Expected {expected_ch} channels, got {feat.shape[1]}"
+            )
+
         # Process through FST
         fst_output = fst(source_features, target_features)
 
         # Verify shapes
         assert fst_output.shape[0] == 2
+        assert fst_output.shape[1] == 220 + 9  # 229 tokens
         assert fst_output.shape[2] == 1024
 
         # Verify no NaNs
@@ -200,24 +212,25 @@ class TestFSTGradientFlow:
 
     def test_fst_learnable_queries_gradients(self, device):
         """Verify learnable queries receive gradients."""
+        msse_output_channels = [64, 128, 256, 512, 1024]
+        
         fst = FontStyleTransformationModule(
-            feature_channels=[64, 128, 256, 512, 1024],
-            num_queries=128,
+            msse_output_channels=msse_output_channels,
+            num_queries=220,
             query_dim=128,
-            num_scale_features=5,
         ).to(device)
 
         # Create dummy inputs
         source_features = []
         target_features = []
-        spatial_size = 96
+        spatial_size = 48
 
-        for ch in [64, 128, 256, 512, 1024]:
-            spatial_size = spatial_size // 2
+        for ch in msse_output_channels:
             src = torch.randn(2, ch, spatial_size, spatial_size, device=device)
             tgt = torch.randn(2, ch, spatial_size, spatial_size, device=device)
             source_features.append(src)
             target_features.append(tgt)
+            spatial_size = spatial_size // 2
 
         output = fst(source_features, target_features)
         loss = output.sum()
@@ -229,23 +242,24 @@ class TestFSTGradientFlow:
 
     def test_fst_positional_encoding_gradients(self, device):
         """Verify positional encodings receive gradients."""
+        msse_output_channels = [64, 128, 256, 512, 1024]
+        
         fst = FontStyleTransformationModule(
-            feature_channels=[64, 128, 256, 512, 1024],
-            num_queries=128,
+            msse_output_channels=msse_output_channels,
+            num_queries=220,
             query_dim=128,
-            num_scale_features=5,
         ).to(device)
 
         source_features = []
         target_features = []
-        spatial_size = 96
+        spatial_size = 48
 
-        for ch in [64, 128, 256, 512, 1024]:
-            spatial_size = spatial_size // 2
+        for ch in msse_output_channels:
             src = torch.randn(2, ch, spatial_size, spatial_size, device=device)
             tgt = torch.randn(2, ch, spatial_size, spatial_size, device=device)
             source_features.append(src)
             target_features.append(tgt)
+            spatial_size = spatial_size // 2
 
         output = fst(source_features, target_features)
         loss = output.sum()
@@ -253,37 +267,42 @@ class TestFSTGradientFlow:
 
         # Each positional encoding should have gradient
         for i, pe in enumerate(fst.pos_encodings):
-            assert pe.grad is not None, f"PosEncoding {i} has no gradient"
+            # Check learnable parameters in AdaptivePositionalEncoding
+            assert pe.height_embed.grad is not None, f"PosEncoding {i} height has no gradient"
+            assert pe.width_embed.grad is not None, f"PosEncoding {i} width has no gradient"
+            assert pe.scale.grad is not None, f"PosEncoding {i} scale has no gradient"
 
     def test_fst_projection_layers_gradients(self, device):
         """Verify projection layers in FST receive gradients."""
+        msse_output_channels = [64, 128, 256, 512, 1024]
+        
         fst = FontStyleTransformationModule(
-            feature_channels=[64, 128, 256, 512, 1024],
-            num_queries=128,
+            msse_output_channels=msse_output_channels,
+            num_queries=220,
             query_dim=128,
-            num_scale_features=5,
         ).to(device)
 
         source_features = []
         target_features = []
-        spatial_size = 96
+        spatial_size = 48
 
-        for ch in [64, 128, 256, 512, 1024]:
-            spatial_size = spatial_size // 2
+        for ch in msse_output_channels:
             src = torch.randn(2, ch, spatial_size, spatial_size, device=device)
             tgt = torch.randn(2, ch, spatial_size, spatial_size, device=device)
             source_features.append(src)
             target_features.append(tgt)
+            spatial_size = spatial_size // 2
 
         output = fst(source_features, target_features)
         loss = output.sum()
         loss.backward()
 
-        # Check all MLPs have gradients
-        for name, param in fst.mlp_channel_adjust.named_parameters():
-            assert param.grad is not None, f"MLP param {name} has no gradient"
+        # Check projection layers have gradients
+        for name, param in fst.projection.named_parameters():
+            assert param.grad is not None, f"Projection param {name} has no gradient"
 
-        assert fst.residual_proj.weight.grad is not None
+        for name, param in fst.residual_proj.named_parameters():
+            assert param.grad is not None, f"Residual proj param {name} has no gradient"
 
 
 class TestFSTOverfitting:
@@ -291,27 +310,28 @@ class TestFSTOverfitting:
 
     def test_fst_batch_overfitting(self, device):
         """Test FST can memorize and overfit a small batch."""
+        msse_output_channels = [64, 128, 256, 512, 1024]
+        
         fst = FontStyleTransformationModule(
-            feature_channels=[64, 128, 256, 512, 1024],
-            num_queries=128,
+            msse_output_channels=msse_output_channels,
+            num_queries=220,
             query_dim=128,
-            num_scale_features=5,
         ).to(device)
 
         # Create fixed batch
         source_features = []
         target_features = []
-        spatial_size = 96
+        spatial_size = 48
 
-        for ch in [64, 128, 256, 512, 1024]:
-            spatial_size = spatial_size // 2
+        for ch in msse_output_channels:
             src = torch.randn(2, ch, spatial_size, spatial_size, device=device)
             tgt = torch.randn(2, ch, spatial_size, spatial_size, device=device)
             source_features.append(src)
             target_features.append(tgt)
+            spatial_size = spatial_size // 2
 
-        # Create target output
-        target_output = torch.randn(2, 256 + 9, 1024, device=device)
+        # Create target output (229 tokens, 1024 dim)
+        target_output = torch.randn(2, 229, 1024, device=device)
 
         # Training loop
         optimizer = torch.optim.Adam(fst.parameters(), lr=1e-2)
@@ -351,13 +371,16 @@ class TestMSSEOverfitting:
 
         x = torch.randn(2, 1, 96, 96, device=device)
 
-        # Create target features
+        # Get actual output channels
+        output_channels = msse.get_output_channels()
+
+        # Create target features with correct dimensions
         target_features = []
-        spatial_size = 96
-        for _ in range(3):
-            spatial_size = spatial_size // 2
+        for i, ch in enumerate(output_channels):
+            # MSSE uses AdaptiveAvgPool2d, so spatial size is 48//(2^i)
+            spatial_size = 48 // (2**i)
             target_features.append(
-                torch.randn(2, 32 * (2**_), spatial_size, spatial_size, device=device)
+                torch.randn(2, ch, spatial_size, spatial_size, device=device)
             )
 
         optimizer = torch.optim.Adam(msse.parameters(), lr=1e-2)
@@ -369,10 +392,8 @@ class TestMSSEOverfitting:
 
             features = msse(x)
 
-            # Compute loss (resize targets if needed)
-            loss = 0
-            for feat, target in zip(features, target_features):
-                loss += loss_fn(feat, target)
+            # Compute loss
+            loss = sum(loss_fn(feat, target) for feat, target in zip(features, target_features))
 
             loss.backward()
             optimizer.step()
@@ -381,6 +402,37 @@ class TestMSSEOverfitting:
         print(f"\nMSSE overfitting loss: {losses[0]:.6f} -> {losses[-1]:.6f}")
 
         assert losses[-1] < losses[0], "MSSE should be able to overfit"
+
+
+class TestFSTChannelValidation:
+    """Test that FST properly validates channel dimensions."""
+
+    def test_fst_rejects_mismatched_channels(self, device):
+        """Test FST raises error when feature channels don't match expected."""
+        msse_output_channels = [64, 128, 256, 512, 1024]
+        
+        fst = FontStyleTransformationModule(
+            msse_output_channels=msse_output_channels,
+            num_queries=220,
+            query_dim=128,
+        ).to(device)
+
+        # Create features with WRONG channel dimensions
+        source_features = []
+        target_features = []
+        spatial_size = 48
+        wrong_channels = [32, 64, 128, 256, 512]  # Intentionally wrong
+
+        for ch in wrong_channels:
+            src = torch.randn(2, ch, spatial_size, spatial_size, device=device)
+            tgt = torch.randn(2, ch, spatial_size, spatial_size, device=device)
+            source_features.append(src)
+            target_features.append(tgt)
+            spatial_size = spatial_size // 2
+
+        # Should raise ValueError with descriptive message
+        with pytest.raises(ValueError, match="Expected .* channels, got"):
+            fst(source_features, target_features)
 
 
 if __name__ == "__main__":

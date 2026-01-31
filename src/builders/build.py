@@ -90,10 +90,9 @@ def build_fst(args):
         feature_channels = [int(x.strip()) for x in feature_channels.split(",")]
 
     fst_module = FontStyleTransformationModule(
-        feature_channels=feature_channels,
         num_queries=args.fst_num_queries,
         query_dim=args.fst_query_dim,
-        num_scale_features=args.fst_num_scales,
+        msse_output_channels=feature_channels,
     )
     print(
         f"✓ Built FST module (queries={args.fst_num_queries}, dim={args.fst_query_dim})"

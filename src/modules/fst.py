@@ -240,8 +240,8 @@ class FontStyleTransformationModule(nn.Module):
             Style transformation features of shape (B, N_L + h_{n_s}*w_{n_s}, c_{n_s})
         """
         # Validate input dimensions
-        assert len(source_features) == len(target_features) == self.num_scale_features
-        assert len(source_features) == len(self.feature_channels)
+        assert len(source_features) == len(target_features) == self.num_scales
+        assert len(source_features) == len(self.msse_channels)
 
         batch_size = source_features[0].shape[0]
         queries = repeat(self.learnable_queries, "n d -> b n d", b=batch_size)
@@ -251,7 +251,7 @@ class FontStyleTransformationModule(nn.Module):
         # Process each scale i
         for i, (f_src, f_tgt) in enumerate(zip(source_features, target_features)):
             # Validate feature dimensions match expected channels
-            expected_channels = self.feature_channels[i]
+            expected_channels = self.msse_channels[i]
             actual_channels = f_src.shape[1]
 
             if actual_channels != expected_channels:
@@ -292,7 +292,7 @@ class FontStyleTransformationModule(nn.Module):
             L_concat = block(L_concat)
 
         # MLP to adjust channel size to c_{n_s} (1024)
-        L_transformed = self.mlp_channel_adjust(L_concat)  # (B, N_L, 1024)
+        L_transformed = self.projection(L_concat)  # (B, N_L, 1024)
 
         # Residual connection: concatenate with last-scale target feature (Eq. 9)
         last_feature = target_features[-1]  # f_{y_r}^{s,n_s}
