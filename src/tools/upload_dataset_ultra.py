@@ -10,6 +10,8 @@ import json
 import logging
 import time
 import os
+import mmap
+import pickle
 import argparse
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,6 +25,8 @@ import multiprocessing as mp
 
 from datasets import Dataset, Features, Image as HFImage, Value
 from PIL import Image, ImageFile
+import cv2
+import numpy as np
 
 # Enable PIL optimizations
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -97,7 +101,7 @@ class ThreeStageParallelBuilder:
         
         # Cache for style images (loaded once, used many times)
         self.style_cache: Dict[str, Image.Image] = {}
-        self._preload_style_images()
+        self._preload_style_images_mmap()
         
         # Path cache
         self.path_cache: Dict[str, Dict[str, Path]] = {}
@@ -110,6 +114,32 @@ class ThreeStageParallelBuilder:
         
         self._validate_structure()
 
+    def _preload_style_images_mmap(self):
+        """Preload styles with memory-mapped cache."""
+        cache_path = self.style_images_dir / ".style_cache.mmap"
+        
+        if cache_path.exists():
+            # Load from mmap (instant)
+            with open(cache_path, 'rb') as f:
+                with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as m:
+                    self.style_cache = pickle.loads(m.read())
+            logger.info(f"Loaded {len(self.style_cache)} styles from mmap cache")
+            return
+        
+        # Build cache (first run only)
+        self.style_cache = {}
+        for ext in [".png", ".jpg", ".jpeg"]:
+            for style_file in self.style_images_dir.glob(f"*{ext}"):
+                style_name = style_file.stem
+                try:
+                    self.style_cache[style_name] = Image.open(style_file).convert("RGB")
+                except Exception as e:
+                    logger.warning(f"Failed to load {style_file}: {e}")
+        
+        # Save to mmap
+        with open(cache_path, 'wb') as f:
+            f.write(pickle.dumps(self.style_cache))
+        logger.info(f"Created mmap cache with {len(self.style_cache)} styles")
     def _preload_style_images(self):
         """Preload all style images into memory."""
         logger.info("Preloading style images...")
@@ -198,43 +228,43 @@ class ThreeStageParallelBuilder:
         return generations, metadata
 
     # ===== STAGE 1: I/O - Image Loading =====
-    def _load_images_batch(self, batch: List[Dict]) -> List[Optional[Dict]]:
-        """Load images for a batch of samples (I/O-bound)."""
+    def _load_images_batch(self, batch: list[dict]) -> list[Optional[dict]]:
+        """Load images lazily (paths only, not pixels)."""
         loaded_batch = []
         
         for gen in batch:
             char = gen.get("character", "")
             style = gen.get("style", "")
             
-            # Get paths from cache
             content_path = self.path_cache['content'].get(char)
             target_path = self.path_cache['target'].get(style, {}).get(char)
-            style_img = self.style_cache.get(style)
             
-            if not all([content_path, target_path, style_img]):
+            if not all([content_path, target_path, style in self.style_cache]):
                 loaded_batch.append(None)
                 continue
             
-            try:
-                # Load images
-                content_img = Image.open(content_path).convert("RGB")
-                target_img = Image.open(target_path).convert("RGB")
-                
-                loaded_batch.append({
-                    'char': char,
-                    'style': style,
-                    'font': gen.get("font", "unknown"),
-                    'content_img': content_img,
-                    'target_img': target_img,
-                    'style_img': style_img,
-                    'content_path': str(content_path.relative_to(self.data_dir)),
-                    'target_path': str(target_path.relative_to(self.data_dir)),
-                })
-            except Exception as e:
-                logger.debug(f"Failed to load images for {char}/{style}: {e}")
-                loaded_batch.append(None)
+            # ✅ Don't load pixels yet — just store paths
+            loaded_batch.append({
+                'char': char,
+                'style': style,
+                'font': gen.get("font", "unknown"),
+                'content_path': content_path,
+                'target_path': target_path,
+                'style_key': style,
+            })
         
         return loaded_batch
+
+    def _resize_image_fast(self, img: Image.Image, new_width: int, new_height: int) -> Image.Image:
+        """Ultra-fast resize using OpenCV with zero-copy."""
+        # Convert PIL -> NumPy (zero-copy)
+        img_array = np.asarray(img)
+        
+        # OpenCV resize (3-5x faster than PIL LANCZOS)
+        resized = cv2.resize(img_array, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+        
+        # Convert back to PIL
+        return Image.fromarray(resized)
 
     # ===== STAGE 2: CPU - Image Processing =====
     def _process_images_batch(self, batch: List[Dict]) -> List[Optional[Dict]]:
@@ -251,10 +281,14 @@ class ThreeStageParallelBuilder:
                 char = loaded['char']
                 style = loaded['style']
                 font = loaded['font']
-                content_img = loaded['content_img']
-                target_img = loaded['target_img']
-                style_img = loaded['style_img']
+                content_path = loaded['content_path']
+                target_path = loaded['target_path']
+                style_key = loaded['style_key']
                 
+                content_img = Image.open(loaded['content_path']).convert("RGB")
+                target_img = Image.open(loaded['target_path']).convert("RGB")
+                style_img = self.style_cache[loaded['style_key']]
+
                 # Calculate dimensions for resizing
                 c_width, c_height = content_img.size
                 s_width, s_height = style_img.size
@@ -266,12 +300,9 @@ class ThreeStageParallelBuilder:
                 s_new_width = int(s_width * (self.resize_height / s_height))
                 t_new_width = int(t_width * (self.resize_height / t_height))
                 
-                content_resized = content_img.resize((c_new_width, self.resize_height), 
-                                                    Image.Resampling.LANCZOS)
-                style_resized = style_img.resize((s_new_width, self.resize_height), 
-                                                Image.Resampling.LANCZOS)
-                target_resized = target_img.resize((t_new_width, self.resize_height), 
-                                                  Image.Resampling.LANCZOS)
+                content_resized = self._resize_image_fast(content_img, c_new_width, self.resize_height)
+                style_resized = self._resize_image_fast(style_img, s_new_width, self.resize_height)
+                target_resized = self._resize_image_fast(target_img, t_new_width, self.resize_height)
                 
                 # Create comparison image
                 total_width = c_new_width + s_new_width + t_new_width + 2 * self.spacing
@@ -448,7 +479,27 @@ class ThreeStageParallelBuilder:
         except Exception as e:
             logger.error(f"Failed to upload chunk {chunk_id}: {e}")
             return len(chunk), False
-
+        
+    def push_to_hub_streaming(self, dataset: Dataset) -> None:
+        """Stream upload with Arrow (no temp files)."""
+        if not self.config.push_to_hub:
+            return
+        
+        logger.info(f"Streaming dataset to {self.config.repo_id}...")
+        
+        # ✅ Direct streaming upload (no chunking)
+        dataset.push_to_hub(
+            repo_id=self.config.repo_id,
+            split=self.config.split,
+            config_name=self.config.config_name,
+            private=self.config.private,
+            token=self.config.token,
+            embed_external_files=False,  # Don't re-encode images
+            num_shards=self.upload_workers,  # Parallel shards
+        )
+        
+        logger.info(f"Streamed to https://huggingface.co/datasets/{self.config.repo_id}")
+    
     def push_to_hub_parallel(self, dataset: Dataset) -> None:
         """Push dataset to HuggingFace Hub with parallel upload."""
         if not self.config.push_to_hub:
