@@ -229,6 +229,7 @@ def run_sample_distributed(remaining_args: list[str]) -> int:
         logger.error(f"Error in sample_distributed: {e}", exc_info=True)
         return 1
 
+
 def save_sampling_config(args: Namespace, output_path: str) -> None:
     """Save sampling configuration to a text file.
 
@@ -237,6 +238,7 @@ def save_sampling_config(args: Namespace, output_path: str) -> None:
         output_path: Path to save the configuration file
     """
     save_args_to_yaml(args, output_path)
+
 
 def main() -> int:
     """Main entry point for inference operations.

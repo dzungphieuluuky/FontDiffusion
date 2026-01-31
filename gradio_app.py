@@ -118,8 +118,10 @@ if __name__ == "__main__":
         with gr.Row():
             with gr.Column(scale=1):
                 gr.Markdown("## Example 1️⃣: Source Image and Reference Image")
-                gr.Markdown("### In this mode, we provide both the source image and \
-                            the reference image for you to try our demo!")
+                gr.Markdown(
+                    "### In this mode, we provide both the source image and \
+                            the reference image for you to try our demo!"
+                )
                 gr.Examples(
                     examples=[
                         [
@@ -158,9 +160,11 @@ if __name__ == "__main__":
                 )
             with gr.Column(scale=1):
                 gr.Markdown("## Example 3️⃣: Reference Image")
-                gr.Markdown("### In this mode, we provide only the reference image, \
+                gr.Markdown(
+                    "### In this mode, we provide only the reference image, \
                             you can upload your own source image or you choose the character above \
-                            to try our demo!")
+                            to try our demo!"
+                )
                 gr.Examples(
                     examples=[
                         "figures/ref_imgs/ref_闡.jpg",

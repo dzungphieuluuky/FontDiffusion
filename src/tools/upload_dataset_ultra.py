@@ -33,9 +33,12 @@ Image.MAX_IMAGE_PIXELS = None
 try:
     from filename_utils import compute_file_hash
 except ImportError:
+
     def compute_file_hash(char: str, style: str, font: str) -> str:
         import hashlib
+
         return hashlib.md5(f"{char}_{style}_{font}".encode()).hexdigest()
+
 
 logger = logging.getLogger(__name__)
 
@@ -50,14 +53,14 @@ _WORKER_STYLE_CACHE: Optional[dict[str, Image.Image]] = None
 def _get_worker_style_cache(style_images_dir: str) -> dict[str, Image.Image]:
     """Lazy-load style cache in each worker process (OS-level caching)."""
     global _WORKER_STYLE_CACHE
-    
+
     if _WORKER_STYLE_CACHE is not None:
         return _WORKER_STYLE_CACHE
-    
+
     # First access in this worker: load styles
     _WORKER_STYLE_CACHE = {}
     style_dir = Path(style_images_dir)
-    
+
     for ext in [".png", ".jpg", ".jpeg"]:
         for style_file in style_dir.glob(f"*{ext}"):
             style_name = style_file.stem
@@ -65,13 +68,14 @@ def _get_worker_style_cache(style_images_dir: str) -> dict[str, Image.Image]:
                 _WORKER_STYLE_CACHE[style_name] = Image.open(style_file).convert("RGB")
             except Exception as e:
                 logger.debug(f"Worker failed to load {style_file}: {e}")
-    
+
     return _WORKER_STYLE_CACHE
 
 
 # ============================================================================
 # STATELESS WORKER FUNCTION (zero-copy IPC)
 # ============================================================================
+
 
 def _process_sample_worker(
     char: str,
@@ -83,7 +87,7 @@ def _process_sample_worker(
     spacing: int,
 ) -> Optional[dict]:
     """Stateless worker function with dynamic path inference (no pre-scanning).
-    
+
     Optimizations:
     - Zero-copy IPC: only primitives passed from main process
     - Worker-local caching: lazy-load styles on first access
@@ -96,43 +100,45 @@ def _process_sample_worker(
         data_path = Path(data_dir)
         content_path = data_path / "ContentImage" / f"{char}.png"
         target_path = data_path / "TargetImage" / style / f"{style}+{char}.png"
-        
+
         # Check existence (OS-level cache makes this fast)
         if not content_path.exists() or not target_path.exists():
             return None
-        
+
         # Lazy-load style cache in this worker
         style_cache = _get_worker_style_cache(style_images_dir)
         if style not in style_cache:
             return None
-        
+
         # Load images
         content_img = Image.open(content_path).convert("RGB")
         target_img = Image.open(target_path).convert("RGB")
         style_img = style_cache[style]
-        
+
         # Calculate resize dimensions
         c_width, c_height = content_img.size
         t_width, t_height = target_img.size
         s_width, s_height = style_img.size
-        
+
         c_new_width = int(c_width * (resize_height / c_height))
         s_new_width = int(s_width * (resize_height / s_height))
         t_new_width = int(t_width * (resize_height / t_height))
-        
+
         # OpenCV resizing (6x faster than PIL LANCZOS)
         content_resized = _resize_image_opencv(content_img, c_new_width, resize_height)
         style_resized = _resize_image_opencv(style_img, s_new_width, resize_height)
         target_resized = _resize_image_opencv(target_img, t_new_width, resize_height)
-        
+
         # Create comparison image
         total_width = c_new_width + s_new_width + t_new_width + 2 * spacing
-        comparison = Image.new("RGB", (total_width, resize_height), color=(255, 255, 255))
-        
+        comparison = Image.new(
+            "RGB", (total_width, resize_height), color=(255, 255, 255)
+        )
+
         comparison.paste(content_resized, (0, 0))
         comparison.paste(style_resized, (c_new_width + spacing, 0))
         comparison.paste(target_resized, (c_new_width + s_new_width + 2 * spacing, 0))
-        
+
         # Return native PIL objects (Arrow handles serialization)
         return {
             "character": char,
@@ -145,16 +151,20 @@ def _process_sample_worker(
             "content_hash": compute_file_hash(char, "", font),
             "target_hash": compute_file_hash(char, style, font),
         }
-        
+
     except Exception as e:
         logger.debug(f"Worker failed to process {char}/{style}: {e}")
         return None
 
 
-def _resize_image_opencv(img: Image.Image, new_width: int, new_height: int) -> Image.Image:
+def _resize_image_opencv(
+    img: Image.Image, new_width: int, new_height: int
+) -> Image.Image:
     """Ultra-fast resize using OpenCV (6x faster than PIL LANCZOS)."""
     img_array = np.asarray(img)
-    resized = cv2.resize(img_array, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+    resized = cv2.resize(
+        img_array, (new_width, new_height), interpolation=cv2.INTER_LINEAR
+    )
     return Image.fromarray(resized)
 
 
@@ -162,9 +172,11 @@ def _resize_image_opencv(img: Image.Image, new_width: int, new_height: int) -> I
 # DATASET BUILDER (main thread orchestration)
 # ============================================================================
 
+
 @dataclass
 class DatasetConfig:
     """Configuration for dataset creation."""
+
     data_dir: Path
     style_images_dir: Path
     repo_id: str
@@ -186,10 +198,10 @@ class DatasetConfig:
 
 class UltraFastDatasetBuilder:
     """Ultra-optimized dataset builder using stateless workers and native Arrow."""
-    
+
     REQUIRED_DIRS = ["ContentImage", "TargetImage"]
     CHECKPOINT_FILE = "results_checkpoint.json"
-    
+
     def __init__(self, config: DatasetConfig):
         """Initialize with minimal state (no heavy pre-loading)."""
         self.config = config
@@ -197,18 +209,18 @@ class UltraFastDatasetBuilder:
         self.style_images_dir = config.style_images_dir
         self.resize_height = config.resize_height
         self.spacing = config.spacing
-        
+
         # Auto-tune performance parameters
         self.cpu_count = os.cpu_count() or 4
         self.num_proc = max(1, self.cpu_count)
         self.process_batch_size = 1000  # Large batches reduce IPC overhead
-        
+
         # Validate structure
         self._validate_structure()
-        
+
         # Load checkpoint (lightweight JSON only)
         self.generations = self._load_checkpoint()
-        
+
         logger.info(f"Ultra-fast pipeline initialized:")
         logger.info(f"  Total generations: {len(self.generations)}")
         logger.info(f"  CPU workers: {self.num_proc} processes")
@@ -228,27 +240,29 @@ class UltraFastDatasetBuilder:
             raise ValueError(f"Checkpoint file not found: {checkpoint_path}")
 
         if not self.style_images_dir.exists():
-            raise ValueError(f"Style images directory not found: {self.style_images_dir}")
+            raise ValueError(
+                f"Style images directory not found: {self.style_images_dir}"
+            )
 
         logger.info("Directory structure validated")
 
     def _load_checkpoint(self) -> list[dict]:
         """Load checkpoint generations (single source of truth)."""
         checkpoint_path = self.data_dir / self.CHECKPOINT_FILE
-        
-        with open(checkpoint_path, 'r', encoding='utf-8') as f:
+
+        with open(checkpoint_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        
+
         generations = data.get("generations", [])
         if not generations:
             raise ValueError("No generations found in checkpoint")
-        
+
         logger.info(f"Loaded {len(generations)} generations from checkpoint")
         return generations
 
     def _process_batch(self, batch: dict) -> dict:
         """Process batch using stateless workers (called by Dataset.map()).
-        
+
         This is the bridge function that:
         1. Extracts lightweight config from batch
         2. Calls stateless worker function
@@ -265,7 +279,7 @@ class UltraFastDatasetBuilder:
             "content_hash": [],
             "target_hash": [],
         }
-        
+
         # Process each sample in the batch
         batch_size = len(batch["character"])
         for i in range(batch_size):
@@ -279,45 +293,51 @@ class UltraFastDatasetBuilder:
                 resize_height=self.resize_height,
                 spacing=self.spacing,
             )
-            
+
             if processed:
                 for key in results.keys():
                     results[key].append(processed[key])
-        
+
         return results
 
     def build(self) -> Dataset:
         """Build dataset using map() for native parallel processing."""
         logger.info("Building dataset with ultra-fast stateless workers...")
-        
+
         start_time = time.time()
-        
+
         # Step 1: Create thin metadata-only dataset from checkpoint
-        logger.info(f"Creating metadata dataset from {len(self.generations)} generations...")
+        logger.info(
+            f"Creating metadata dataset from {len(self.generations)} generations..."
+        )
         metadata = {
             "character": [g.get("character", "") for g in self.generations],
             "style": [g.get("style", "") for g in self.generations],
             "font": [g.get("font", "unknown") for g in self.generations],
         }
-        
+
         thin_dataset = Dataset.from_dict(metadata)
         logger.info(f"Metadata dataset created: {len(thin_dataset)} samples")
-        
+
         # Step 2: Use map() for parallel processing with stateless workers
-        logger.info(f"Processing images with {self.num_proc} workers (batch size: {self.process_batch_size})...")
-        
-        features = Features({
-            "character": Value("string"),
-            "style": Value("string"),
-            "font": Value("string"),
-            "content_image": HFImage(),
-            "style_image": HFImage(),
-            "target_image": HFImage(),
-            "comparison_image": HFImage(),
-            "content_hash": Value("string"),
-            "target_hash": Value("string"),
-        })
-        
+        logger.info(
+            f"Processing images with {self.num_proc} workers (batch size: {self.process_batch_size})..."
+        )
+
+        features = Features(
+            {
+                "character": Value("string"),
+                "style": Value("string"),
+                "font": Value("string"),
+                "content_image": HFImage(),
+                "style_image": HFImage(),
+                "target_image": HFImage(),
+                "comparison_image": HFImage(),
+                "content_hash": Value("string"),
+                "target_hash": Value("string"),
+            }
+        )
+
         # Use map() with stateless workers (zero-copy IPC + native Arrow)
         dataset = thin_dataset.map(
             self._process_batch,
@@ -328,17 +348,21 @@ class UltraFastDatasetBuilder:
             remove_columns=thin_dataset.column_names,
             desc="Processing with stateless workers + native Arrow",
         )
-        
+
         # Filter out failed samples
         original_size = len(dataset)
-        dataset = dataset.filter(lambda x: x["character"] is not None, num_proc=self.num_proc)
+        dataset = dataset.filter(
+            lambda x: x["character"] is not None, num_proc=self.num_proc
+        )
         filtered_count = original_size - len(dataset)
-        
+
         build_time = time.time() - start_time
-        
-        logger.info(f"Dataset built: {len(dataset)} valid samples ({filtered_count} filtered) in {build_time:.2f}s")
-        logger.info(f"Processing speed: {len(dataset)/build_time:.1f} samples/s")
-        
+
+        logger.info(
+            f"Dataset built: {len(dataset)} valid samples ({filtered_count} filtered) in {build_time:.2f}s"
+        )
+        logger.info(f"Processing speed: {len(dataset) / build_time:.1f} samples/s")
+
         return dataset
 
     def push_to_hub_streaming(self, dataset: Dataset) -> None:
@@ -346,10 +370,10 @@ class UltraFastDatasetBuilder:
         if not self.config.push_to_hub:
             logger.info("Skipping push to Hub")
             return
-        
+
         logger.info(f"Streaming dataset to {self.config.repo_id}...")
         start_time = time.time()
-        
+
         try:
             dataset.push_to_hub(
                 repo_id=self.config.repo_id,
@@ -360,11 +384,15 @@ class UltraFastDatasetBuilder:
                 embed_external_files=False,
                 num_shards=max(1, self.cpu_count * 2),
             )
-            
+
             upload_time = time.time() - start_time
-            logger.info(f"Upload completed in {upload_time:.2f}s ({len(dataset)/upload_time:.1f} samples/s)")
-            logger.info(f"Dataset: https://huggingface.co/datasets/{self.config.repo_id}")
-            
+            logger.info(
+                f"Upload completed in {upload_time:.2f}s ({len(dataset) / upload_time:.1f} samples/s)"
+            )
+            logger.info(
+                f"Dataset: https://huggingface.co/datasets/{self.config.repo_id}"
+            )
+
         except Exception as e:
             logger.error(f"Upload failed: {e}")
             raise
@@ -373,9 +401,9 @@ class UltraFastDatasetBuilder:
         """Save dataset to local disk."""
         logger.info(f"Saving dataset to {output_path}...")
         start_time = time.time()
-        
+
         dataset.save_to_disk(str(output_path))
-        
+
         save_time = time.time() - start_time
         logger.info(f"Dataset saved in {save_time:.2f}s")
 
@@ -383,6 +411,7 @@ class UltraFastDatasetBuilder:
 # ============================================================================
 # PUBLIC API (maintains same interface for users)
 # ============================================================================
+
 
 def create_dataset_ultra(
     data_dir: str | Path,
@@ -398,16 +427,16 @@ def create_dataset_ultra(
     spacing: int = 10,
 ) -> Dataset:
     """Create dataset with ultra-fast processing and stateless workers.
-    
+
     Key optimizations:
     - Stateless workers with zero-copy IPC (no pickle overhead)
     - Per-worker local caching (lazy style loading)
     - Dynamic path inference (no pre-scanning filesystem)
     - OpenCV resizing (6x faster than PIL)
     - Native Arrow serialization (no manual encoding)
-    
+
     Expected speedup: 50-100x faster than baseline
-    
+
     Args:
         data_dir: Path to data directory (ContentImage/ and TargetImage/)
         style_images_dir: Path to style images directory
@@ -420,7 +449,7 @@ def create_dataset_ultra(
         local_save_path: Local path to save dataset
         resize_height: Height for comparison images
         spacing: Spacing between images in comparison
-    
+
     Returns:
         Created Dataset object
     """
@@ -436,16 +465,16 @@ def create_dataset_ultra(
         resize_height=resize_height,
         spacing=spacing,
     )
-    
+
     builder = UltraFastDatasetBuilder(config)
     dataset = builder.build()
-    
+
     if local_save_path:
         builder.save_local(dataset, Path(local_save_path))
-    
+
     if push_to_hub:
         builder.push_to_hub_streaming(dataset)
-    
+
     return dataset
 
 
@@ -479,82 +508,60 @@ Optimizations Applied:
 Expected speedup: 50-100x faster than baseline!
         """,
     )
-    
+
     # Required arguments
     parser.add_argument(
         "--data-dir",
         required=True,
-        help="Path to data directory (must contain ContentImage/ and TargetImage/)"
+        help="Path to data directory (must contain ContentImage/ and TargetImage/)",
     )
     parser.add_argument(
-        "--style-images-dir",
-        required=True,
-        help="Path to style images directory"
+        "--style-images-dir", required=True, help="Path to style images directory"
     )
     parser.add_argument(
         "--repo-id",
         required=True,
-        help="HuggingFace repository ID (username/dataset-name)"
+        help="HuggingFace repository ID (username/dataset-name)",
     )
-    
+
     # Optional arguments
     parser.add_argument(
-        "--split",
-        default="train",
-        help="Dataset split name (default: train)"
+        "--split", default="train", help="Dataset split name (default: train)"
+    )
+    parser.add_argument("--config-name", help="Dataset configuration name")
+    parser.add_argument(
+        "--no-push", action="store_true", help="Skip pushing to HuggingFace Hub"
     )
     parser.add_argument(
-        "--config-name",
-        help="Dataset configuration name"
+        "--private", action="store_true", help="Make repository private"
     )
-    parser.add_argument(
-        "--no-push",
-        action="store_true",
-        help="Skip pushing to HuggingFace Hub"
-    )
-    parser.add_argument(
-        "--private",
-        action="store_true",
-        help="Make repository private"
-    )
-    parser.add_argument(
-        "--local-save",
-        help="Save dataset locally to this path"
-    )
-    parser.add_argument(
-        "--token",
-        help="HuggingFace API token"
-    )
+    parser.add_argument("--local-save", help="Save dataset locally to this path")
+    parser.add_argument("--token", help="HuggingFace API token")
     parser.add_argument(
         "--resize-height",
         type=int,
         default=256,
-        help="Height for comparison images (default: 256)"
+        help="Height for comparison images (default: 256)",
     )
     parser.add_argument(
         "--spacing",
         type=int,
         default=10,
-        help="Spacing between images in comparison (default: 10)"
+        help="Spacing between images in comparison (default: 10)",
     )
-    parser.add_argument(
-        "--verbose",
-        action="store_true",
-        help="Enable verbose logging"
-    )
-    
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
+
     args = parser.parse_args()
-    
+
     # Setup logging
     log_level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(
-        level=log_level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
-    
+
     try:
         start_time = time.time()
-        
+
         dataset = create_dataset_ultra(
             data_dir=args.data_dir,
             style_images_dir=args.style_images_dir,
@@ -568,22 +575,22 @@ Expected speedup: 50-100x faster than baseline!
             resize_height=args.resize_height,
             spacing=args.spacing,
         )
-        
+
         total_time = time.time() - start_time
-        
+
         # Success summary
         print(f"\n✅ Ultra-fast dataset creation completed in {total_time:.2f}s!")
         print(f"📊 Samples: {len(dataset)}")
-        print(f"⚡ Speed: {len(dataset)/total_time:.1f} samples/second")
+        print(f"⚡ Speed: {len(dataset) / total_time:.1f} samples/second")
         print(f"🔤 Unique characters: {len(set(dataset['character']))}")
         print(f"🎨 Unique styles: {len(set(dataset['style']))}")
-        
+
         if not args.no_push:
             print(f"🌐 Uploaded to: https://huggingface.co/datasets/{args.repo_id}")
-        
+
         if args.local_save:
             print(f"💾 Local copy saved to: {args.local_save}")
-        
+
     except KeyboardInterrupt:
         logger.warning("Dataset creation interrupted by user")
         raise SystemExit(130)

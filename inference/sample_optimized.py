@@ -114,7 +114,7 @@ def arg_parse() -> Namespace:
         default=False,
         help="Use deterministic algorithms for reproducibility",
     )
-    
+
     # FST-specific arguments
     parser.add_argument(
         "--use_fst",
@@ -146,7 +146,7 @@ def arg_parse() -> Namespace:
         default=5,
         help="Number of scales in MSSE",
     )
-    
+
     args: Namespace = parser.parse_args()
 
     style_image_size: int = getattr(args, "style_image_size", 96)
@@ -338,7 +338,9 @@ def load_state_dict_auto(path: str):
         return torch.load(path, map_location="cpu")
 
 
-def load_fontdiffuser_pipeline(args: Namespace, use_fst: bool = False) -> FontDiffuserDPMPipeline:
+def load_fontdiffuser_pipeline(
+    args: Namespace, use_fst: bool = False
+) -> FontDiffuserDPMPipeline:
     """Load Font Diffuser pipeline with optimizations"""
     logger.info(f"Loading FontDiffuser{'WithFST' if use_fst else ''} pipeline...")
 
@@ -346,7 +348,7 @@ def load_fontdiffuser_pipeline(args: Namespace, use_fst: bool = False) -> FontDi
     unet: UNet = build_unet(args=args)
     style_encoder: StyleEncoder = build_style_encoder(args=args)
     content_encoder: ContentEncoder = build_content_encoder(args=args)
-    
+
     # Load base component weights
     unet_ckpt_path = (
         f"{args.ckpt_dir}/unet.safetensors"
@@ -380,44 +382,46 @@ def load_fontdiffuser_pipeline(args: Namespace, use_fst: bool = False) -> FontDi
             build_original_style_projection,
             get_unet_cross_attention_dim,
         )
-        
+
         logger.info("Building FST modules...")
-        
+
         # Build FST modules
         mss_encoder = build_mss_encoder(args=args)
         fst_module = build_fst(args=args)
-        
+
         # Get cross-attention dimension
         cross_attn_dim = get_unet_cross_attention_dim(unet)
-        
+
         # Parse feature channels
         feature_channels = args.fst_feature_channels
         if isinstance(feature_channels, str):
             feature_channels = [int(x.strip()) for x in feature_channels.split(",")]
-        
+
         # Build projection layers
         fst_projection = build_fst_projection(feature_channels[-1], cross_attn_dim)
-        original_style_projection = build_original_style_projection(1024, cross_attn_dim)
-        
+        original_style_projection = build_original_style_projection(
+            1024, cross_attn_dim
+        )
+
         logger.info("✓ Built FST modules")
-        
+
         # Load FST module weights
         fst_ckpt_dir = getattr(args, "fst_ckpt_path", args.ckpt_dir)
         if fst_ckpt_dir and os.path.exists(fst_ckpt_dir):
             logger.info(f"Loading FST weights from {fst_ckpt_dir}...")
-            
+
             fst_components = {
                 "mss_encoder": mss_encoder,
                 "fst_module": fst_module,
                 "fst_projection": fst_projection,
                 "original_style_projection": original_style_projection,
             }
-            
+
             for name, module in fst_components.items():
                 ckpt_path = f"{fst_ckpt_dir}/{name}.safetensors"
                 if not os.path.exists(ckpt_path):
                     ckpt_path = f"{fst_ckpt_dir}/{name}.pth"
-                
+
                 if os.path.exists(ckpt_path):
                     module.load_state_dict(load_state_dict_auto(ckpt_path))
                     logger.info(f"  ✓ Loaded {name}")
@@ -440,9 +444,7 @@ def load_fontdiffuser_pipeline(args: Namespace, use_fst: bool = False) -> FontDi
     else:
         # Standard model (non-FST)
         model: FontDiffuserModelDPM = FontDiffuserModelDPM(
-            unet=unet, 
-            style_encoder=style_encoder, 
-            content_encoder=content_encoder
+            unet=unet, style_encoder=style_encoder, content_encoder=content_encoder
         )
         logger.info("✓ Created standard FontDiffuserModelDPM")
 
@@ -463,12 +465,14 @@ def load_fontdiffuser_pipeline(args: Namespace, use_fst: bool = False) -> FontDi
         logger.info("✓ Model compiled")
 
     # Move to device
-    dtype: torch.dtype = torch.float16 if getattr(args, "fp16", False) else torch.float32
+    dtype: torch.dtype = (
+        torch.float16 if getattr(args, "fp16", False) else torch.float32
+    )
     model.to(args.device, dtype=dtype)
     model.eval()
 
     logger.info("✓ Model moved to device and set to eval mode")
-    
+
     # Log model info
     if hasattr(model, "log_model_info"):
         model.log_model_info()
@@ -486,8 +490,9 @@ def load_fontdiffuser_pipeline(args: Namespace, use_fst: bool = False) -> FontDi
         guidance_scale=getattr(args, "guidance_scale", 7.5),
     )
     logger.info("✓ Created DPM-Solver pipeline")
-    
+
     return pipe
+
 
 def sampling_batch(
     args: Namespace,

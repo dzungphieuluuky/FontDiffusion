@@ -17,7 +17,7 @@ from .builders.build import (
     build_mss_encoder,
     build_fst_projection,
     build_original_style_projection,
-    get_unet_cross_attention_dim
+    get_unet_cross_attention_dim,
 )
 from .builders.build_optimized import (
     build_unet_cached,

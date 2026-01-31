@@ -35,12 +35,12 @@ class TestGradientFlowSimple:
         # Check all parameters have gradients
         for name, param in model.named_parameters():
             assert param.grad is not None, f"Parameter '{name}' has no gradient"
-            assert not torch.isnan(
-                param.grad
-            ).any(), f"Parameter '{name}' has NaN gradients"
-            assert not torch.isinf(
-                param.grad
-            ).any(), f"Parameter '{name}' has Inf gradients"
+            assert not torch.isnan(param.grad).any(), (
+                f"Parameter '{name}' has NaN gradients"
+            )
+            assert not torch.isinf(param.grad).any(), (
+                f"Parameter '{name}' has Inf gradients"
+            )
 
     def test_conv_model_gradients(self, device):
         """Verify convolutional layers receive gradients."""
@@ -71,9 +71,9 @@ class TestGradientFlowSimple:
                 grad_count += 1
                 assert not torch.isnan(param.grad).any(), f"NaN in {name}.grad"
 
-        assert (
-            grad_count == param_count
-        ), f"Only {grad_count}/{param_count} parameters have gradients"
+        assert grad_count == param_count, (
+            f"Only {grad_count}/{param_count} parameters have gradients"
+        )
 
 
 class TestGradientFlowComplex:
@@ -168,12 +168,12 @@ class TestGradientFlowComplex:
         loss.backward()
 
         for name, param in model.named_parameters():
-            assert (
-                param.grad is not None
-            ), f"Attention parameter '{name}' has no gradient"
-            assert (
-                param.grad.abs().sum() > 0
-            ), f"Attention parameter '{name}' has zero gradient"
+            assert param.grad is not None, (
+                f"Attention parameter '{name}' has no gradient"
+            )
+            assert param.grad.abs().sum() > 0, (
+                f"Attention parameter '{name}' has zero gradient"
+            )
 
 
 class TestGradientMagnitudes:
@@ -203,9 +203,9 @@ class TestGradientMagnitudes:
         print(f"\nMax gradient norm: {max_grad_norm:.6f}")
 
         # Gradient should be finite
-        assert torch.isfinite(
-            torch.tensor(max_grad_norm)
-        ), "Gradient norm is not finite (NaN or Inf)"
+        assert torch.isfinite(torch.tensor(max_grad_norm)), (
+            "Gradient norm is not finite (NaN or Inf)"
+        )
 
         # For this simple setup, gradient shouldn't be extremely large
         assert max_grad_norm < 100, f"Gradient explosion detected: {max_grad_norm}"
@@ -266,9 +266,9 @@ class TestGradientAccumulation:
         grad_after_second = model.weight.grad.clone()
 
         # Gradient should accumulate (roughly doubled, accounting for randomness)
-        assert (
-            grad_after_second.abs() > grad_after_first.abs() * 0.5
-        ).any(), "Gradients should accumulate"
+        assert (grad_after_second.abs() > grad_after_first.abs() * 0.5).any(), (
+            "Gradients should accumulate"
+        )
 
     def test_zero_grad_clears_gradients(self, device):
         """Verify zero_grad properly clears gradients."""
@@ -343,9 +343,9 @@ class TestDeadLayers:
 
         # All parameters should have gradients in training mode
         for name, param in model.named_parameters():
-            assert (
-                param.grad is not None
-            ), f"Parameter '{name}' has no gradient in training mode"
+            assert param.grad is not None, (
+                f"Parameter '{name}' has no gradient in training mode"
+            )
 
     def test_conv_batch_norm_gradients(self, device):
         """Test gradients through Conv+BatchNorm blocks."""
@@ -381,9 +381,9 @@ class TestDeadLayers:
             f"{params_without_grad} without"
         )
 
-        assert (
-            params_without_grad == 0
-        ), f"{params_without_grad} parameters have no gradients"
+        assert params_without_grad == 0, (
+            f"{params_without_grad} parameters have no gradients"
+        )
 
 
 class TestRecurrentGradients:
@@ -427,9 +427,9 @@ class TestRecurrentGradients:
             if param.grad is None:
                 param_names_no_grad.append(name)
 
-        assert (
-            len(param_names_no_grad) == 0
-        ), f"Parameters without gradients: {param_names_no_grad}"
+        assert len(param_names_no_grad) == 0, (
+            f"Parameters without gradients: {param_names_no_grad}"
+        )
 
 
 class TestGradientStability:
@@ -459,9 +459,9 @@ class TestGradientStability:
 
         # Gradients should be identical (or very close)
         for i in range(1, len(grad_sequences)):
-            assert torch.allclose(
-                grad_sequences[0], grad_sequences[i], atol=1e-6
-            ), f"Gradient not consistent at iteration {i}"
+            assert torch.allclose(grad_sequences[0], grad_sequences[i], atol=1e-6), (
+                f"Gradient not consistent at iteration {i}"
+            )
 
 
 class TestGradientByParameterType:

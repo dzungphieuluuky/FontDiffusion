@@ -17,7 +17,7 @@ class MultiScaleStyleEncoder(nn.Module):
 
         self.encoders = nn.ModuleList()
         for i in range(num_scales):
-            out_channels = base_channels * (2 ** i)  # 64, 128, 256, 512, 1024
+            out_channels = base_channels * (2**i)  # 64, 128, 256, 512, 1024
             self.output_channels.append(out_channels)
 
             encoder = nn.Sequential(
@@ -25,7 +25,7 @@ class MultiScaleStyleEncoder(nn.Module):
                 nn.ReLU(),
                 nn.Conv2d(out_channels // 2, out_channels, 3, 1, 1),
                 nn.ReLU(),
-                nn.AdaptiveAvgPool2d((48 // (2 ** i), 48 // (2 ** i))),
+                nn.AdaptiveAvgPool2d((48 // (2**i), 48 // (2**i))),
             )
             self.encoders.append(encoder)
 

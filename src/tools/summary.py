@@ -9,6 +9,7 @@ from src import (
     build_unet,
 )
 
+
 def print_model_summary(model: nn.Module, input_shapes: dict, device: str = "cpu"):
     """
     Print a torchinfo summary of the model.
@@ -25,8 +26,15 @@ def print_model_summary(model: nn.Module, input_shapes: dict, device: str = "cpu
         raise ImportError("Please install torchinfo: pip install torchinfo")
 
     # Prepare dummy inputs as a tuple in the order expected by the model's forward
-    dummy_inputs = tuple(torch.zeros(shape).to(device) for shape in input_shapes.values())
-    summary(model.to(device), input_data=dummy_inputs, depth=3, col_names=("input_size", "output_size", "num_params", "trainable"))
+    dummy_inputs = tuple(
+        torch.zeros(shape).to(device) for shape in input_shapes.values()
+    )
+    summary(
+        model.to(device),
+        input_data=dummy_inputs,
+        depth=3,
+        col_names=("input_size", "output_size", "num_params", "trainable"),
+    )
 
 
 from src.model import FontDiffuserModel, print_model_summary
@@ -43,7 +51,7 @@ input_shapes = {
     "timesteps": (1,),
     "style_images": (1, 1, 96, 96),
     "content_images": (1, 1, 96, 96),
-    "content_encoder_downsample_size": ()  # If scalar, can omit or use (1,)
+    "content_encoder_downsample_size": (),  # If scalar, can omit or use (1,)
 }
 
 print_model_summary(model, input_shapes, device="cpu")

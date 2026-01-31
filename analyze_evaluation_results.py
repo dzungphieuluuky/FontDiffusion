@@ -1132,7 +1132,9 @@ class EvaluationAnalyzer:
             badge_class = (
                 "badge-success"
                 if stats.cv < 10
-                else "badge-warning" if stats.cv < 25 else "badge-danger"
+                else "badge-warning"
+                if stats.cv < 25
+                else "badge-danger"
             )
 
             html += f"""

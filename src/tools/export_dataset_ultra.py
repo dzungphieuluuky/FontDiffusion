@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 # STATELESS WORKER FUNCTION (process-based parallelism)
 # ============================================================================
 
+
 def _save_image_worker(
     sample_index: int,
     dataset_path: str,
@@ -43,19 +44,19 @@ def _save_image_worker(
     save_type: str,  # "content" or "target"
 ) -> Optional[dict[str, Any]]:
     """Stateless worker function for image saving with atomic writes.
-    
+
     Optimizations:
     - Worker-side image decoding (main thread stays unblocked)
     - Atomic writes via temp files (corruption prevention)
     - No redundant mkdir calls (directories pre-created)
     - Process-based parallelism (true parallel encoding, GIL-free)
-    
+
     Args:
         sample_index: Index in the dataset
         dataset_path: Path to dataset on disk
         output_dir: Root output directory
         save_type: Either "content" or "target"
-    
+
     Returns:
         Metadata dict with paths and hashes, or None on failure
     """
@@ -63,25 +64,25 @@ def _save_image_worker(
         # Load dataset in worker (Arrow format makes this fast)
         dataset = Dataset.load_from_disk(dataset_path)
         sample = dataset[sample_index]
-        
+
         char = sample["character"]
         style = sample["style"]
         font = sample.get("font", "unknown")
-        
+
         output_path = Path(output_dir)
-        
+
         if save_type == "content":
             # Content image processing
             content_img = sample.get("content_image")
             if not isinstance(content_img, Image.Image):
                 return None
-            
+
             content_filename = get_content_filename(char)
             final_path = output_path / "ContentImage" / content_filename
-            
+
             # Atomic write via temp file
             _atomic_save_image(content_img, final_path)
-            
+
             return {
                 "type": "content",
                 "character": char,
@@ -90,19 +91,19 @@ def _save_image_worker(
                 "filename": content_filename,
                 "content_hash": compute_file_hash(char, "", font),
             }
-        
+
         else:  # save_type == "target"
             # Target image processing
             target_img = sample.get("target_image")
             if not isinstance(target_img, Image.Image):
                 return None
-            
+
             target_filename = get_target_filename(char, style)
             final_path = output_path / "TargetImage" / style / target_filename
-            
+
             # Atomic write via temp file
             _atomic_save_image(target_img, final_path)
-            
+
             return {
                 "type": "target",
                 "character": char,
@@ -113,7 +114,7 @@ def _save_image_worker(
                 "content_hash": compute_file_hash(char, "", font),
                 "target_hash": compute_file_hash(char, style, font),
             }
-        
+
     except Exception as e:
         logger.debug(f"Worker failed to save {save_type} at index {sample_index}: {e}")
         return None
@@ -121,24 +122,23 @@ def _save_image_worker(
 
 def _atomic_save_image(img: Image.Image, final_path: Path) -> None:
     """Save image atomically using temp file + rename.
-    
+
     This ensures that interrupted writes never leave corrupted files.
     Only complete, valid images are ever visible at the final path.
     """
     # Create temp file in same directory (ensures same filesystem for atomic rename)
     temp_fd, temp_path = tempfile.mkstemp(
-        suffix=final_path.suffix,
-        dir=final_path.parent
+        suffix=final_path.suffix, dir=final_path.parent
     )
-    
+
     try:
         # Save to temp file
-        with os.fdopen(temp_fd, 'wb') as f:
-            img.save(f, format=img.format or 'PNG')
-        
+        with os.fdopen(temp_fd, "wb") as f:
+            img.save(f, format=img.format or "PNG")
+
         # Atomic rename (POSIX-compliant, works on Windows too)
         os.replace(temp_path, final_path)
-        
+
     except Exception as e:
         # Clean up temp file on failure
         try:
@@ -151,6 +151,7 @@ def _atomic_save_image(img: Image.Image, final_path: Path) -> None:
 # ============================================================================
 # EXPORT CONFIGURATION
 # ============================================================================
+
 
 @dataclass
 class ExportConfig:
@@ -182,6 +183,7 @@ class ExportConfig:
 # ULTRA-FAST DATASET EXPORTER
 # ============================================================================
 
+
 class UltraFastDatasetExporter:
     """Ultra-optimized dataset exporter with process-based parallelism."""
 
@@ -195,11 +197,11 @@ class UltraFastDatasetExporter:
         self.output_dir = config.output_dir
         self.content_dir = self.output_dir / "ContentImage"
         self.target_dir = self.output_dir / "TargetImage"
-        
+
         # Auto-tune workers
         self.cpu_count = os.cpu_count() or 4
         self.num_workers = min(config.num_workers, self.cpu_count)
-        
+
         logger.info(f"Ultra-fast exporter initialized:")
         logger.info(f"  Workers: {self.num_workers} processes")
         logger.info(f"  Output: {self.output_dir}")
@@ -222,7 +224,9 @@ class UltraFastDatasetExporter:
             except Exception as e:
                 raise ValueError(f"Failed to load local dataset: {e}") from e
 
-        config_msg = f" (config: {self.config.config_name})" if self.config.config_name else ""
+        config_msg = (
+            f" (config: {self.config.config_name})" if self.config.config_name else ""
+        )
         logger.info(
             f"Loading dataset from Hub: {self.config.repo_id} (split: {self.config.split}){config_msg}"
         )
@@ -233,14 +237,16 @@ class UltraFastDatasetExporter:
                 split=self.config.split,
                 token=self.config.token,
             )
-            
+
             # Save to temp cache for worker access
             temp_cache = tempfile.mkdtemp(prefix="fontdiffusion_export_")
             dataset.save_to_disk(temp_cache)
-            
-            logger.info(f"Loaded {len(dataset)} samples from Hub (cached to {temp_cache})")
+
+            logger.info(
+                f"Loaded {len(dataset)} samples from Hub (cached to {temp_cache})"
+            )
             return dataset, temp_cache
-            
+
         except Exception as e:
             raise ValueError(
                 f"Failed to load from Hub {self.config.repo_id}: {e}"
@@ -248,22 +254,22 @@ class UltraFastDatasetExporter:
 
     def _precreate_directories(self, dataset: Dataset) -> None:
         """Pre-create all directory structure to eliminate redundant mkdir calls.
-        
+
         Optimization: Creates all style subdirectories upfront in main thread.
         Workers can then write directly without any mkdir system calls.
         """
         logger.info("Pre-creating directory structure...")
-        
+
         # Create base directories
         self.content_dir.mkdir(parents=True, exist_ok=True)
         self.target_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Create all style subdirectories
         unique_styles = set(dataset["style"])
         for style in unique_styles:
             style_dir = self.target_dir / style
             style_dir.mkdir(parents=True, exist_ok=True)
-        
+
         logger.info(f"Pre-created {len(unique_styles)} style directories")
 
     def _export_with_streaming_json(
@@ -272,80 +278,84 @@ class UltraFastDatasetExporter:
         dataset_path: str,
     ) -> dict[str, Any]:
         """Export images with process-based parallelism and streaming JSON writes.
-        
+
         Key optimizations:
         - ProcessPoolExecutor for true parallel encoding (no GIL)
         - Worker-side image decoding (main thread decoupling)
         - Incremental JSON writing (constant memory usage)
         - Atomic file writes (corruption prevention)
-        
+
         Args:
             dataset: Dataset to export
             dataset_path: Path to dataset on disk (for worker access)
-        
+
         Returns:
             Metadata dictionary
         """
         logger.info(f"Exporting with {self.num_workers} parallel workers...")
-        
+
         dataset_size = len(dataset)
         checkpoint_path = self.output_dir / "results_checkpoint.json"
-        
+
         # Open JSON file for streaming writes
         with checkpoint_path.open("w", encoding="utf-8") as json_file:
             # Write JSON header
             json_file.write('{\n  "generations": [\n')
-            
+
             exported_content = set()
             generations_count = 0
             characters = set()
             styles = set()
             fonts = set()
-            
+
             with ProcessPoolExecutor(max_workers=self.num_workers) as executor:
                 # Submit all tasks upfront
                 futures = []
-                
+
                 for i in range(dataset_size):
                     # Submit content task (will be deduplicated via set)
-                    futures.append(executor.submit(
-                        _save_image_worker,
-                        i,
-                        dataset_path,
-                        str(self.output_dir),
-                        "content"
-                    ))
-                    
+                    futures.append(
+                        executor.submit(
+                            _save_image_worker,
+                            i,
+                            dataset_path,
+                            str(self.output_dir),
+                            "content",
+                        )
+                    )
+
                     # Submit target task
-                    futures.append(executor.submit(
-                        _save_image_worker,
-                        i,
-                        dataset_path,
-                        str(self.output_dir),
-                        "target"
-                    ))
-                
+                    futures.append(
+                        executor.submit(
+                            _save_image_worker,
+                            i,
+                            dataset_path,
+                            str(self.output_dir),
+                            "target",
+                        )
+                    )
+
                 # Process results as they complete
                 completed = 0
                 target_results = []  # Buffer for building generation records
-                
+
                 for future in as_completed(futures):
                     result = future.result()
-                    
+
                     if result:
                         if result["type"] == "content":
                             # Track content files (deduplicate)
                             if result["filename"] not in exported_content:
                                 exported_content.add(result["filename"])
                                 characters.add(result["character"])
-                        
+
                         elif result["type"] == "target":
                             # Buffer target results for generation records
                             target_results.append(result)
                             styles.add(result["style"])
                             fonts.add(result["font"])
                             characters.add(result["character"])
-                            
+
                             # Write generation record incrementally
                             generation = {
                                 "character": result["character"],
@@ -356,16 +366,16 @@ class UltraFastDatasetExporter:
                                 "content_hash": result["content_hash"],
                                 "target_hash": result["target_hash"],
                             }
-                            
+
                             # Write JSON entry
                             if generations_count > 0:
-                                json_file.write(',\n')
-                            json_file.write('    ')
+                                json_file.write(",\n")
+                            json_file.write("    ")
                             json.dump(generation, json_file, ensure_ascii=False)
                             generations_count += 1
-                    
+
                     completed += 1
-                    
+
                     # Log progress
                     if completed % 1000 == 0:
                         progress_pct = completed * 100 // (dataset_size * 2)
@@ -374,21 +384,27 @@ class UltraFastDatasetExporter:
                             f"({progress_pct}%) - "
                             f"{len(exported_content)} content, {generations_count} target"
                         )
-            
+
             # Write JSON footer
-            json_file.write('\n  ],\n')
-            json_file.write(f'  "characters": {json.dumps(sorted(characters), ensure_ascii=False)},\n')
-            json_file.write(f'  "styles": {json.dumps(sorted(styles), ensure_ascii=False)},\n')
-            json_file.write(f'  "fonts": {json.dumps(sorted(fonts) if fonts else ["unknown"], ensure_ascii=False)},\n')
+            json_file.write("\n  ],\n")
+            json_file.write(
+                f'  "characters": {json.dumps(sorted(characters), ensure_ascii=False)},\n'
+            )
+            json_file.write(
+                f'  "styles": {json.dumps(sorted(styles), ensure_ascii=False)},\n'
+            )
+            json_file.write(
+                f'  "fonts": {json.dumps(sorted(fonts) if fonts else ["unknown"], ensure_ascii=False)},\n'
+            )
             json_file.write(f'  "total_chars": {len(characters)},\n')
             json_file.write(f'  "total_styles": {len(styles)}\n')
-            json_file.write('}\n')
-        
+            json_file.write("}\n")
+
         logger.info(
             f"Exported {len(exported_content)} content images, "
             f"{generations_count} target images"
         )
-        
+
         return {
             "generations_count": generations_count,
             "content_count": len(exported_content),
@@ -409,11 +425,11 @@ class UltraFastDatasetExporter:
             ValueError: If dataset loading or export fails
         """
         logger.info("Starting ultra-fast dataset export...")
-        
+
         dataset, dataset_path = self._load_dataset()
         self._precreate_directories(dataset)
         metadata = self._export_with_streaming_json(dataset, dataset_path)
-        
+
         logger.info("Export completed successfully")
         return metadata
 
@@ -421,6 +437,7 @@ class UltraFastDatasetExporter:
 # ============================================================================
 # PUBLIC API (maintains same interface)
 # ============================================================================
+
 
 def export_dataset(
     output_dir: str | Path,
@@ -555,7 +572,7 @@ Expected speedup: 10-20x faster than baseline!
     # Setup logging
     logging.basicConfig(
         level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
 
     try:

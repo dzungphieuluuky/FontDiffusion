@@ -220,9 +220,11 @@ def sampling_batch_with_accelerator(
 
             # Process in batches
             all_images = []
-            for i in HFTqdm(range(0, len(content_batch), args.batch_size),
-                            desc="Sampling images", 
-                            disable=not accelerator.is_main_process):
+            for i in HFTqdm(
+                range(0, len(content_batch), args.batch_size),
+                desc="Sampling images",
+                disable=not accelerator.is_main_process,
+            ):
                 batch_content = content_batch[i : i + args.batch_size]
                 batch_style = style_batch[i : i + args.batch_size]
 
@@ -346,7 +348,7 @@ def batch_generate_images_with_accelerator(
                     style_path,
                     font_manager,
                     primary_font,
-                    accelerator
+                    accelerator,
                 )
 
                 if images is None:
@@ -741,6 +743,7 @@ def main():
             logger.warning(
                 f"GPU {accelerator.process_index}: Error during cleanup: {e}"
             )
+
 
 if __name__ == "__main__":
     main()

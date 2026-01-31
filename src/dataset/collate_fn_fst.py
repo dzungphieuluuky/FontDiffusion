@@ -38,7 +38,7 @@ class CollateFN(object):
 
         Dataset provides keys: target_image, content_image, style_image, style_source_image
         Trainer expects keys: target_img, content_img, style_img, style_source_img
-        
+
         Each batch item should contain:
         - target_image: Generated character (from dataset)
         - content_image: Content reference (from dataset)
@@ -59,12 +59,16 @@ class CollateFN(object):
 
         # Add nonorm_target_image if present
         if "nonorm_target_image" in batch[0]:
-            nonorm_targets = torch.stack([item["nonorm_target_image"] for item in batch])
+            nonorm_targets = torch.stack(
+                [item["nonorm_target_image"] for item in batch]
+            )
             result["nonorm_target_image"] = nonorm_targets
 
         # Add style_source_image for FST mode
         if "style_source_image" in batch[0]:
-            style_source_imgs = torch.stack([item["style_source_image"] for item in batch])
+            style_source_imgs = torch.stack(
+                [item["style_source_image"] for item in batch]
+            )
             result["style_source_image"] = style_source_imgs
 
         # Add neg_images for SCR mode

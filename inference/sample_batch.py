@@ -33,6 +33,7 @@ from inference.sample_optimized import (
     get_style_transform,
 )
 from src.configs.fontdiffuser import get_parser
+
 logger = logging.getLogger(__name__)
 enable_progress_bars()
 
@@ -359,6 +360,7 @@ class QualityEvaluator:
             image.save(path)
         except Exception as e:
             logger.info(f"Error saving image to {path}: {e}")
+
 
 def load_characters(
     characters_arg: str, start_line: int = 1, end_line: int = None
@@ -1418,27 +1420,27 @@ def main() -> None:
     """Main function"""
     parser = get_parser()
     args = parser.parse_args()
-    
+
     # Validate required arguments
     if not args.characters:
         raise ValueError("--characters is required")
     if not args.style_images:
-        raise ValueError("--style_images is required") 
+        raise ValueError("--style_images is required")
     if not args.ckpt_dir:
         raise ValueError("--ckpt_dir is required")
     if not args.ttf_path:
         raise ValueError("--ttf_path is required")
-    
+
     # Convert image sizes to tuples (centralized parser uses int)
     if isinstance(args.style_image_size, int):
         args.style_image_size = (args.style_image_size, args.style_image_size)
     if isinstance(args.content_image_size, int):
         args.content_image_size = (args.content_image_size, args.content_image_size)
-    
+
     # Set derived defaults if not provided
     if not args.output_dir:
         args.output_dir = "my_dataset/train_original"
-    
+
     results: dict[str, str] = {}
 
     logger.info("=" * 60)
