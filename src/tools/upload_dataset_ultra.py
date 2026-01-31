@@ -50,28 +50,27 @@ logger = logging.getLogger(__name__)
 _WORKER_STYLE_CACHE: Optional[dict[str, Image.Image]] = None
 
 
-def _get_worker_style_cache(style_images_dir: str) -> dict[str, np.ndarray]:
-    """Lazy-load style cache as raw NumPy arrays (OpenCV format)."""
+def _get_worker_style_cache(style_images_dir: str) -> dict[str, Image.Image]:
+    """Lazy-load style cache in each worker process (OS-level caching)."""
     global _WORKER_STYLE_CACHE
 
     if _WORKER_STYLE_CACHE is not None:
         return _WORKER_STYLE_CACHE
 
+    # First access in this worker: load styles
     _WORKER_STYLE_CACHE = {}
-    # Use os.scandir for faster directory iteration than pathlib
-    with os.scandir(style_images_dir) as entries:
-        for entry in entries:
-            if entry.is_file() and entry.name.lower().endswith(('.png', '.jpg', '.jpeg')):
-                try:
-                    # Load directly to numpy/opencv BGR, convert to RGB
-                    img = cv2.imread(entry.path)
-                    if img is not None:
-                        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                        _WORKER_STYLE_CACHE[entry.name.split('.')[0]] = img
-                except Exception:
-                    pass
+    style_dir = Path(style_images_dir)
+
+    for ext in [".png", ".jpg", ".jpeg"]:
+        for style_file in style_dir.glob(f"*{ext}"):
+            style_name = style_file.stem
+            try:
+                _WORKER_STYLE_CACHE[style_name] = Image.open(style_file).convert("RGB")
+            except Exception as e:
+                logger.debug(f"Worker failed to load {style_file}: {e}")
 
     return _WORKER_STYLE_CACHE
+
 
 # ============================================================================
 # STATELESS WORKER FUNCTION (zero-copy IPC)
@@ -87,76 +86,76 @@ def _process_sample_worker(
     resize_height: int,
     spacing: int,
 ) -> Optional[dict]:
-    try:
-        # Optimization 1: Fast String Concatenation (No Pathlib overhead)
-        # Assuming standard extensions, or you can try/except blocks for extensions
-        content_path = f"{data_dir}/ContentImage/{char}.png"
-        target_path = f"{data_dir}/TargetImage/{style}/{style}+{char}.png"
+    """Stateless worker function with dynamic path inference (no pre-scanning).
 
-        # Optimization 2: Lazy Load Style Cache (as Numpy Arrays)
+    Optimizations:
+    - Zero-copy IPC: only primitives passed from main process
+    - Worker-local caching: lazy-load styles on first access
+    - Dynamic pathing: construct paths algorithmically (no filesystem scan)
+    - OpenCV resizing: 6x faster than PIL LANCZOS
+    - Native PIL return: let Arrow handle serialization
+    """
+    try:
+        # Dynamic path construction (no pre-scan lookup)
+        data_path = Path(data_dir)
+        content_path = data_path / "ContentImage" / f"{char}.png"
+        target_path = data_path / "TargetImage" / style / f"{style}+{char}.png"
+
+        # Check existence (OS-level cache makes this fast)
+        if not content_path.exists() or not target_path.exists():
+            return None
+
+        # Lazy-load style cache in this worker
         style_cache = _get_worker_style_cache(style_images_dir)
         if style not in style_cache:
             return None
-        style_arr = style_cache[style] # Already RGB numpy array
 
-        # Optimization 3: Read directly with OpenCV (removes PIL->Numpy copy)
-        # Note: cv2.imread returns None if file doesn't exist (Skipping .exists() check)
-        content_arr = cv2.imread(content_path)
-        if content_arr is None: return None
-        content_arr = cv2.cvtColor(content_arr, cv2.COLOR_BGR2RGB)
+        # Load images
+        content_img = Image.open(content_path).convert("RGB")
+        target_img = Image.open(target_path).convert("RGB")
+        style_img = style_cache[style]
 
-        target_arr = cv2.imread(target_path)
-        if target_arr is None: return None
-        target_arr = cv2.cvtColor(target_arr, cv2.COLOR_BGR2RGB)
+        # Calculate resize dimensions
+        c_width, c_height = content_img.size
+        t_width, t_height = target_img.size
+        s_width, s_height = style_img.size
 
-        # Optimization 4: Math on tuples/ints is faster than looking up .size objects
-        # content_arr.shape is (h, w, c)
-        h_c, w_c = content_arr.shape[:2]
-        h_s, w_s = style_arr.shape[:2]
-        h_t, w_t = target_arr.shape[:2]
+        c_new_width = int(c_width * (resize_height / c_height))
+        s_new_width = int(s_width * (resize_height / s_height))
+        t_new_width = int(t_width * (resize_height / t_height))
 
-        # Calculate dimensions
-        # Use integer division // for slight speedup over int() casting
-        w_c_new = (w_c * resize_height) // h_c
-        w_s_new = (w_s * resize_height) // h_s
-        w_t_new = (w_t * resize_height) // h_t
+        # OpenCV resizing (6x faster than PIL LANCZOS)
+        content_resized = _resize_image_opencv(content_img, c_new_width, resize_height)
+        style_resized = _resize_image_opencv(style_img, s_new_width, resize_height)
+        target_resized = _resize_image_opencv(target_img, t_new_width, resize_height)
 
-        # Optimization 5: Resize (Already in CV2/Numpy)
-        content_resized = cv2.resize(content_arr, (w_c_new, resize_height), interpolation=cv2.INTER_LINEAR)
-        style_resized = cv2.resize(style_arr, (w_s_new, resize_height), interpolation=cv2.INTER_LINEAR)
-        target_resized = cv2.resize(target_arr, (w_t_new, resize_height), interpolation=cv2.INTER_LINEAR)
+        # Create comparison image
+        total_width = c_new_width + s_new_width + t_new_width + 2 * spacing
+        comparison = Image.new(
+            "RGB", (total_width, resize_height), color=(255, 255, 255)
+        )
 
-        # Optimization 6: Create Comparison via Memory Allocation (Faster than Paste)
-        # Create spacers
-        if spacing > 0:
-            spacer = np.ones((resize_height, spacing, 3), dtype=np.uint8) * 255
-            # Horizontal Stack: [Content | Space | Style | Space | Target]
-            # This is a single C-level memory copy
-            comparison_arr = np.hstack([
-                content_resized, spacer, 
-                style_resized, spacer, 
-                target_resized
-            ])
-        else:
-            comparison_arr = np.hstack([content_resized, style_resized, target_resized])
+        comparison.paste(content_resized, (0, 0))
+        comparison.paste(style_resized, (c_new_width + spacing, 0))
+        comparison.paste(target_resized, (c_new_width + s_new_width + 2 * spacing, 0))
 
-        # Optimization 7: Final Conversion to PIL 
-        # (Only do this ONCE per image, as required by HF Dataset)
+        # Return native PIL objects (Arrow handles serialization)
         return {
             "character": char,
             "style": style,
             "font": font,
-            "content_image": Image.fromarray(content_arr), # Original size
-            "style_image": Image.fromarray(style_arr),     # Original size
-            "target_image": Image.fromarray(target_arr),   # Original size
-            "comparison_image": Image.fromarray(comparison_arr),
+            "content_image": content_img,
+            "style_image": style_img,
+            "target_image": target_img,
+            "comparison_image": comparison,
             "content_hash": compute_file_hash(char, "", font),
             "target_hash": compute_file_hash(char, style, font),
         }
 
     except Exception as e:
-        # logger.debug(f"Worker failed: {e}") # Logging in tight loops can slow things down
+        logger.debug(f"Worker failed to process {char}/{style}: {e}")
         return None
+
 
 def _resize_image_opencv(
     img: Image.Image, new_width: int, new_height: int
@@ -348,7 +347,6 @@ class UltraFastDatasetBuilder:
             features=features,
             remove_columns=thin_dataset.column_names,
             desc="Processing with stateless workers + native Arrow",
-            writer_batch_size=5000
         )
 
         # Filter out failed samples
