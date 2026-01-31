@@ -214,7 +214,7 @@ class UltraFastDatasetBuilder:
         # Auto-tune performance parameters
         self.cpu_count = os.cpu_count() or 4
         self.num_proc = max(1, self.cpu_count)
-        self.process_batch_size = 10000  # Large batches reduce IPC overhead
+        self.process_batch_size = 1000  # Large batches reduce IPC overhead
 
         # Validate structure
         self._validate_structure()
@@ -348,7 +348,7 @@ class UltraFastDatasetBuilder:
             features=features,
             remove_columns=thin_dataset.column_names,
             desc="Processing with stateless workers + native Arrow",
-            writer_batch_size=self.process_batch_size,
+            writer_batch_size=5000
         )
 
         # Filter out failed samples
