@@ -422,7 +422,7 @@ class DatasetBuilder:
         skipped: int = 0
         
         # Use ProcessPoolExecutor for CPU-bound image processing
-        with ProcessPoolExecutor(max_workers=self.config.num_workers) as executor:
+        with ThreadPoolExecutor(max_workers=self.config.num_workers) as executor:
             # Process in manageable batches
             for i in range(0, len(generations), self.config.batch_size):
                 batch = generations[i:i + self.config.batch_size]
@@ -549,7 +549,7 @@ class DatasetBuilder:
         all_samples = []
         skipped = 0
         
-        with ProcessPoolExecutor(max_workers=self.config.num_workers) as executor:
+        with ThreadPoolExecutor(max_workers=self.config.num_workers) as executor:
             # Process all generations in parallel batches
             batch_futures = []
             for i in range(0, len(generations), self.config.batch_size):
