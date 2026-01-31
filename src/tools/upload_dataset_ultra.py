@@ -384,7 +384,7 @@ class UltraFastDatasetBuilder:
         
         # Filter out failed samples (None values become missing rows)
         original_size = len(dataset)
-        dataset = dataset.filter(lambda x: x["character"] is not None)
+        dataset = dataset.filter(lambda x: x["character"] is not None, num_proc=self.num_proc)
         filtered_count = original_size - len(dataset)
         
         build_time = time.time() - start_time
