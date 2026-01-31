@@ -87,7 +87,7 @@ class TestFSTModuleIntegration:
     def test_fst_variable_configs(self, device, num_queries: int, query_dim: int):
         """Test FST with different configurations."""
         msse_output_channels = [64, 128, 256, 512, 1024]
-        
+
         fst = FontStyleTransformationModule(
             msse_output_channels=msse_output_channels,
             num_queries=num_queries,
@@ -190,7 +190,9 @@ class TestFSTWithMSSEPipeline:
             target_features = msse(style_target)
 
         # Verify feature channel dimensions match expectations
-        for i, (feat, expected_ch) in enumerate(zip(source_features, msse_output_channels)):
+        for i, (feat, expected_ch) in enumerate(
+            zip(source_features, msse_output_channels)
+        ):
             assert feat.shape[1] == expected_ch, (
                 f"Scale {i}: Expected {expected_ch} channels, got {feat.shape[1]}"
             )
@@ -213,7 +215,7 @@ class TestFSTGradientFlow:
     def test_fst_learnable_queries_gradients(self, device):
         """Verify learnable queries receive gradients."""
         msse_output_channels = [64, 128, 256, 512, 1024]
-        
+
         fst = FontStyleTransformationModule(
             msse_output_channels=msse_output_channels,
             num_queries=220,
@@ -243,7 +245,7 @@ class TestFSTGradientFlow:
     def test_fst_positional_encoding_gradients(self, device):
         """Verify positional encodings receive gradients."""
         msse_output_channels = [64, 128, 256, 512, 1024]
-        
+
         fst = FontStyleTransformationModule(
             msse_output_channels=msse_output_channels,
             num_queries=220,
@@ -268,14 +270,18 @@ class TestFSTGradientFlow:
         # Each positional encoding should have gradient
         for i, pe in enumerate(fst.pos_encodings):
             # Check learnable parameters in AdaptivePositionalEncoding
-            assert pe.height_embed.grad is not None, f"PosEncoding {i} height has no gradient"
-            assert pe.width_embed.grad is not None, f"PosEncoding {i} width has no gradient"
+            assert pe.height_embed.grad is not None, (
+                f"PosEncoding {i} height has no gradient"
+            )
+            assert pe.width_embed.grad is not None, (
+                f"PosEncoding {i} width has no gradient"
+            )
             assert pe.scale.grad is not None, f"PosEncoding {i} scale has no gradient"
 
     def test_fst_projection_layers_gradients(self, device):
         """Verify projection layers in FST receive gradients."""
         msse_output_channels = [64, 128, 256, 512, 1024]
-        
+
         fst = FontStyleTransformationModule(
             msse_output_channels=msse_output_channels,
             num_queries=220,
@@ -311,7 +317,7 @@ class TestFSTOverfitting:
     def test_fst_batch_overfitting(self, device):
         """Test FST can memorize and overfit a small batch."""
         msse_output_channels = [64, 128, 256, 512, 1024]
-        
+
         fst = FontStyleTransformationModule(
             msse_output_channels=msse_output_channels,
             num_queries=220,
@@ -393,7 +399,9 @@ class TestMSSEOverfitting:
             features = msse(x)
 
             # Compute loss
-            loss = sum(loss_fn(feat, target) for feat, target in zip(features, target_features))
+            loss = sum(
+                loss_fn(feat, target) for feat, target in zip(features, target_features)
+            )
 
             loss.backward()
             optimizer.step()
@@ -410,7 +418,7 @@ class TestFSTChannelValidation:
     def test_fst_rejects_mismatched_channels(self, device):
         """Test FST raises error when feature channels don't match expected."""
         msse_output_channels = [64, 128, 256, 512, 1024]
-        
+
         fst = FontStyleTransformationModule(
             msse_output_channels=msse_output_channels,
             num_queries=220,
