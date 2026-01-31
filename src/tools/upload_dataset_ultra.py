@@ -654,7 +654,7 @@ def create_dataset_three_stage(
         builder.save_local(dataset, Path(local_save_path))
     
     if push_to_hub:
-        builder.push_to_hub_parallel(dataset)
+        builder.push_to_hub_streaming(dataset)
     
     return dataset
 
