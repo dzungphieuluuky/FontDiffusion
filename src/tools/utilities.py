@@ -13,6 +13,7 @@ import os
 import torch
 from safetensors.torch import save_file
 from datasets.utils import tqdm as hf_tqdm, enable_progress_bar
+from tqdm.auto import tqdm as auto_tqdm
 
 enable_progress_bar()
 """Utility functions for model inspection and logging."""
@@ -76,7 +77,7 @@ HF_BAR_FORMAT = (
 T = TypeVar("T")
 
 
-class HFTqdm(hf_tqdm, Generic[T]):
+class HFTqdm(auto_tqdm, Generic[T]):
     def __init__(
         self,
         iterable: Optional[Iterable[T]] = None,
