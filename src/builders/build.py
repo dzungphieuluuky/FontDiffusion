@@ -1,6 +1,6 @@
 import argparse
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
-import torch 
+import torch
 from torch import nn
 
 
@@ -87,22 +87,25 @@ def build_fst(args: argparse.Namespace) -> FontStyleTransformationModule:
     feature_channels = args.fst_feature_channels
     if isinstance(feature_channels, str):
         feature_channels = [int(x.strip()) for x in feature_channels.split(",")]
-    
+
     fst_module = FontStyleTransformationModule(
-        feature_channels=feature_channels,
         num_queries=args.fst_num_queries,
         query_dim=args.fst_query_dim,
-        num_scale_features=args.fst_num_scales,
+        msse_output_channels=feature_channels,
     )
-    print(f"✓ Built FST module (queries={args.fst_num_queries}, dim={args.fst_query_dim})")
+    print(
+        f"✓ Built FST module (queries={args.fst_num_queries}, dim={args.fst_query_dim})"
+    )
     return fst_module
 
 
 def build_mss_encoder(args: argparse.Namespace) -> MultiScaleStyleEncoder:
     """Build Multi-Scale Style Encoder."""
-    num_scales = getattr(args, 'mss_num_scales', None) or getattr(args, 'fst_num_scales', 5)
-    base_channels = getattr(args, 'mss_base_channels', 64)
-    
+    num_scales = getattr(args, "mss_num_scales", None) or getattr(
+        args, "fst_num_scales", 5
+    )
+    base_channels = getattr(args, "mss_base_channels", 64)
+
     mss_encoder = MultiScaleStyleEncoder(
         in_channels=3,
         base_channels=base_channels,
@@ -129,21 +132,21 @@ def build_original_style_projection(style_dim: int, cross_attn_dim: int) -> nn.L
 def get_unet_cross_attention_dim(unet: UNet) -> int:
     """
     Infer cross-attention dimension from U-Net.
-    
+
     Args:
         unet: U-Net module
-        
+
     Returns:
         Cross-attention dimension
     """
     # Try to get from config
     if hasattr(unet, "config") and hasattr(unet.config, "cross_attention_dim"):
         return unet.config.cross_attention_dim
-    
+
     # Inspect first cross-attention layer
     for module in unet.modules():
         if hasattr(module, "to_k") and isinstance(module.to_k, nn.Linear):
             return module.to_k.in_features
-    
+
     # Default fallback
     return 1024

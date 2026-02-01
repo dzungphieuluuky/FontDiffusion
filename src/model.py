@@ -506,7 +506,7 @@ class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
             original_style_projection: Pre-built projection layer (style vec → cross-attn)
         """
         super().__init__()
-        
+
         # Assign all modules (no internal creation)
         self.unet: UNet = unet
         self.style_encoder: StyleEncoder = style_encoder
@@ -577,8 +577,8 @@ class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
         style_images = cond[1]
 
         # 1. Original style encoding
-        style_img_feature, style_vec, style_residual_features = self.config.style_encoder(
-            style_images
+        style_img_feature, style_vec, style_residual_features = (
+            self.config.style_encoder(style_images)
         )
 
         # 2. Multi-scale style encoding

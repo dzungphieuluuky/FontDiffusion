@@ -28,6 +28,7 @@ import sys
 import logging
 import argparse
 from argparse import Namespace
+from src.tools.utils import save_args_to_yaml
 
 # Setup logging
 logging.basicConfig(
@@ -229,6 +230,16 @@ def run_sample_distributed(remaining_args: list[str]) -> int:
         return 1
 
 
+def save_sampling_config(args: Namespace, output_path: str) -> None:
+    """Save sampling configuration to a text file.
+
+    Args:
+        args: Argument namespace containing configuration
+        output_path: Path to save the configuration file
+    """
+    save_args_to_yaml(args, output_path)
+
+
 def main() -> int:
     """Main entry point for inference operations.
 
@@ -244,7 +255,7 @@ def main() -> int:
     logger.info("=" * 70)
     logger.info(f"FontDiffuser Inference - Mode: {mode}")
     logger.info("=" * 70)
-
+    save_sampling_config(args, "sampling_config.yaml")
     # Route to appropriate inference mode with remaining arguments
     if mode == "sample_optimized":
         logger.info("Running single-image optimized inference...")

@@ -27,12 +27,11 @@ from src import (
     build_scr,
     build_style_encoder,
     build_unet,
-
     build_fst,
     build_mss_encoder,
     build_fst_projection,
     build_original_style_projection,
-    get_unet_cross_attention_dim
+    get_unet_cross_attention_dim,
 )
 from src.model import FontDiffuserWithFST
 from src.tools.utilities import (
@@ -86,7 +85,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
     def _setup_models(self):
         """Initialize FST model components."""
         logger.info("Building model components...")
-        
+
         # Build core components
         unet = build_unet(args=self.args)
         style_encoder = build_style_encoder(args=self.args)
@@ -105,30 +104,28 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         # Create model based on FST flag
         if self.use_fst:
             logger.info("Building FST-enhanced model...")
-            
+
             # Build FST-specific modules
             mss_encoder = build_mss_encoder(args=self.args)
             fst_module = build_fst(args=self.args)
-            
+
             # Get cross-attention dimension from U-Net
             cross_attn_dim = get_unet_cross_attention_dim(unet)
-            
+
             # Build projection layers
             fst_projection = build_fst_projection(
-                feature_dim=self.fst_feature_channels[-1],
-                cross_attn_dim=cross_attn_dim
+                feature_dim=self.fst_feature_channels[-1], cross_attn_dim=cross_attn_dim
             )
             original_style_projection = build_original_style_projection(
-                style_dim=1024,
-                cross_attn_dim=cross_attn_dim
+                style_dim=1024, cross_attn_dim=cross_attn_dim
             )
-            
+
             # Load FST checkpoints if available from phase 1
             if hasattr(self, "_fst_module_states"):
                 self._load_fst_module_states(
                     mss_encoder, fst_module, fst_projection, original_style_projection
                 )
-            
+
             # Create FST model
             self.model = FontDiffuserWithFST(
                 unet=unet,
@@ -139,10 +136,10 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 fst_projection=fst_projection,
                 original_style_projection=original_style_projection,
             )
-            
+
             logger.info("✓ Created FontDiffuserWithFST")
             self.model.log_model_info()
-            
+
             # Apply freezing if specified
             if self.freeze_original_encoders:
                 logger.info("Freezing original encoders...")
@@ -153,12 +150,13 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 for param in self.model.diffusion_unet.parameters():
                     param.requires_grad = False
                 logger.info("✓ Original encoders frozen")
-                
+
                 logger.info("\nTrainable parameters after freezing:")
                 self.model.log_model_info()
         else:
             # Standard model without FST
             from src.model import FontDiffuserModel
+
             self.model = FontDiffuserModel(
                 unet=unet,
                 style_encoder=style_encoder,
@@ -178,25 +176,31 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 self._load_scr_checkpoint(self.args.scr_ckpt_path)
             self.scr.requires_grad_(False)
 
-    def _load_fst_module_states(self, mss_encoder, fst_module, fst_projection, original_style_projection):
+    def _load_fst_module_states(
+        self, mss_encoder, fst_module, fst_projection, original_style_projection
+    ):
         """Load FST module states from phase 1 checkpoint."""
         try:
             if "mss_encoder" in self._fst_module_states:
                 mss_encoder.load_state_dict(self._fst_module_states["mss_encoder"])
                 logger.info("  ✓ Loaded mss_encoder from phase 1")
-            
+
             if "fst_module" in self._fst_module_states:
                 fst_module.load_state_dict(self._fst_module_states["fst_module"])
                 logger.info("  ✓ Loaded fst_module from phase 1")
-            
+
             if "fst_projection" in self._fst_module_states:
-                fst_projection.load_state_dict(self._fst_module_states["fst_projection"])
+                fst_projection.load_state_dict(
+                    self._fst_module_states["fst_projection"]
+                )
                 logger.info("  ✓ Loaded fst_projection from phase 1")
-                
+
             if "original_style_projection" in self._fst_module_states:
-                original_style_projection.load_state_dict(self._fst_module_states["original_style_projection"])
+                original_style_projection.load_state_dict(
+                    self._fst_module_states["original_style_projection"]
+                )
                 logger.info("  ✓ Loaded original_style_projection from phase 1")
-                
+
         except Exception as e:
             logger.warning(f"Error loading FST module states: {e}")
 
@@ -230,7 +234,12 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
 
         # Try to load FST-specific modules if available
         if self.use_fst:
-            fst_modules = ["mss_encoder", "fst_module", "fst_projection", "original_style_projection"]
+            fst_modules = [
+                "mss_encoder",
+                "fst_module",
+                "fst_projection",
+                "original_style_projection",
+            ]
             self._fst_module_states = {}
 
             for module_name in fst_modules:

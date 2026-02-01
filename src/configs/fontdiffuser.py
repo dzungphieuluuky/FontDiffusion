@@ -10,17 +10,17 @@ def get_parser():
     parser = argparse.ArgumentParser(
         description="FontDiffuser - Font Style Transfer with Diffusion Models"
     )
-    
+
     # ==================== Experience & Paths ====================
-    experience_group = parser.add_argument_group('Experiment Configuration')
+    experience_group = parser.add_argument_group("Experiment Configuration")
     experience_group.add_argument(
         "--seed", type=int, default=123, help="Random seed for reproducibility"
     )
     experience_group.add_argument(
-        "--experience_name", 
-        type=str, 
+        "--experience_name",
+        type=str,
         default="fontdiffuser_training",
-        help="Experiment name for logging"
+        help="Experiment name for logging",
     )
     experience_group.add_argument(
         "--data_root",
@@ -35,16 +35,16 @@ def get_parser():
         help="Output directory for checkpoints/results",
     )
     experience_group.add_argument(
-        "--ckpt_dir", 
-        type=str, 
+        "--ckpt_dir",
+        type=str,
         default=None,
-        help="Checkpoint directory (for loading pretrained models)"
+        help="Checkpoint directory (for loading pretrained models)",
     )
     experience_group.add_argument(
-        "--report_to", 
-        type=str, 
-        default="wandb", 
-        help="Logging library (wandb/tensorboard)"
+        "--report_to",
+        type=str,
+        default="wandb",
+        help="Logging library (wandb/tensorboard)",
     )
     experience_group.add_argument(
         "--logging_dir",
@@ -54,7 +54,7 @@ def get_parser():
     )
 
     # ==================== Model Architecture ====================
-    model_group = parser.add_argument_group('Model Architecture')
+    model_group = parser.add_argument_group("Model Architecture")
     model_group.add_argument(
         "--resolution",
         type=int,
@@ -68,16 +68,10 @@ def get_parser():
         help="U-Net channel dimensions",
     )
     model_group.add_argument(
-        "--style_image_size", 
-        type=int, 
-        default=96, 
-        help="Style image size"
+        "--style_image_size", type=int, default=96, help="Style image size"
     )
     model_group.add_argument(
-        "--content_image_size", 
-        type=int, 
-        default=96, 
-        help="Content image size"
+        "--content_image_size", type=int, default=96, help="Content image size"
     )
     model_group.add_argument(
         "--content_encoder_downsample_size",
@@ -87,7 +81,7 @@ def get_parser():
     )
     model_group.add_argument(
         "--channel_attn",
-        action="store_true", 
+        action="store_true",
         default=True,
         help="Use SE attention in U-Net",
     )
@@ -105,11 +99,9 @@ def get_parser():
     )
 
     # ==================== Training Configuration ====================
-    training_group = parser.add_argument_group('Training Configuration')
+    training_group = parser.add_argument_group("Training Configuration")
     training_group.add_argument(
-        "--phase_2", 
-        action="store_true", 
-        help="Train in phase 2 with SCR module"
+        "--phase_2", action="store_true", help="Train in phase 2 with SCR module"
     )
     training_group.add_argument(
         "--phase_1",
@@ -122,51 +114,33 @@ def get_parser():
         default=None,
         help="Phase 1 checkpoint directory (for phase 2 training)",
     )
-    
+
     # SCR Module
     training_group.add_argument(
-        "--temperature", 
-        type=float, 
-        default=0.07,
-        help="SCR temperature parameter"
+        "--temperature", type=float, default=0.07, help="SCR temperature parameter"
     )
     training_group.add_argument(
-        "--mode", 
-        type=str, 
-        default="refinement",
-        help="SCR mode"
+        "--mode", type=str, default="refinement", help="SCR mode"
     )
     training_group.add_argument(
-        "--scr_image_size", 
-        type=int, 
-        default=96,
-        help="SCR image size"
+        "--scr_image_size", type=int, default=96, help="SCR image size"
     )
     training_group.add_argument(
-        "--scr_ckpt_path", 
-        type=str, 
-        default=None,
-        help="SCR checkpoint path"
+        "--scr_ckpt_path", type=str, default=None, help="SCR checkpoint path"
     )
     training_group.add_argument(
-        "--num_neg", 
-        type=int, 
-        default=16, 
-        help="Number of negative samples for SCR"
+        "--num_neg", type=int, default=16, help="Number of negative samples for SCR"
     )
     training_group.add_argument(
-        "--nce_layers", 
-        type=str, 
-        default="0,1,2,3",
-        help="NCE layer indices"
+        "--nce_layers", type=str, default="0,1,2,3", help="NCE layer indices"
     )
     training_group.add_argument(
-        "--sc_coefficient", 
-        type=float, 
+        "--sc_coefficient",
+        type=float,
         default=0.01,
-        help="Style consistency loss coefficient"
+        help="Style consistency loss coefficient",
     )
-    
+
     # Batch & Steps
     training_group.add_argument(
         "--train_batch_size",
@@ -181,10 +155,7 @@ def get_parser():
         help="Total training steps",
     )
     training_group.add_argument(
-        "--ckpt_interval", 
-        type=int, 
-        default=40000, 
-        help="Checkpoint save interval"
+        "--ckpt_interval", type=int, default=40000, help="Checkpoint save interval"
     )
     training_group.add_argument(
         "--gradient_accumulation_steps",
@@ -193,30 +164,21 @@ def get_parser():
         help="Gradient accumulation steps",
     )
     training_group.add_argument(
-        "--log_interval", 
-        type=int, 
-        default=100, 
-        help="Training log interval"
+        "--log_interval", type=int, default=100, help="Training log interval"
     )
     training_group.add_argument(
-        "--val_interval", 
-        type=int, 
-        default=100, 
-        help="Validation interval"
+        "--val_interval", type=int, default=100, help="Validation interval"
     )
-    
+
     # Loss Coefficients
     training_group.add_argument(
-        "--perceptual_coefficient", 
-        type=float, 
+        "--perceptual_coefficient",
+        type=float,
         default=0.01,
-        help="Perceptual loss coefficient"
+        help="Perceptual loss coefficient",
     )
     training_group.add_argument(
-        "--offset_coefficient", 
-        type=float, 
-        default=0.5,
-        help="Offset loss coefficient"
+        "--offset_coefficient", type=float, default=0.5, help="Offset loss coefficient"
     )
     training_group.add_argument(
         "--style_transform_coefficient",
@@ -224,7 +186,7 @@ def get_parser():
         default=0.1,
         help="Style transformation loss coefficient",
     )
-    
+
     # Learning Rate
     training_group.add_argument(
         "--learning_rate",
@@ -250,7 +212,7 @@ def get_parser():
         default=10000,
         help="LR warmup steps",
     )
-    
+
     # Classifier-Free Guidance
     training_group.add_argument(
         "--drop_prob",
@@ -258,7 +220,7 @@ def get_parser():
         default=0.1,
         help="Unconditional training dropout probability",
     )
-    
+
     # Scheduler
     training_group.add_argument(
         "--beta_scheduler",
@@ -266,7 +228,7 @@ def get_parser():
         default="scaled_linear",
         help="Beta scheduler for DDPM",
     )
-    
+
     # Optimizer
     training_group.add_argument(
         "--adam_beta1",
@@ -281,10 +243,7 @@ def get_parser():
         help="Adam beta2 parameter",
     )
     training_group.add_argument(
-        "--adam_weight_decay", 
-        type=float, 
-        default=1e-2, 
-        help="Adam weight decay"
+        "--adam_weight_decay", type=float, default=1e-2, help="Adam weight decay"
     )
     training_group.add_argument(
         "--adam_epsilon",
@@ -293,10 +252,7 @@ def get_parser():
         help="Adam epsilon value",
     )
     training_group.add_argument(
-        "--max_grad_norm", 
-        default=1.0, 
-        type=float, 
-        help="Max gradient norm"
+        "--max_grad_norm", default=1.0, type=float, help="Max gradient norm"
     )
     training_group.add_argument(
         "--mixed_precision",
@@ -307,7 +263,7 @@ def get_parser():
     )
 
     # ==================== Sampling/Inference ====================
-    sampling_group = parser.add_argument_group('Sampling Configuration')
+    sampling_group = parser.add_argument_group("Sampling Configuration")
     sampling_group.add_argument(
         "--algorithm_type",
         type=str,
@@ -327,34 +283,17 @@ def get_parser():
         help="Classifier-free guidance scale",
     )
     sampling_group.add_argument(
-        "--num_inference_steps", 
-        type=int, 
-        default=20, 
-        help="Number of inference steps"
+        "--num_inference_steps", type=int, default=20, help="Number of inference steps"
     )
     sampling_group.add_argument(
-        "--model_type", 
-        type=str, 
-        default="noise", 
-        help="Model type for sampling"
+        "--model_type", type=str, default="noise", help="Model type for sampling"
+    )
+    sampling_group.add_argument("--order", type=int, default=2, help="DPM-Solver order")
+    sampling_group.add_argument(
+        "--skip_type", type=str, default="time_uniform", help="DPM-Solver skip type"
     )
     sampling_group.add_argument(
-        "--order", 
-        type=int, 
-        default=2, 
-        help="DPM-Solver order"
-    )
-    sampling_group.add_argument(
-        "--skip_type", 
-        type=str, 
-        default="time_uniform", 
-        help="DPM-Solver skip type"
-    )
-    sampling_group.add_argument(
-        "--method", 
-        type=str, 
-        default="multistep", 
-        help="DPM-Solver method"
+        "--method", type=str, default="multistep", help="DPM-Solver method"
     )
     sampling_group.add_argument(
         "--correcting_x0_fn",
@@ -363,29 +302,19 @@ def get_parser():
         help="DPM-Solver x0 correction function",
     )
     sampling_group.add_argument(
-        "--t_start", 
-        type=str, 
-        default=None, 
-        help="DPM-Solver start time"
+        "--t_start", type=str, default=None, help="DPM-Solver start time"
     )
     sampling_group.add_argument(
-        "--t_end", 
-        type=str, 
-        default=None, 
-        help="DPM-Solver end time"
+        "--t_end", type=str, default=None, help="DPM-Solver end time"
     )
 
     # ==================== Inference-Specific Arguments ====================
-    inference_group = parser.add_argument_group('Inference-Specific')
+    inference_group = parser.add_argument_group("Inference-Specific")
+    inference_group.add_argument("--demo", action="store_true", help="Run in demo mode")
     inference_group.add_argument(
-        "--demo", 
+        "--character_input",
         action="store_true",
-        help="Run in demo mode"
-    )
-    inference_group.add_argument(
-        "--character_input", 
-        action="store_true",
-        help="Use character input instead of image"
+        help="Use character input instead of image",
     )
     inference_group.add_argument(
         "--content_character",
@@ -400,33 +329,19 @@ def get_parser():
         help="Path to text file with one character per line",
     )
     inference_group.add_argument(
-        "--content_image_path", 
-        type=str, 
-        default=None,
-        help="Path to content image"
+        "--content_image_path", type=str, default=None, help="Path to content image"
     )
     inference_group.add_argument(
-        "--style_image_path", 
-        type=str, 
-        default=None,
-        help="Path to style image"
+        "--style_image_path", type=str, default=None, help="Path to style image"
     )
     inference_group.add_argument(
-        "--save_image", 
-        action="store_true",
-        help="Save generated images"
+        "--save_image", action="store_true", help="Save generated images"
     )
     inference_group.add_argument(
-        "--save_image_dir", 
-        type=str, 
-        default=None, 
-        help="Image save directory"
+        "--save_image_dir", type=str, default=None, help="Image save directory"
     )
     inference_group.add_argument(
-        "--device", 
-        type=str, 
-        default="cuda:0",
-        help="Device to use"
+        "--device", type=str, default="cuda:0", help="Device to use"
     )
     inference_group.add_argument(
         "--ttf_path",
@@ -436,7 +351,7 @@ def get_parser():
     )
 
     # ==================== Batch Sampling Arguments ====================
-    batch_group = parser.add_argument_group('Batch Sampling')
+    batch_group = parser.add_argument_group("Batch Sampling")
     batch_group.add_argument(
         "--characters",
         type=str,
@@ -481,7 +396,7 @@ def get_parser():
     )
 
     # ==================== Style Transformation ====================
-    style_transform_group = parser.add_argument_group('Style Transformation')
+    style_transform_group = parser.add_argument_group("Style Transformation")
     style_transform_group.add_argument(
         "--enable_style_transform",
         action="store_true",
@@ -501,20 +416,14 @@ def get_parser():
         help="Hidden dimension for style transformation",
     )
     style_transform_group.add_argument(
-        "--num_heads", 
-        type=int, 
-        default=8, 
-        help="Number of attention heads"
+        "--num_heads", type=int, default=8, help="Number of attention heads"
     )
     style_transform_group.add_argument(
-        "--ffn_dim", 
-        type=int, 
-        default=2048, 
-        help="FFN dimension"
+        "--ffn_dim", type=int, default=2048, help="FFN dimension"
     )
 
     # ==================== FST (Font Style Transformation) ====================
-    fst_group = parser.add_argument_group('FST Enhancement')
+    fst_group = parser.add_argument_group("FST Enhancement")
     fst_group.add_argument(
         "--use_fst",
         action="store_true",
@@ -530,8 +439,8 @@ def get_parser():
     fst_group.add_argument(
         "--fst_num_queries",
         type=int,
-        default=256,
-        help="Number of learnable queries in FST",
+        default=220,
+        help="Number of learnable queries in FST (default 220 for 256 total)",
     )
     fst_group.add_argument(
         "--fst_query_dim",
@@ -577,12 +486,9 @@ def get_parser():
     )
 
     # ==================== Optimization Flags ====================
-    optimization_group = parser.add_argument_group('Performance Optimization')
+    optimization_group = parser.add_argument_group("Performance Optimization")
     optimization_group.add_argument(
-        "--fp16", 
-        action="store_true", 
-        default=False, 
-        help="Use FP16 precision"
+        "--fp16", action="store_true", default=False, help="Use FP16 precision"
     )
     optimization_group.add_argument(
         "--batch_size",
@@ -603,16 +509,10 @@ def get_parser():
         help="Use deterministic algorithms",
     )
     optimization_group.add_argument(
-        "--compile", 
-        action="store_true", 
-        default=False, 
-        help="Use torch.compile"
+        "--compile", action="store_true", default=False, help="Use torch.compile"
     )
     optimization_group.add_argument(
-        "--enable_xformers", 
-        action="store_true", 
-        default=False, 
-        help="Enable xFormers"
+        "--enable_xformers", action="store_true", default=False, help="Enable xFormers"
     )
     optimization_group.add_argument(
         "--enable_attention_slicing",
@@ -628,7 +528,7 @@ def get_parser():
     )
 
     # ==================== Evaluation ====================
-    eval_group = parser.add_argument_group('Evaluation')
+    eval_group = parser.add_argument_group("Evaluation")
     eval_group.add_argument(
         "--evaluate",
         action="store_true",
@@ -643,7 +543,7 @@ def get_parser():
     )
 
     # ==================== Logging & Tracking ====================
-    logging_group = parser.add_argument_group('Logging & Tracking')
+    logging_group = parser.add_argument_group("Logging & Tracking")
     logging_group.add_argument(
         "--use_wandb",
         action="store_true",
@@ -657,14 +557,11 @@ def get_parser():
         help="W&B project name",
     )
     logging_group.add_argument(
-        "--wandb_run_name", 
-        type=str, 
-        default=None, 
-        help="W&B run name"
+        "--wandb_run_name", type=str, default=None, help="W&B run name"
     )
 
     # ==================== Distributed Training ====================
-    distributed_group = parser.add_argument_group('Distributed Training')
+    distributed_group = parser.add_argument_group("Distributed Training")
     distributed_group.add_argument(
         "--local_rank",
         type=int,
@@ -673,7 +570,7 @@ def get_parser():
     )
 
     # ==================== Legacy/Advanced ====================
-    advanced_group = parser.add_argument_group('Advanced')
+    advanced_group = parser.add_argument_group("Advanced")
     advanced_group.add_argument(
         "--controlnet",
         action="store_true",

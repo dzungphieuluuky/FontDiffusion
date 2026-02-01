@@ -15,6 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 def get_nonorm_transform(resolution):
     """Get transform without normalization."""
     nonorm_transform = transforms.Compose(

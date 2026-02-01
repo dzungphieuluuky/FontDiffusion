@@ -13,6 +13,7 @@ import os
 import torch
 from safetensors.torch import save_file
 from datasets.utils import tqdm as hf_tqdm, enable_progress_bar
+from tqdm.auto import tqdm as auto_tqdm
 
 enable_progress_bar()
 """Utility functions for model inspection and logging."""
@@ -65,7 +66,8 @@ HF_BLUE = "#1055C9"
 HF_GREEN = "#41A67E"
 HF_ORANGE = "#FF8C00"
 HF_RED = "#E03E3E"
-
+HF_CYAN = "#00B8D9"
+HF_INDIGO = "#6554C0"
 HF_BAR_FORMAT = (
     "{desc}: {percentage:3.0f}%|{bar}| "
     "{n_fmt}/{total_fmt} "
@@ -75,7 +77,7 @@ HF_BAR_FORMAT = (
 T = TypeVar("T")
 
 
-class HFTqdm(hf_tqdm, Generic[T]):
+class HFTqdm(auto_tqdm, Generic[T]):
     def __init__(
         self,
         iterable: Optional[Iterable[T]] = None,
@@ -89,9 +91,9 @@ class HFTqdm(hf_tqdm, Generic[T]):
         kwargs.setdefault("unit", unit)
         kwargs.setdefault("unit_scale", True)
         kwargs.setdefault("bar_format", HF_BAR_FORMAT)
-        kwargs.setdefault("colour", HF_BLUE)
+        kwargs.setdefault("colour", HF_INDIGO)
         kwargs.setdefault("ascii", False)
-        kwargs.setdefault("ncols", 120)
+        kwargs.setdefault("ncols", 100)
         kwargs.setdefault("leave", True)
         kwargs["disable"] = disable
         super().__init__(iterable=iterable, desc=desc, total=total, **kwargs)
@@ -106,7 +108,7 @@ class HFTqdm(hf_tqdm, Generic[T]):
         super().update(n)
         if self.total:
             progress = self.n / self.total
-            self.colour = HF_BLUE if progress < 1.0 else HF_GREEN
+            self.colour = HF_INDIGO if progress < 1.0 else HF_GREEN
 
     def set_description(self, desc: Optional[str] = None, refresh: bool = True) -> None:
         if desc:
