@@ -69,6 +69,9 @@ class DatasetConfig:
         if isinstance(self.style_images_dir, str):
             self.style_images_dir = Path(self.style_images_dir)
 
+def filter_invalid_sample(sample):
+    return sample["character"] is not None
+
 
 class UltraFastDatasetBuilder:
     """Ultra-optimized dataset builder using map() and pre-encoded bytes."""
@@ -88,7 +91,7 @@ class UltraFastDatasetBuilder:
         # Auto-tune performance parameters
         self.cpu_count = os.cpu_count() or 4
         self.num_proc = max(1, self.cpu_count - 1)
-        self.process_batch_size = 1000  # Large batches reduce IPC overhead
+        self.process_batch_size = 1800  # Large batches reduce IPC overhead
         
         # Caches
         self.style_cache: dict[str, Image.Image] = {}
@@ -382,7 +385,11 @@ class UltraFastDatasetBuilder:
 
         # Filter out failed samples (None values become missing rows)
         original_size = len(dataset)
-        dataset = dataset.filter(lambda x: x["character"] is not None, num_proc=self.num_proc)
+        dataset = dataset.filter(
+            filter_invalid_sample, 
+            num_proc=self.num_proc,
+            desc="Filtering invalid samples",
+        )
         filtered_count = original_size - len(dataset)
         
         build_time = time.time() - start_time
