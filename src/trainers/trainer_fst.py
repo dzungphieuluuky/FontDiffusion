@@ -73,6 +73,10 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         self.num_consistency_pairs = getattr(args, "num_consistency_pairs", 0)
         self.consistency_loss_weight = getattr(args, "consistency_loss_weight", 0.1)
 
+        self.num_identity_pairs = getattr(args, "num_identity_pairs", 0)
+        self.identity_loss_weight = getattr(args, "identity_loss_weight", 0.1)
+        self.identity_pair_mode = getattr(args, "identity_pair_mode", "random")
+
         # Call parent constructor
         super().__init__(args)
 
@@ -296,8 +300,10 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             use_fst=self.use_fst,
             style_source_same_prob=self.style_source_same_prob,
             num_consistency_pairs=self.num_consistency_pairs,
+            num_identity_pairs=self.num_identity_pairs,  # ADD THIS
+            identity_pair_mode=self.identity_pair_mode,   # ADD THIS
         )
-
+        
         self.train_dataloader = torch.utils.data.DataLoader(
             train_dataset,
             shuffle=True,
@@ -307,7 +313,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             pin_memory=True,
             persistent_workers=True,
         )
-
+        
         logger.info(f"✓ Loaded FST dataset with {len(train_dataset)} samples")
 
     def _setup_optimizer(self):
@@ -418,7 +424,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         self,
         samples: dict[str, torch.Tensor],
     ) -> tuple[torch.Tensor, dict[str, float]]:
-        """Perform a single training step with FST model."""
+        """Perform a single training step with FST model including identity loss."""
         self.model.train()
 
         # Extract and prepare inputs
@@ -515,6 +521,28 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                     loss_dict["weighted_consistency_loss"] = (
                         self.consistency_loss_weight * consistency_loss.item()
                     )
+
+
+        if self.num_identity_pairs > 0 and samples.get("num_identity_pairs_total", 0) > 0:
+            identity_sources = samples["identity_pair_sources"]
+            identity_targets = samples["identity_pair_targets"]
+            
+            # Compute identity loss
+            identity_loss, identity_metrics = self.model.compute_identity_loss(
+                identity_sources,
+                identity_targets,
+                num_queries=self.fst_num_queries,
+            )
+            
+            # Add to total loss
+            total_loss = total_loss + self.identity_loss_weight * identity_loss
+            
+            # Log metrics
+            loss_dict["identity_loss"] = identity_loss.item()
+            loss_dict["identity_diagonal_mean"] = identity_metrics["diagonal_mean"]
+            loss_dict["identity_diagonal_std"] = identity_metrics["identity_diagonal_std"]
+
+
         return total_loss, loss_dict    
 
     def save_checkpoint(self, is_final: bool = False):
@@ -635,6 +663,11 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 "fst_num_queries": self.fst_num_queries,
                 "fst_query_dim": self.fst_query_dim,
                 "fst_num_scales": self.fst_num_scales,
+                "num_consistency_pairs": self.num_consistency_pairs,
+                "consistency_loss_weight": self.consistency_loss_weight,
+                "num_identity_pairs": self.num_identity_pairs,
+                "identity_loss_weight": self.identity_loss_weight,
+                "identity_pair_mode": self.identity_pair_mode,
             }
 
             if self.use_fst:
