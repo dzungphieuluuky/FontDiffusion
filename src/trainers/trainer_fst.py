@@ -541,8 +541,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             # Log metrics
             loss_dict["identity_loss"] = identity_loss.item()
             loss_dict["identity_diagonal_mean"] = identity_metrics["diagonal_mean"]
-            loss_dict["identity_diagonal_std"] = identity_metrics["identity_diagonal_std"]
-
+            loss_dict["identity_diagonal_std"] = identity_metrics["diagonal_std"]  # Fixed key name
 
         return total_loss, loss_dict    
 
