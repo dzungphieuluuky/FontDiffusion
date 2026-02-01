@@ -3,8 +3,8 @@ Ultra-optimized export of Hugging Face dataset to FontDiffusion directory struct
 
 Key optimizations applied:
 - Directory pre-creation cache (eliminates redundant mkdir system calls)
-- ProcessPoolExecutor for true parallel image encoding (GIL avoidance)
-- Worker-side image decoding (main thread decoupling)
+- Native HuggingFace Datasets parallelism (num_proc for Arrow-optimized I/O)
+- Batch processing with map() for memory efficiency
 - Streamed JSON metadata writing (constant memory usage)
 - Atomic file writes with temp files (corruption prevention)
 
@@ -14,7 +14,6 @@ import json
 import logging
 import os
 import tempfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -22,11 +21,13 @@ from typing import Any, Optional
 from datasets import Dataset, load_dataset
 from PIL import Image
 
-from filename_utils import (
+from src.tools.filename_utils import (
     compute_file_hash,
     get_content_filename,
     get_target_filename,
 )
+
+from src.tools.utilities import HFTqdm
 
 logger = logging.getLogger(__name__)
 
@@ -63,81 +64,10 @@ def _validate_dataset_structure(dataset: Dataset) -> None:
     logger.info(f"✓ Dataset structure validated. Columns: {dataset_cols}")
 
 
-def _save_image_worker(
-    sample_index: int,
-    dataset_path: str,
-    output_dir: str,
-    save_type: str,
-) -> Optional[dict[str, Any]]:
-    """Stateless worker function for image saving with atomic writes.
-
-    Args:
-        sample_index: Index in the dataset
-        dataset_path: Path to dataset on disk
-        output_dir: Root output directory
-        save_type: Either "content" or "target"
-
-    Returns:
-        Metadata dict with paths and hashes, or None on failure
-    """
-    try:
-        # Load dataset in worker (Arrow format makes this fast)
-        dataset = Dataset.load_from_disk(dataset_path)
-        sample = dataset[sample_index]
-
-        char = sample["character"]
-        style = sample["style"]
-        font = sample.get("font", "unknown")
-
-        output_path = Path(output_dir)
-
-        if save_type == "content":
-            content_img = sample.get("content_image")
-            if not isinstance(content_img, Image.Image):
-                return None
-
-            content_filename = get_content_filename(char)
-            final_path = output_path / "ContentImage" / content_filename
-
-            _atomic_save_image(content_img, final_path)
-
-            return {
-                "type": "content",
-                "character": char,
-                "style": style,
-                "font": font,
-                "filename": content_filename,
-                "content_hash": compute_file_hash(char, "", font),
-            }
-
-        else:  # save_type == "target"
-            target_img = sample.get("target_image")
-            if not isinstance(target_img, Image.Image):
-                return None
-
-            target_filename = get_target_filename(char, style)
-            final_path = output_path / "TargetImage" / style / target_filename
-
-            _atomic_save_image(target_img, final_path)
-
-            return {
-                "type": "target",
-                "character": char,
-                "style": style,
-                "font": font,
-                "content_filename": get_content_filename(char),
-                "target_filename": target_filename,
-                "content_hash": compute_file_hash(char, "", font),
-                "target_hash": compute_file_hash(char, style, font),
-            }
-
-    except Exception as e:
-        logger.debug(f"Worker failed to save {save_type} at index {sample_index}: {e}")
-        return None
-
-
 def _atomic_save_image(img: Image.Image, final_path: Path) -> None:
     """Save image atomically using temp file + rename."""
+    final_path.parent.mkdir(parents=True, exist_ok=True)
+    
     temp_fd, temp_path = tempfile.mkstemp(
         suffix=final_path.suffix, dir=final_path.parent
     )
@@ -156,6 +86,82 @@ def _atomic_save_image(img: Image.Image, final_path: Path) -> None:
         raise e
 
 
+@staticmethod
+def _process_batch(batch: dict, output_dir: str) -> dict:
+    """Process a batch of samples for parallel execution via Dataset.map().
+
+    This function is called by datasets library with num_proc parallelism.
+    It saves images and returns metadata for each sample.
+
+    Args:
+        batch: Dictionary of lists (HF batch format)
+        output_dir: Root output directory
+
+    Returns:
+        Dictionary with metadata lists
+    """
+    output_path = Path(output_dir)
+
+    # Initialize result lists
+    batch_size = len(batch["character"])
+    content_saved = []
+    target_saved = []
+    content_filenames = []
+    target_filenames = []
+    content_hashes = []
+    target_hashes = []
+
+    for i in HFTqdm(range(batch_size), desc="Processing batch"):
+        char = batch["character"][i]
+        style = batch["style"][i]
+        font = batch.get("font", ["unknown"] * batch_size)[i]
+
+        # Process content image
+        content_img = batch.get("content_image", [None] * batch_size)[i]
+        content_filename = get_content_filename(char)
+
+        if isinstance(content_img, Image.Image):
+            try:
+                final_path = output_path / "ContentImage" / content_filename
+                _atomic_save_image(content_img, final_path)
+                content_saved.append(True)
+            except Exception as e:
+                logger.debug(f"Failed to save content {content_filename}: {e}")
+                content_saved.append(False)
+        else:
+            content_saved.append(False)
+
+        # Process target image
+        target_img = batch.get("target_image", [None] * batch_size)[i]
+        target_filename = get_target_filename(char, style)
+
+        if isinstance(target_img, Image.Image):
+            try:
+                final_path = output_path / "TargetImage" / style / target_filename
+                _atomic_save_image(target_img, final_path)
+                target_saved.append(True)
+            except Exception as e:
+                logger.debug(f"Failed to save target {target_filename}: {e}")
+                target_saved.append(False)
+        else:
+            target_saved.append(False)
+
+        # Store metadata
+        content_filenames.append(content_filename)
+        target_filenames.append(target_filename)
+        content_hashes.append(compute_file_hash(char, "", font))
+        target_hashes.append(compute_file_hash(char, style, font))
+
+    return {
+        "content_saved": content_saved,
+        "target_saved": target_saved,
+        "content_filename": content_filenames,
+        "target_filename": target_filenames,
+        "content_hash": content_hashes,
+        "target_hash": target_hashes,
+    }
+
+
 # ============================================================================
 # EXPORT CONFIGURATION
 # ============================================================================
@@ -172,6 +178,7 @@ class ExportConfig:
     config_name: Optional[str] = None
     token: Optional[str] = None
     num_workers: int = 4
+    batch_size: int = 1000
 
     def __post_init__(self):
         """Validate and convert paths."""
@@ -192,7 +199,7 @@ class ExportConfig:
 
 
 class UltraFastDatasetExporter:
-    """Ultra-optimized dataset exporter with process-based parallelism."""
+    """Ultra-optimized dataset exporter using native Datasets parallelism."""
 
     def __init__(self, config: ExportConfig):
         """Initialize the exporter."""
@@ -205,14 +212,14 @@ class UltraFastDatasetExporter:
         self.num_workers = min(config.num_workers, self.cpu_count)
 
         logger.info(f"Ultra-fast exporter initialized:")
-        logger.info(f"  Workers: {self.num_workers} processes")
+        logger.info(f"  Workers: {self.num_workers} (via dataset.map num_proc)")
         logger.info(f"  Output: {self.output_dir}")
 
-    def _load_dataset(self) -> tuple[Dataset, str]:
+    def _load_dataset(self) -> Dataset:
         """Load dataset from Hub or local disk.
 
         Returns:
-            Tuple of (dataset, dataset_path_on_disk)
+            Loaded dataset
 
         Raises:
             ValueError: If dataset cannot be loaded
@@ -227,7 +234,7 @@ class UltraFastDatasetExporter:
                 dataset = Dataset.load_from_disk(str(self.config.local_dataset_path))
                 _validate_dataset_structure(dataset)
                 logger.info(f"Loaded {len(dataset)} samples from disk")
-                return dataset, str(self.config.local_dataset_path)
+                return dataset
             except Exception as e:
                 raise ValueError(f"Failed to load local dataset: {e}") from e
 
@@ -250,15 +257,8 @@ class UltraFastDatasetExporter:
             )
             
             _validate_dataset_structure(dataset)
-
-            # Save to temp cache for worker access
-            temp_cache = tempfile.mkdtemp(prefix="fontdiffusion_export_")
-            dataset.save_to_disk(temp_cache)
-
-            logger.info(
-                f"Loaded {len(dataset)} samples from Hub (cached to {temp_cache})"
-            )
-            return dataset, temp_cache
+            logger.info(f"Loaded {len(dataset)} samples from Hub")
+            return dataset
 
         except Exception as e:
             logger.error(
@@ -284,91 +284,89 @@ class UltraFastDatasetExporter:
 
         logger.info(f"Pre-created {len(unique_styles)} style directories")
 
-    def _export_with_streaming_json(
-        self,
-        dataset: Dataset,
-        dataset_path: str,
-    ) -> dict[str, Any]:
-        """Export images with process-based parallelism and streaming JSON writes."""
-        logger.info(f"Exporting with {self.num_workers} parallel workers...")
+    def _export_with_map(self, dataset: Dataset) -> dict[str, Any]:
+        """Export images using dataset.map() with num_proc parallelism.
 
-        dataset_size = len(dataset)
+        Key optimizations:
+        - Native HuggingFace Datasets parallelism (Arrow-optimized I/O)
+        - Batch processing for memory efficiency
+        - Incremental JSON writing (constant memory usage)
+        - Atomic file writes (corruption prevention)
+
+        Args:
+            dataset: Dataset to export
+
+        Returns:
+            Metadata dictionary
+        """
+        logger.info(
+            f"Exporting with dataset.map() using {self.num_workers} workers..."
+        )
+
         checkpoint_path = self.output_dir / "results_checkpoint.json"
+
+        # Process dataset with parallel map
+        logger.info("Processing samples with dataset.map()...")
+
+        processed_dataset = dataset.map(
+            _process_batch,
+            batched=True,
+            batch_size=self.config.batch_size,
+            num_proc=self.num_workers,
+            desc="Exporting images",
+            fn_kwargs={"output_dir": str(self.output_dir)},
+        )
+
+        # Write checkpoint JSON
+        logger.info("Writing results_checkpoint.json...")
 
         with checkpoint_path.open("w", encoding="utf-8") as json_file:
             json_file.write('{\n  "generations": [\n')
 
-            exported_content = set()
             generations_count = 0
             characters = set()
             styles = set()
             fonts = set()
 
-            with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
-                futures = []
+            # Iterate through processed dataset
+            for i, sample in enumerate(processed_dataset):
+                char = sample["character"]
+                style = sample["style"]
+                font = sample.get("font", "unknown")
 
-                for i in range(dataset_size):
-                    futures.append(
-                        executor.submit(
-                            _save_image_worker,
-                            i,
-                            dataset_path,
-                            str(self.output_dir),
-                            "content",
-                        )
+                # Track unique values
+                characters.add(char)
+                styles.add(style)
+                fonts.add(font)
+
+                # Write generation record if target was saved
+                if sample.get("target_saved", False):
+                    generation = {
+                        "character": char,
+                        "style": style,
+                        "font": font,
+                        "content_image_path": f"ContentImage/{sample['content_filename']}",
+                        "target_image_path": f"TargetImage/{style}/{sample['target_filename']}",
+                        "content_hash": sample["content_hash"],
+                        "target_hash": sample["target_hash"],
+                    }
+
+                    if generations_count > 0:
+                        json_file.write(",\n")
+                    json_file.write("    ")
+                    json.dump(generation, json_file, ensure_ascii=False)
+                    generations_count += 1
+
+                # Log progress
+                if (i + 1) % 1000 == 0:
+                    progress_pct = (i + 1) * 100 // len(processed_dataset)
+                    logger.info(
+                        f"Progress: {i + 1}/{len(processed_dataset)} samples "
+                        f"({progress_pct}%) - "
+                        f"{generations_count} target images written"
                     )
-                    futures.append(
-                        executor.submit(
-                            _save_image_worker,
-                            i,
-                            dataset_path,
-                            str(self.output_dir),
-                            "target",
-                        )
-                    )
 
-                completed = 0
-
-                for future in as_completed(futures):
-                    result = future.result()
-
-                    if result:
-                        if result["type"] == "content":
-                            if result["filename"] not in exported_content:
-                                exported_content.add(result["filename"])
-                                characters.add(result["character"])
-
-                        elif result["type"] == "target":
-                            styles.add(result["style"])
-                            fonts.add(result["font"])
-                            characters.add(result["character"])
-
-                            generation = {
-                                "character": result["character"],
-                                "style": result["style"],
-                                "font": result["font"],
-                                "content_image_path": f"ContentImage/{result['content_filename']}",
-                                "target_image_path": f"TargetImage/{result['style']}/{result['target_filename']}",
-                                "content_hash": result["content_hash"],
-                                "target_hash": result["target_hash"],
-                            }
-
-                            if generations_count > 0:
-                                json_file.write(",\n")
-                            json_file.write("    ")
-                            json.dump(generation, json_file, ensure_ascii=False)
-                            generations_count += 1
-
-                    completed += 1
-
-                    if completed % 1000 == 0:
-                        progress_pct = completed * 100 // (dataset_size * 2)
-                        logger.info(
-                            f"Progress: {completed}/{dataset_size * 2} tasks "
-                            f"({progress_pct}%) - "
-                            f"{len(exported_content)} content, {generations_count} target"
-                        )
-
+            # Write JSON footer
             json_file.write("\n  ],\n")
             json_file.write(
                 f'  "characters": {json.dumps(sorted(characters), ensure_ascii=False)},\n'
@@ -383,14 +381,17 @@ class UltraFastDatasetExporter:
             json_file.write(f'  "total_styles": {len(styles)}\n')
             json_file.write("}\n")
 
+        # Count actual content files (they were deduplicated)
+        content_count = len(list(self.content_dir.glob("*.png")))
+
         logger.info(
-            f"Exported {len(exported_content)} content images, "
+            f"Exported {content_count} content images, "
             f"{generations_count} target images"
         )
 
         return {
             "generations_count": generations_count,
-            "content_count": len(exported_content),
+            "content_count": content_count,
             "characters": sorted(characters),
             "styles": sorted(styles),
             "fonts": sorted(fonts) if fonts else ["unknown"],
@@ -402,9 +403,9 @@ class UltraFastDatasetExporter:
         """Execute the full export process."""
         logger.info("Starting ultra-fast dataset export...")
 
-        dataset, dataset_path = self._load_dataset()
+        dataset = self._load_dataset()
         self._precreate_directories(dataset)
-        metadata = self._export_with_streaming_json(dataset, dataset_path)
+        metadata = self._export_with_map(dataset)
 
         logger.info("Export completed successfully")
         return metadata
@@ -423,8 +424,11 @@ def export_dataset(
     config_name: Optional[str] = None,
     token: Optional[str] = None,
     num_workers: int = 4,
+    batch_size: int = 1000,
 ) -> dict[str, Any]:
     """Export HuggingFace dataset to disk with ultra-fast processing.
+
+    Uses dataset.map(num_proc=...) for clean, multiprocessing-free parallelism.
 
     Args:
         output_dir: Directory to export to
@@ -434,6 +438,7 @@ def export_dataset(
         config_name: Dataset configuration name
         token: HuggingFace API token
         num_workers: Number of parallel workers (default: 4)
+        batch_size: Batch size for processing (default: 1000)
 
     Returns:
         Metadata dictionary from results_checkpoint.json
@@ -446,6 +451,7 @@ def export_dataset(
         config_name=config_name,
         token=token,
         num_workers=num_workers,
+        batch_size=batch_size,
     )
 
     exporter = UltraFastDatasetExporter(config)
@@ -457,15 +463,15 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Ultra-fast HuggingFace dataset exporter",
+        description="Ultra-fast HuggingFace dataset exporter using dataset.map(num_proc=...)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   # Export from local dataset
-  python tools/export_dataset_ultra.py --output-dir ./output --local-path my_dataset/
+  python src/tools/export_dataset_ultra.py --output-dir ./output --local-path my_dataset/
   
   # Export from Hub
-  python tools/export_dataset_ultra.py --output-dir ./output --repo-id user/dataset --workers 8
+  python src/tools/export_dataset_ultra.py --output-dir ./output --repo-id user/dataset --workers 8
         """,
     )
 
@@ -478,8 +484,14 @@ Examples:
     parser.add_argument(
         "--workers",
         type=int,
-        default=max(1, os.cpu_count() - 1),
-        help="Number of workers",
+        default=max(1, (os.cpu_count() or 4) - 1),
+        help="Number of workers (default: cpu_count - 1)",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=1000,
+        help="Batch size for processing (default: 1000)",
     )
 
     args = parser.parse_args()
@@ -498,6 +510,7 @@ Examples:
             config_name=args.config_name,
             token=args.token,
             num_workers=args.workers,
+            batch_size=args.batch_size,
         )
 
         print(f"\n✅ Export completed!")
