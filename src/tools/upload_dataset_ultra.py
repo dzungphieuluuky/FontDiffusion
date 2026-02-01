@@ -31,7 +31,7 @@ from PIL import Image, ImageFile
 import cv2
 import numpy as np
 
-from src.tools.utilities import HFTqdm
+from utilities import HFTqdm
 # Enable PIL optimizations
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 Image.MAX_IMAGE_PIXELS = None
