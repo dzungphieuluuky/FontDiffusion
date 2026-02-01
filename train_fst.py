@@ -80,6 +80,12 @@ def main():
         logger.info("✅ Training completed successfully!")
         logger.info("=" * 80)
 
+        # Export to ONNX if flag is set
+        if args.export_onnx:
+            logger.info("\nStarting ONNX export...")
+            trainer.export_to_onnx()
+            logger.info("✓ ONNX export finished!")
+            
     except KeyboardInterrupt:
         logger.warning("Training interrupted by user")
         sys.exit(130)

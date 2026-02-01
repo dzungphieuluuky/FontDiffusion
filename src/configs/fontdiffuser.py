@@ -615,6 +615,27 @@ def get_parser():
         help="If set, outputs a torchinfo summary of all core models to model_summary.txt",
     )
 
+    # ==================== ONNX Export ====================
+    export_group = parser.add_argument_group("Model Export")
+    export_group.add_argument(
+        "--export_onnx",
+        action="store_true",
+        default=False,
+        help="Export model to ONNX format after training for visualization with netron.app",
+    )
+    export_group.add_argument(
+        "--onnx_opset_version",
+        type=int,
+        default=17,
+        help="ONNX opset version (default: 17 for better operator support)",
+    )
+    export_group.add_argument(
+        "--onnx_export_dir",
+        type=str,
+        default=None,
+        help="Directory to save ONNX models (defaults to output_dir/onnx)",
+    )
+
     # ==================== Distributed Training ====================
     distributed_group = parser.add_argument_group("Distributed Training")
     distributed_group.add_argument(

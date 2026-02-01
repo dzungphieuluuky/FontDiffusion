@@ -18,6 +18,10 @@ from accelerate.utils import set_seed
 from diffusers.optimization import get_scheduler
 from torchvision import transforms
 
+import onnx
+import onnxruntime
+from onnx.external_data_helper import convert_model_to_external_data
+
 from src.dataset.font_dataset_fst import FontDataset as FontDatasetFST
 from src.dataset.collate_fn_fst import CollateFN as CollateFNFST
 from src.modules import UNet, ContentEncoder, StyleEncoder, SCR
@@ -774,3 +778,160 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
 
             self.accelerator.log({"fst_config": fst_config})
             logger.info(f"FST Configuration: {fst_config}")
+
+    def export_to_onnx(self) -> bool:
+        """
+        Export trained FST model to ONNX format as a single unified model.
+        
+        Returns:
+            bool: True if export successful, False otherwise
+        """
+        if not self.accelerator.is_main_process:
+            return False
+        
+        try:
+            logger.info("=" * 80)
+            logger.info("Exporting FontDiffuserWithFST model to ONNX...")
+            logger.info("=" * 80)
+            
+            # Determine export directory
+            if self.args.onnx_export_dir:
+                export_dir = Path(self.args.onnx_export_dir)
+            else:
+                export_dir = Path(self.args.output_dir) / "onnx"
+            
+            export_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Unwrap model
+            unwrapped_model = self.accelerator.unwrap_model(self.model)
+            unwrapped_model.eval()
+            
+            device = next(unwrapped_model.parameters()).device
+            
+            # Prepare dummy inputs matching FontDiffuserWithFST.forward signature
+            batch_size = 1
+            dummy_inputs = (
+                torch.randn(batch_size, 4, 12, 12, device=device),      # noisy_latents
+                torch.tensor([0], dtype=torch.long, device=device),      # timestep
+                torch.randn(batch_size, 1, 96, 96, device=device),       # content_img
+                torch.randn(batch_size, 1, 96, 96, device=device),       # style_source_img
+                torch.randn(batch_size, 1, 96, 96, device=device),       # style_target_img
+            )
+            
+            input_names = [
+                "noisy_latents",
+                "timestep",
+                "content_img",
+                "style_source_img",
+                "style_target_img",
+            ]
+            
+            output_names = [
+                "noise_pred",
+                "offset_out_sum",
+                "content_features",
+                "transformation_features",
+                "fst_condition",
+                "source_style_features",
+                "target_style_features",
+                "orig_style_feat",
+                "orig_style_vec",
+            ]
+            
+            onnx_path = export_dir / "fontdiffuser_fst_model.onnx"
+            
+            logger.info(f"\nExporting model to: {onnx_path}")
+            logger.info(f"Input shapes:")
+            for name, tensor in zip(input_names, dummy_inputs):
+                logger.info(f"  - {name}: {tuple(tensor.shape)}")
+            logger.info(f"Output shapes: {output_names}")
+            
+            # Create wrapper to handle dict return
+            class ONNXWrapper(torch.nn.Module):
+                def __init__(self, model):
+                    super().__init__()
+                    self.model = model
+                
+                def forward(self, noisy_latents, timestep, content_img, style_source_img, style_target_img):
+                    output_dict = self.model(
+                        noisy_latents=noisy_latents,
+                        timestep=timestep,
+                        content_img=content_img,
+                        style_source_img=style_source_img,
+                        style_target_img=style_target_img,
+                        content_encoder_downsample_size=self.model.model.content_encoder_downsample_size if hasattr(self.model, 'model') else 4,
+                        return_dict=True,
+                    )
+                    
+                    # Return outputs in order matching output_names
+                    return (
+                        output_dict["noise_pred"],
+                        output_dict["offset_out_sum"],
+                        output_dict["content_features"],
+                        output_dict["transformation_features"],
+                        output_dict["fst_condition"],
+                        output_dict["source_style_features"],
+                        output_dict["target_style_features"],
+                        output_dict["orig_style_feat"],
+                        output_dict["orig_style_vec"],
+                    )
+            
+            wrapper_model = ONNXWrapper(unwrapped_model)
+            wrapper_model.eval()
+            
+            # Export to ONNX
+            with torch.no_grad():
+                torch.onnx.export(
+                    wrapper_model,
+                    dummy_inputs,
+                    str(onnx_path),
+                    input_names=input_names,
+                    output_names=output_names,
+                    opset_version=self.args.onnx_opset_version,
+                    do_constant_folding=True,
+                    verbose=False,
+                    use_external_data_format=False,
+                    dynamic_axes={
+                        "noisy_latents": {0: "batch_size"},
+                        "content_img": {0: "batch_size"},
+                        "style_source_img": {0: "batch_size"},
+                        "style_target_img": {0: "batch_size"},
+                        "timestep": {0: "batch_size"},
+                        "noise_pred": {0: "batch_size"},
+                        "offset_out_sum": {0: "batch_size"},
+                    },
+                )
+            
+            # Validate ONNX model
+            try:
+                onnx_model = onnx.load(str(onnx_path))
+                onnx.checker.check_model(onnx_model)
+                logger.info(f"✓ ONNX model validation passed")
+                
+                # Print model info
+                graph = onnx_model.graph
+                logger.info(f"\nONNX Model Information:")
+                logger.info(f"  - Inputs: {len(graph.input)}")
+                logger.info(f"  - Outputs: {len(graph.output)}")
+                logger.info(f"  - Nodes: {len(graph.node)}")
+                
+            except Exception as e:
+                logger.warning(f"ONNX validation warning: {e}")
+            
+            # Get file size
+            file_size_mb = onnx_path.stat().st_size / (1024 * 1024)
+            
+            logger.info("=" * 80)
+            logger.info(f"✓ ONNX export complete!")
+            logger.info(f"  - File: {onnx_path}")
+            logger.info(f"  - Size: {file_size_mb:.2f} MB")
+            logger.info(f"  - Opset version: {self.args.onnx_opset_version}")
+            logger.info(f"  - Visualize at: https://netron.app/")
+            logger.info("=" * 80)
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to export to ONNX: {e}")
+            logger.debug(traceback.format_exc())
+            return False
+        
