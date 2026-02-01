@@ -378,7 +378,7 @@ class FontDiffuserWithFST(nn.Module):
             target_style_features,
         )  # (B, N_L + H*W, D)
         
-        # Extract learnable query portion only
+        # Extract learnable query portion only BEFORE computing correlation
         query_features = transformation_features[:, :num_queries, :]  # (B, N_L, D)
         
         B, N, D = query_features.shape
@@ -389,13 +389,14 @@ class FontDiffuserWithFST(nn.Module):
         target_norm = F.normalize(query_features, p=2, dim=-1)
         
         # Self-similarity matrix (should be identity when same-style)
+        # (B, D, N) @ (B, N, D) = (B, D, D)
         correlation = torch.bmm(
             source_norm.transpose(1, 2),  # (B, D, N)
             target_norm                     # (B, N, D)
-        ).transpose(1, 2)  # (B, N, N)
+        )  # (B, D, D)
         
         # Distance from identity matrix
-        identity_matrix = torch.eye(N, device=correlation.device).unsqueeze(0).expand(B, -1, -1)
+        identity_matrix = torch.eye(D, device=correlation.device).unsqueeze(0).expand(B, -1, -1)  # (B, D, D)
         diff = correlation - identity_matrix
         
         # Frobenius norm: identity loss
@@ -413,7 +414,7 @@ class FontDiffuserWithFST(nn.Module):
         
         # Compute metrics
         with torch.no_grad():
-            diagonal = torch.diagonal(correlation, dim1=1, dim2=2)  # (B, N)
+            diagonal = torch.diagonal(correlation, dim1=1, dim2=2)  # (B, D)
             metrics = {
                 "identity_loss": identity_loss.item(),
                 "ortho_loss": ortho_loss.item(),
@@ -421,8 +422,7 @@ class FontDiffuserWithFST(nn.Module):
                 "diagonal_std": diagonal.std().item(),
             }
         
-        return total_loss, metrics
-    
+        return total_loss, metrics    
 
     
 class FontDiffuserModel(ModelMixin, ConfigMixin):
