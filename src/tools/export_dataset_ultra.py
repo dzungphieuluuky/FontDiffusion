@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
-from datasets import Dataset, load_dataset, list_datasets
+from datasets import Dataset, load_dataset
 from PIL import Image
 
 from filename_utils import (
