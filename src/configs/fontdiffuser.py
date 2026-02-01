@@ -566,6 +566,12 @@ def get_parser():
         default=False,
         help="Use fast sampling mode",
     )
+    optimization_group.add_argument(
+        "--num_workers",
+        type=int,
+        default=os.cpu_count() - 1,
+        help="Number of DataLoader workers",
+    )
 
     # ==================== Evaluation ====================
     eval_group = parser.add_argument_group("Evaluation")

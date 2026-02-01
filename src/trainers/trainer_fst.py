@@ -5,6 +5,7 @@ Extends base FontDiffuserTrainer with FST-specific functionality.
 
 import argparse
 import logging
+import os
 import traceback
 from dataclasses import asdict
 from pathlib import Path
@@ -19,6 +20,7 @@ from torchvision import transforms
 
 from src.dataset.font_dataset_fst import FontDataset as FontDatasetFST
 from src.dataset.collate_fn_fst import CollateFN as CollateFNFST
+from src.modules import UNet, ContentEncoder, StyleEncoder, SCR
 from src import (
     ContentPerceptualLoss,
     FontDiffuserModel,
@@ -58,24 +60,23 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
     def __init__(self, args: argparse.Namespace):
         """Initialize FST trainer."""
         # Store FST-specific args before calling super
-        self.use_fst = getattr(args, "use_fst", True)
-        self.freeze_original_encoders = getattr(args, "freeze_original_encoders", False)
-        self.style_source_same_prob = getattr(args, "style_source_same_prob", 0.5)
+        self.use_fst: bool = getattr(args, "use_fst", True)
+        self.freeze_original_encoders: bool = getattr(args, "freeze_original_encoders", False)
+        self.style_source_same_prob: float = getattr(args, "style_source_same_prob", 0.5)
 
         # Parse FST configuration
-        self.fst_feature_channels = self._parse_feature_channels(
+        self.fst_feature_channels: list[int] = self._parse_feature_channels(
             getattr(args, "fst_feature_channels", "64,128,256,512,1024")
         )
-        self.fst_num_queries = getattr(args, "fst_num_queries", 256)
-        self.fst_query_dim = getattr(args, "fst_query_dim", 128)
-        self.fst_num_scales = getattr(args, "fst_num_scales", 5)
+        self.fst_num_queries: int = getattr(args, "fst_num_queries", 256)
+        self.fst_query_dim: int = getattr(args, "fst_query_dim", 128)
+        self.fst_num_scales: int = getattr(args, "fst_num_scales", 5)
+        self.num_consistency_pairs: int = getattr(args, "num_consistency_pairs", 0)
+        self.consistency_loss_weight: float = getattr(args, "consistency_loss_weight", 0.1)
 
-        self.num_consistency_pairs = getattr(args, "num_consistency_pairs", 0)
-        self.consistency_loss_weight = getattr(args, "consistency_loss_weight", 0.1)
-
-        self.num_identity_pairs = getattr(args, "num_identity_pairs", 0)
-        self.identity_loss_weight = getattr(args, "identity_loss_weight", 0.1)
-        self.identity_pair_mode = getattr(args, "identity_pair_mode", "random")
+        self.num_identity_pairs: int = getattr(args, "num_identity_pairs", 0)
+        self.identity_loss_weight: float = getattr(args, "identity_loss_weight", 0.1)
+        self.identity_pair_mode: str = getattr(args, "identity_pair_mode", "random")
 
         # Call parent constructor
         super().__init__(args)
@@ -91,9 +92,9 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         logger.info("Building model components...")
 
         # Build core components
-        unet = build_unet(args=self.args)
-        style_encoder = build_style_encoder(args=self.args)
-        content_encoder = build_content_encoder(args=self.args)
+        unet: UNet = build_unet(args=self.args)
+        style_encoder: StyleEncoder = build_style_encoder(args=self.args)
+        content_encoder: ContentEncoder = build_content_encoder(args=self.args)
         self.noise_scheduler = build_ddpm_scheduler(self.args)
 
         # Load phase 1 checkpoints if specified
@@ -309,7 +310,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             shuffle=True,
             batch_size=self.config.train_batch_size,
             collate_fn=CollateFNFST(),
-            num_workers=getattr(self.args, "num_workers", 4),
+            num_workers=getattr(self.args, "num_workers", os.cpu_count() - 1),
             pin_memory=True,
             persistent_workers=True,
         )
