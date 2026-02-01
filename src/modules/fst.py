@@ -276,12 +276,15 @@ class FontStyleTransformationModule(nn.Module):
 
             # Add learnable positional encoding (before Eq. 5)
             pe = self.pos_encodings[i]
-            f_src = f_src + pe
-            f_tgt = f_tgt + pe
+            f_src = f_src + pe(f_src)  # Call pe as a module
+            f_tgt = f_tgt + pe(f_tgt)  # Call pe as a module
 
             # Flatten spatial dimensions: (B, C, H, W) -> (B, H*W, C)
             f_src_flat = rearrange(f_src, "b c h w -> b (h w) c")
             f_tgt_flat = rearrange(f_tgt, "b c h w -> b (h w) c")
+
+
+
 
             # Project for attention: Q_i = L W_i^Q, K_i = f^{s,i} W_i^K, V_i = f^{s,i} W_i^V
             Q = queries  # (B, N_L, d)
