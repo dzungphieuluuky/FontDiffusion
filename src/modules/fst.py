@@ -109,45 +109,39 @@ class AdaptivePositionalEncoding(nn.Module):
         """x: (B, C, H, W)"""
         B, C, H, W = x.shape
 
-        # Interpolate if input size doesn't match
-        h_embed = (
-            F.interpolate(
-                self.height_embed.unsqueeze(0).unsqueeze(-1),
-                size=(H, 1),
-                mode="bilinear",
-                align_corners=False,
-            )
-            .squeeze(-1)
-            .permute(0, 2, 1)
-        )  # (1, H, C//2)
+        # Interpolate height embedding: (max_h, C//2) -> (H, C//2)
+        h_embed = F.interpolate(
+            self.height_embed.unsqueeze(0).unsqueeze(0),  # (1, 1, max_h, C//2)
+            size=(H, C // 2),
+            mode="bilinear",
+            align_corners=False,
+        ).squeeze(0).squeeze(0)  # (H, C//2)
 
-        w_embed = (
-            F.interpolate(
-                self.width_embed.unsqueeze(0).unsqueeze(1),
-                size=(1, W),
-                mode="bilinear",
-                align_corners=False,
-            )
-            .squeeze(1)
-            .permute(0, 2, 1)
-        )  # (1, W, C//2)
+        # Interpolate width embedding: (max_w, C//2) -> (W, C//2)
+        w_embed = F.interpolate(
+            self.width_embed.unsqueeze(0).unsqueeze(0),  # (1, 1, max_w, C//2)
+            size=(W, C // 2),
+            mode="bilinear",
+            align_corners=False,
+        ).squeeze(0).squeeze(0)  # (W, C//2)
 
-        # Combine height and width embeddings using proper broadcasting
-        # h_embed: (1, H, C//2) -> (1, H, 1, C//2)
-        # w_embed: (1, W, C//2) -> (1, 1, W, C//2)
-        h_embed_spatial = h_embed.unsqueeze(2)  # (1, H, 1, C//2)
-        w_embed_spatial = w_embed.unsqueeze(1)  # (1, 1, W, C//2)
+        # Broadcast to spatial grid
+        # h_embed: (H, C//2) -> (1, H, 1, C//2)
+        # w_embed: (W, C//2) -> (1, 1, W, C//2)
+        h_embed_spatial = h_embed.unsqueeze(0).unsqueeze(2)  # (1, H, 1, C//2)
+        w_embed_spatial = w_embed.unsqueeze(0).unsqueeze(1)  # (1, 1, W, C//2)
         
+        # Concatenate and expand: (1, H, W, C)
         pos_embed = torch.cat(
             [
-                h_embed_spatial.expand(1, H, W, C // 2),
-                w_embed_spatial.expand(1, H, W, C // 2),
+                h_embed_spatial.expand(B, H, W, C // 2),
+                w_embed_spatial.expand(B, H, W, C // 2),
             ],
             dim=-1,
-        ).permute(0, 3, 1, 2)  # (1, C, H, W)
+        ).permute(0, 3, 1, 2)  # (B, C, H, W)
 
         return x + self.scale * pos_embed
-
+    
 class FontStyleTransformationModule(nn.Module):
     def __init__(
         self,
