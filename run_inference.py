@@ -250,12 +250,51 @@ def main() -> int:
     parser = create_parser()
     args, remaining_args = parser.parse_known_args()
 
+    # Import centralized parser for summary flag
+    from src.configs.fontdiffuser import get_parser as get_fd_parser
+    fd_parser = get_fd_parser()
+    fd_args, _ = fd_parser.parse_known_args(remaining_args)
+
     mode: str = args.mode
 
     logger.info("=" * 70)
     logger.info(f"FontDiffuser Inference - Mode: {mode}")
     logger.info("=" * 70)
     save_sampling_config(args, "sampling_config.yaml")
+
+    # Torchinfo summary (if enabled)
+    if getattr(fd_args, "summary", False):
+        try:
+            import torch
+            from torchinfo import summary
+            from src import build_unet, build_style_encoder, build_content_encoder
+
+            logger.info("Generating model summary (torchinfo)...")
+            # Build models with parsed args
+            unet = build_unet(args=fd_args)
+            style_encoder = build_style_encoder(args=fd_args)
+            content_encoder = build_content_encoder(args=fd_args)
+
+            # Example input shapes (batch_size=1, C=1, H, W)
+            img_size = fd_args.resolution if hasattr(fd_args, "resolution") else 96
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            unet = unet.to(device)
+            style_encoder = style_encoder.to(device)
+            content_encoder = content_encoder.to(device)
+
+            with open("model_summary.txt", "w", encoding="utf-8") as f:
+                f.write("UNet:\n")
+                f.write(str(summary(unet, input_size=(1, 1, img_size, img_size), device=device, verbose=0)))
+                f.write("\n\nStyleEncoder:\n")
+                f.write(str(summary(style_encoder, input_size=(1, 1, img_size, img_size), device=device, verbose=0)))
+                f.write("\n\nContentEncoder:\n")
+                f.write(str(summary(content_encoder, input_size=(1, 1, img_size, img_size), device=device, verbose=0)))
+            logger.info("✓ Model summary saved to model_summary.txt")
+        except ImportError:
+            logger.warning("torchinfo not installed; skipping model summary.")
+        except Exception as e:
+            logger.error(f"Failed to generate model summary: {e}")
+
     # Route to appropriate inference mode with remaining arguments
     if mode == "sample_optimized":
         logger.info("Running single-image optimized inference...")

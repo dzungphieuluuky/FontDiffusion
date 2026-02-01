@@ -600,6 +600,15 @@ def get_parser():
         "--wandb_run_name", type=str, default=None, help="W&B run name"
     )
 
+    # ==================== Model Summary ====================
+    summary_group = parser.add_argument_group("Model Summary")
+    summary_group.add_argument(
+        "--summary",
+        action="store_true",
+        default=False,
+        help="If set, outputs a torchinfo summary of all core models to model_summary.txt",
+    )
+
     # ==================== Distributed Training ====================
     distributed_group = parser.add_argument_group("Distributed Training")
     distributed_group.add_argument(
