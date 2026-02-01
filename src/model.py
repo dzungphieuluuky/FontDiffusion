@@ -346,6 +346,85 @@ class FontDiffuserWithFST(nn.Module):
         total_loss = variance_loss + 0.05 * kl_loss
         
         return total_loss
+    
+
+    def compute_identity_loss(
+        self,
+        identity_pair_sources: torch.Tensor,
+        identity_pair_targets: torch.Tensor,
+        num_queries: int = 220,
+    ) -> tuple[torch.Tensor, dict[str, float]]:
+        """
+        Compute identity mapping loss for same-style pairs.
+        
+        For same-style image pairs, FST should produce near-identity transformation.
+        
+        Args:
+            identity_pair_sources: (B, 1, H, W) - Source style images
+            identity_pair_targets: (B, 1, H, W) - Target style images (same style as source)
+            num_queries: Number of learnable queries to use
+            
+        Returns:
+            loss: Scalar loss tensor
+            metrics: Dict with diagnostics
+        """
+        # Extract multi-scale features from both
+        source_style_features = self.mss_encoder(identity_pair_sources)
+        target_style_features = self.mss_encoder(identity_pair_targets)
+        
+        # Apply FST to get transformation
+        transformation_features = self.fst_module(
+            source_style_features,
+            target_style_features,
+        )  # (B, N_L + H*W, D)
+        
+        # Extract learnable query portion only
+        query_features = transformation_features[:, :num_queries, :]  # (B, N_L, D)
+        
+        B, N, D = query_features.shape
+        
+        # For identity mapping, source and target transformation should be same
+        # Compute correlation matrix: should be identity
+        source_norm = F.normalize(query_features, p=2, dim=-1)
+        target_norm = F.normalize(query_features, p=2, dim=-1)
+        
+        # Self-similarity matrix (should be identity when same-style)
+        correlation = torch.bmm(
+            source_norm.transpose(1, 2),  # (B, D, N)
+            target_norm                     # (B, N, D)
+        ).transpose(1, 2)  # (B, N, N)
+        
+        # Distance from identity matrix
+        identity_matrix = torch.eye(N, device=correlation.device).unsqueeze(0).expand(B, -1, -1)
+        diff = correlation - identity_matrix
+        
+        # Frobenius norm: identity loss
+        identity_loss = torch.norm(
+            diff.reshape(B, -1), p='fro', dim=1
+        ).mean()
+        
+        # Orthogonality regularization: C^T @ C should also be identity
+        CTC = torch.bmm(correlation.transpose(1, 2), correlation)
+        ortho_loss = torch.norm(
+            (CTC - identity_matrix).reshape(B, -1), p='fro', dim=1
+        ).mean()
+        
+        total_loss = identity_loss + 0.01 * ortho_loss
+        
+        # Compute metrics
+        with torch.no_grad():
+            diagonal = torch.diagonal(correlation, dim1=1, dim2=2)  # (B, N)
+            metrics = {
+                "identity_loss": identity_loss.item(),
+                "ortho_loss": ortho_loss.item(),
+                "diagonal_mean": diagonal.mean().item(),
+                "diagonal_std": diagonal.std().item(),
+            }
+        
+        return total_loss, metrics
+    
+
+    
 class FontDiffuserModel(ModelMixin, ConfigMixin):
     """Forward function for FontDiffuer with content encoder style encoder and unet."""
 
