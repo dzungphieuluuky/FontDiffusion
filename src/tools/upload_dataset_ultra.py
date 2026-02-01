@@ -410,7 +410,7 @@ class UltraFastDatasetBuilder:
                 token=self.config.token,
                 embed_external_files=False,
                 num_shards=self.config.num_shards,
-                num_proc=1,
+                num_proc=self.num_proc,
                 commit_message="Ultra-fast dataset upload with pre-encoded bytes",
             )
             
