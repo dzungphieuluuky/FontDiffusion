@@ -147,59 +147,6 @@ class AdaptivePositionalEncoding(nn.Module):
         ).permute(0, 3, 1, 2)  # (1, C, H, W)
 
         return x + self.scale * pos_embed
-    
-class AdaptivePositionalEncoding(nn.Module):
-    """Learnable positional encoding with spatial awareness."""
-
-    def __init__(self, channels: int, max_h: int = 48, max_w: int = 48):
-        super().__init__()
-        self.channels = channels
-
-        # Learnable embeddings for height and width
-        self.height_embed = nn.Parameter(torch.randn(max_h, channels // 2))
-        self.width_embed = nn.Parameter(torch.randn(max_w, channels // 2))
-
-        # Optional: Add learned scale factor
-        self.scale = nn.Parameter(torch.ones(1))
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """x: (B, C, H, W)"""
-        B, C, H, W = x.shape
-
-        # Interpolate if input size doesn't match
-        h_embed = (
-            F.interpolate(
-                self.height_embed.unsqueeze(0).unsqueeze(-1),
-                size=(H, 1),
-                mode="bilinear",
-                align_corners=False,
-            )
-            .squeeze(-1)
-            .permute(0, 2, 1)
-        )  # (1, H, C//2)
-
-        w_embed = (
-            F.interpolate(
-                self.width_embed.unsqueeze(0).unsqueeze(1),
-                size=(1, W),
-                mode="bilinear",
-                align_corners=False,
-            )
-            .squeeze(1)
-            .permute(0, 2, 1)
-        )  # (1, W, C//2)
-
-        # Combine height and width embeddings
-        pos_embed = torch.cat(
-            [
-                h_embed.repeat(1, 1, W).reshape(1, H, W, C // 2),
-                w_embed.repeat(1, H, 1).reshape(1, H, W, C // 2),
-            ],
-            dim=-1,
-        ).permute(0, 3, 1, 2)  # (1, C, H, W)
-
-        return x + self.scale * pos_embed
-
 
 class FontStyleTransformationModule(nn.Module):
     def __init__(
