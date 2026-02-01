@@ -485,6 +485,31 @@ def get_parser():
         help="Number of scales in MSSE (if None, uses fst_num_scales)",
     )
 
+    # ==================== Identity Loss for FST ====================
+    fst_group.add_argument(
+        "--num_identity_pairs",
+        type=int,
+        default=0,
+        help="Number of same-style pairs for identity mapping loss (0 to disable). "
+            "Example: 3 = load 3 pairs per batch where both images have same style.",
+    )
+    fst_group.add_argument(
+        "--identity_loss_weight",
+        type=float,
+        default=0.1,
+        help="Weight for identity mapping loss (0.0-1.0). "
+            "Higher values enforce stronger identity constraint.",
+    )
+    fst_group.add_argument(
+        "--identity_pair_mode",
+        type=str,
+        default="random",
+        choices=["random", "same_style"],
+        help="How to sample identity pairs:\n"
+            "  'random': Each pair can have different style\n"
+            "  'same_style': All pairs use same style as main sample (stronger constraint)",
+    )
+
     # ==================== Optimization Flags ====================
     optimization_group = parser.add_argument_group("Performance Optimization")
     optimization_group.add_argument(
