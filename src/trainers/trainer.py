@@ -622,7 +622,7 @@ class FontDiffuserTrainer:
                     # Optimization step
                     self.optimizer.step()
                     self.lr_scheduler.step()
-                    self.optimizer.zero_grad()
+                    self.optimizer.zero_grad(set_to_none=True)
 
                     # Update tracking variables
                     train_loss_accum += loss.detach().item()
