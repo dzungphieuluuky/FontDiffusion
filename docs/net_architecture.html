@@ -1,0 +1,63 @@
+<!-- Architecture diagram for FontDiffuserWithFST -->
+<pre>
+Inputs:
+  ┌───────────────────────────────┐
+  │ noisy_latents   (B, 4, H, W) │
+  │ timestep        (B,) or scalar│
+  │ content_img     (B, 1, 96,96) │
+  │ style_source_img(B, 1, 96,96) │
+  │ style_target_img(B, 1, 96,96) │
+  └───────────────────────────────┘
+            │
+            ▼
+ContentEncoder ────────────────┐
+(content_img)                  │
+  │                            │
+  ├─► content_img_feature (B,C1,H1,W1)
+  └─► content_residual_features (list)
+            │
+ContentEncoder ────────────────┐
+(style_target_img)             │
+  │                            │
+  ├─► style_content_feature (B,C1,H1,W1)
+  └─► style_content_res_features (list)
+            │
+StyleEncoder ──────────────────────────────► orig_style_feat (B,C2,H2,W2)
+(style_target_img)                         │
+                                           └─► orig_style_vec (B,D)
+MSSE ──────────────────────────────┐
+(style_source_img)                 │
+  │                                │
+  └─► source_style_features (B,N,D) │
+MSSE ──────────────────────────────┐│
+(style_target_img)                 ││
+  │                                ││
+  └─► target_style_features (B,N,D)││
+            │                     ││
+FST ───────────────────────────────┘│
+(source_style_features, target_style_features)
+  │
+  └─► transformation_features (B,N,D)
+            │
+FSTProjection ──────────────────────► fst_condition (B,N,D')
+            │
+OriginalStyleProjection ────────────► orig_style_projected (B,1,D')
+(orig_style_vec)                     │
+            │                       │
+            └─► combined_style_condition = concat(fst_condition, orig_style_projected) (B,N+1,D')
+            │
+            ▼
+encoder_hidden_states = [
+  orig_style_feat (B,C2,H2,W2),
+  content_residual_features (list),
+  combined_style_condition (B,N+1,D'),
+  style_content_res_features (list)
+]
+            │
+            ▼
+DiffusionUNet
+(noisy_latents, timestep, encoder_hidden_states, ...)
+  │
+  ├─► noise_pred (B,4,H,W)
+  └─► offset_out_sum (B,4,H,W)
+</pre>
