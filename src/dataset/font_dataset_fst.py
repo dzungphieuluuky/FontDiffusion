@@ -31,24 +31,7 @@ def get_nonorm_transform(resolution):
 
 
 class FontDataset(Dataset):
-    """
-    Enhanced dataset for font generation supporting both original and FST modes.
-
-    For FST mode, provides:
-    - content_image: The character to generate
-    - style_image: Target style reference (same character, different font)
-    - style_source_image: Source style reference (optional, for style transformation)
-    - target_image: Ground truth
-
-    Args:
-        args: Arguments containing data_root, resolution, etc.
-        phase: 'train' or 'test'
-        transforms: List of [content_transform, style_transform, target_transform]
-        scr: Whether to use SCR loss (loads negative samples)
-        use_fst: Whether to use FST mode (loads source style images)
-        style_source_same_prob: Probability of using same style for source/target (0.0-1.0)
-    """
-
+    
     def __init__(
         self,
         args,
@@ -58,6 +41,8 @@ class FontDataset(Dataset):
         use_fst: bool = False,
         style_source_same_prob: float = 0.5,
         num_consistency_pairs: int = 0,
+        num_identity_pairs: int = 0,  # ADD THIS
+        identity_pair_mode: str = "random",  # ADD THIS
     ):
         super().__init__()
         self.root = args.data_root
@@ -66,6 +51,8 @@ class FontDataset(Dataset):
         self.use_fst = use_fst
         self.style_source_same_prob = style_source_same_prob
         self.num_consistency_pairs = num_consistency_pairs
+        self.num_identity_pairs = num_identity_pairs  # ADD THIS
+        self.identity_pair_mode = identity_pair_mode  # ADD THIS
         if self.scr:
             self.num_neg = args.num_neg
 
@@ -128,6 +115,65 @@ class FontDataset(Dataset):
             f"Found {len(self.target_images)} target images across "
             f"{len(self.style_to_images)} styles"
         )
+
+    def get_same_style_pairs(
+        self,
+        num_pairs: int,
+        target_style: Optional[str] = None,
+        exclude_content: Optional[str] = None,
+    ) -> list[tuple[str, str]]:
+        """Sample pairs of images with same style but different content.
+        
+        Args:
+            num_pairs: Number of pairs to sample
+            target_style: If provided, sample from this specific style
+            exclude_content: Content character to exclude
+            
+        Returns:
+            List of (image1_path, image2_path) tuples
+        """
+        pairs = []
+        
+        if target_style:
+            # Sample from specific style
+            if target_style not in self.style_to_images:
+                return pairs
+            
+            images_in_style = self.style_to_images[target_style].copy()
+            
+            # Remove excluded content
+            if exclude_content:
+                images_in_style = [
+                    img for img in images_in_style
+                    if exclude_content not in img
+                ]
+            
+            # Sample up to num_pairs
+            sample_size = min(num_pairs, len(images_in_style) // 2)
+            for _ in range(sample_size):
+                if len(images_in_style) < 2:
+                    break
+                img1, img2 = random.sample(images_in_style, 2)
+                pairs.append((img1, img2))
+        
+        else:
+            # Sample from random styles
+            available_styles = list(self.style_to_images.keys())
+            
+            for _ in range(num_pairs):
+                if not available_styles:
+                    break
+                
+                style = random.choice(available_styles)
+                images = self.style_to_images[style]
+                
+                if len(images) < 2:
+                    continue
+                
+                img1, img2 = random.sample(images, 2)
+                pairs.append((img1, img2))
+        
+        return pairs
 
     def get_style_source_image(
         self, target_style: str, content: str, target_image_path: str
@@ -426,7 +472,43 @@ class FontDataset(Dataset):
 
             sample["neg_images"] = neg_images
 
+
+        if self.num_identity_pairs > 0 and self.use_fst:
+            identity_pairs = []
+            
+            if self.identity_pair_mode == "same_style":
+                # All pairs from same style as main sample
+                pair_paths = self.get_same_style_pairs(
+                    num_pairs=self.num_identity_pairs,
+                    target_style=style,
+                    exclude_content=content,
+                )
+            else:  # "random"
+                # Random styles for each pair
+                pair_paths = self.get_same_style_pairs(
+                    num_pairs=self.num_identity_pairs,
+                )
+            
+            # Load and transform pairs
+            for img1_path, img2_path in pair_paths:
+                try:
+                    img1 = Image.open(img1_path).convert("RGB")
+                    img2 = Image.open(img2_path).convert("RGB")
+                    
+                    if self.transforms is not None:
+                        img1 = self.transforms[1](img1)  # Style transform
+                        img2 = self.transforms[1](img2)  # Style transform
+                    
+                    identity_pairs.append((img1, img2))
+                except Exception as e:
+                    logger.debug(f"Failed to load identity pair: {e}")
+                    continue
+            
+            if identity_pairs:
+                sample["identity_pairs"] = identity_pairs
+        
         return sample
+    
     
     def get_style_source_image_with_name(
         self, target_style: str, content: str, target_image_path: str

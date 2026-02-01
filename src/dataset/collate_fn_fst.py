@@ -98,6 +98,26 @@ class CollateFN(object):
                 result["consistency_source_images"] = torch.stack(consistency_sources)
                 result["consistency_target_images"] = torch.stack(consistency_targets)
 
+        if "identity_pairs" in batch[0]:
+            all_identity_pairs = []
+            
+            for item in batch:
+                pairs = item.get("identity_pairs", [])
+                all_identity_pairs.extend(pairs)
+            
+            if all_identity_pairs:
+                # Each pair is (source_tensor, target_tensor)
+                sources = torch.stack([pair[0] for pair in all_identity_pairs])
+                targets = torch.stack([pair[1] for pair in all_identity_pairs])
+                
+                result["identity_pair_sources"] = sources  # (N_pairs, 1, H, W)
+                result["identity_pair_targets"] = targets  # (N_pairs, 1, H, W)
+                result["num_identity_pairs_total"] = len(all_identity_pairs)
+            else:
+                result["num_identity_pairs_total"] = 0
+        else:
+            result["num_identity_pairs_total"] = 0
+
         return result
 
     def _collate_neg_images(
