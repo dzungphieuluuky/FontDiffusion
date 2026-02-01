@@ -31,6 +31,7 @@ from PIL import Image, ImageFile
 import cv2
 import numpy as np
 
+from src.tools.utilities import HFTqdm
 # Enable PIL optimizations
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 Image.MAX_IMAGE_PIXELS = None
@@ -60,7 +61,7 @@ class DatasetConfig:
     resize_height: int = 256
     spacing: int = 10
     jpeg_quality: int = 90
-
+    num_shards: int = 8
     def __post_init__(self):
         """Convert paths to Path objects."""
         if isinstance(self.data_dir, str):
@@ -86,7 +87,7 @@ class UltraFastDatasetBuilder:
         
         # Auto-tune performance parameters
         self.cpu_count = os.cpu_count() or 4
-        self.num_proc = max(1, self.cpu_count)
+        self.num_proc = max(1, self.cpu_count - 1)
         self.process_batch_size = 1000  # Large batches reduce IPC overhead
         
         # Caches
@@ -304,12 +305,9 @@ class UltraFastDatasetBuilder:
         except Exception as e:
             logger.debug(f"Failed to process {char}/{style}: {e}")
             return None
-
+    
     def _process_batch(self, batch: dict) -> dict:
         """Process batch using map() pattern (called by Dataset.map())."""
-        # Note: batch is a dict of lists when batched=True
-        # We need to process each index individually but return dict of lists
-        
         results = {
             "character": [],
             "style": [],
@@ -321,22 +319,21 @@ class UltraFastDatasetBuilder:
             "content_hash": [],
             "target_hash": [],
         }
-        
-        # Process each sample in the batch
+
         batch_size = len(batch["character"])
-        for i in range(batch_size):
+        for i in HFTqdm(range(batch_size), desc="Processing batch"):
             gen = {
                 "character": batch["character"][i],
                 "style": batch["style"][i],
                 "font": batch["font"][i],
             }
-            
+
             processed = self._process_sample(gen)
-            
+
             if processed:
                 for key in results.keys():
                     results[key].append(processed[key])
-        
+
         return results
 
     def build(self) -> Dataset:
@@ -381,7 +378,8 @@ class UltraFastDatasetBuilder:
             remove_columns=thin_dataset.column_names,
             desc="Processing images with OpenCV + pre-encoding",
         )
-        
+
+
         # Filter out failed samples (None values become missing rows)
         original_size = len(dataset)
         dataset = dataset.filter(lambda x: x["character"] is not None, num_proc=self.num_proc)
@@ -411,8 +409,8 @@ class UltraFastDatasetBuilder:
                 private=self.config.private,
                 token=self.config.token,
                 embed_external_files=False,
-                num_shards=max(1, self.cpu_count * 2),
-                num_proc=self.num_proc,
+                num_shards=self.config.num_shards,
+                num_proc=1,
                 commit_message="Ultra-fast dataset upload with pre-encoded bytes",
             )
             
@@ -434,7 +432,6 @@ class UltraFastDatasetBuilder:
         save_time = time.time() - start_time
         logger.info(f"Dataset saved in {save_time:.2f}s")
 
-
 def create_dataset_ultra(
     data_dir: str | Path,
     style_images_dir: str | Path,
@@ -448,6 +445,7 @@ def create_dataset_ultra(
     resize_height: int = 256,
     spacing: int = 10,
     jpeg_quality: int = 90,
+    num_shards: int = 8,
 ) -> Dataset:
     """Create dataset with ultra-fast processing and pre-encoded bytes.
     
@@ -491,6 +489,7 @@ def create_dataset_ultra(
         resize_height=resize_height,
         spacing=spacing,
         jpeg_quality=jpeg_quality,
+        num_shards=num_shards
     )
     
     builder = UltraFastDatasetBuilder(config)
@@ -608,6 +607,12 @@ Expected speedup: 50-100x faster than baseline!
         help="JPEG quality for pre-encoding (85-95, default: 90)"
     )
     parser.add_argument(
+        "--num-shards",
+        type=int,
+        default=8,
+        help="Number of shards for dataset upload (default: 8)"
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Enable verbose logging"
@@ -638,6 +643,7 @@ Expected speedup: 50-100x faster than baseline!
             resize_height=args.resize_height,
             spacing=args.spacing,
             jpeg_quality=args.jpeg_quality,
+            num_shards=args.num_shards,
         )
         
         total_time = time.time() - start_time
