@@ -10,12 +10,11 @@ Key optimizations applied:
 
 Expected speedup: 10-20x faster than baseline implementation
 """
-
 import json
 import logging
 import os
 import tempfile
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -236,6 +235,7 @@ class UltraFastDatasetExporter:
                 name=self.config.config_name,
                 split=self.config.split,
                 token=self.config.token,
+                num_proc=1,
             )
 
             # Save to temp cache for worker access
@@ -308,7 +308,7 @@ class UltraFastDatasetExporter:
             styles = set()
             fonts = set()
 
-            with ProcessPoolExecutor(max_workers=self.num_workers) as executor:
+            with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
                 # Submit all tasks upfront
                 futures = []
 

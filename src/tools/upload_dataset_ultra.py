@@ -412,6 +412,8 @@ class UltraFastDatasetBuilder:
                 token=self.config.token,
                 embed_external_files=False,
                 num_shards=max(1, self.cpu_count * 2),
+                num_proc=self.num_proc,
+                commit_message="Ultra-fast dataset upload with pre-encoded bytes",
             )
             
             upload_time = time.time() - start_time
