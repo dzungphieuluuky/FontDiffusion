@@ -485,6 +485,21 @@ def get_parser():
         help="Number of scales in MSSE (if None, uses fst_num_scales)",
     )
 
+    fst_group.add_argument(
+        "--num_consistency_pairs",
+        type=int,
+        default=0,
+        help="Number of same-style pairs for style consistency loss (0 to disable). "
+            "Example: 3 = load 3 pairs per batch where both images have same style.",
+    )
+    fst_group.add_argument(
+        "--consistency_loss_weight",
+        type=float,
+        default=0.1,
+        help="Weight for style consistency loss (0.0-1.0). "
+            "Higher values enforce stronger style consistency.",
+    )
+
     # ==================== Identity Loss for FST ====================
     fst_group.add_argument(
         "--num_identity_pairs",
