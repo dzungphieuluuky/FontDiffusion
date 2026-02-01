@@ -4,17 +4,9 @@ from einops import rearrange, repeat
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-<<<<<<< HEAD
 
 class CrossAttentionBlock(nn.Module):
     """Memory-efficient cross-attention with gradient checkpointing."""
-=======
-
-
-class CrossAttentionBlock(nn.Module):
-    """Memory-efficient cross-attention with gradient checkpointing."""
-
->>>>>>> main
     def __init__(
         self,
         query_dim: int,
@@ -27,18 +19,12 @@ class CrossAttentionBlock(nn.Module):
         super().__init__()
         self.num_heads: int = num_heads
         self.head_dim: int = query_dim // num_heads
-<<<<<<< HEAD
         self.scale: float = self.head_dim ** -0.5
         
-=======
-        self.scale: float = self.head_dim**-0.5
-
->>>>>>> main
         # Project K/V to query_dim ONCE (not per-head)
         self.to_q: nn.Linear = nn.Linear(query_dim, query_dim, bias=False)
         self.to_k: nn.Linear = nn.Linear(key_dim, query_dim, bias=False)
         self.to_v: nn.Linear = nn.Linear(value_dim, query_dim, bias=False)
-<<<<<<< HEAD
         
         self.proj_out: nn.Linear = nn.Linear(query_dim, query_dim)
         self.dropout: nn.Dropout = nn.Dropout(dropout)
@@ -61,48 +47,6 @@ class CrossAttentionBlock(nn.Module):
                 q, k, v, 
                 dropout_p=self.dropout.p if self.training else 0.0,
                 scale=self.scale
-=======
-
-        self.proj_out: nn.Linear = nn.Linear(query_dim, query_dim)
-        self.dropout: nn.Dropout = nn.Dropout(dropout)
-
-        # Use Flash Attention if available
-        self.use_flash_attn: bool = use_flash_attn and hasattr(
-            F, "scaled_dot_product_attention"
-        )
-
-    def forward(
-        self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
-    ) -> torch.Tensor:
-        B, N_q, C = query.shape
-        _, N_kv, _ = key.shape
-
-        # Project
-        q: torch.Tensor = (
-            self.to_q(query)
-            .reshape(B, N_q, self.num_heads, self.head_dim)
-            .transpose(1, 2)
-        )
-        k: torch.Tensor = (
-            self.to_k(key)
-            .reshape(B, N_kv, self.num_heads, self.head_dim)
-            .transpose(1, 2)
-        )
-        v: torch.Tensor = (
-            self.to_v(value)
-            .reshape(B, N_kv, self.num_heads, self.head_dim)
-            .transpose(1, 2)
-        )
-
-        if self.use_flash_attn:
-            # Use PyTorch 2.0+ Flash Attention (faster + less memory)
-            out = F.scaled_dot_product_attention(
-                q,
-                k,
-                v,
-                dropout_p=self.dropout.p if self.training else 0.0,
-                scale=self.scale,
->>>>>>> main
             )
         else:
             # Standard attention
@@ -110,16 +54,9 @@ class CrossAttentionBlock(nn.Module):
             attn = attn.softmax(dim=-1)
             attn = self.dropout(attn)
             out = attn @ v
-<<<<<<< HEAD
         
         out = out.transpose(1, 2).reshape(B, N_q, C)
         return self.proj_out(out)
-=======
-
-        out = out.transpose(1, 2).reshape(B, N_q, C)
-        return self.proj_out(out)
-
->>>>>>> main
 
 class SelfAttentionBlock(nn.Module):
     """Self-attention block for feature fusion."""
@@ -258,7 +195,6 @@ class FontStyleTransformationModule(nn.Module):
         self.query_dim = query_dim
         self.num_scales = len(msse_output_channels)
         self.msse_channels = msse_output_channels  # [64, 128, 256, 512, 1024]
-<<<<<<< HEAD
         
         # Learnable queries (N_L = 220, per paper)
         self.learnable_queries = nn.Parameter(torch.randn(num_queries, query_dim))
@@ -289,52 +225,14 @@ class FontStyleTransformationModule(nn.Module):
             for _ in range(num_self_attn_blocks)
         ])
         
-=======
-
-        # Learnable queries (N_L = 220, per paper)
-        self.learnable_queries = nn.Parameter(torch.randn(num_queries, query_dim))
-
-        # Update FST to use this
-        self.pos_encodings = nn.ModuleList(
-            [AdaptivePositionalEncoding(ch) for ch in msse_output_channels]
-        )
-        # Cross-attention blocks per scale
-        self.cross_attn_blocks = nn.ModuleList(
-            [
-                nn.ModuleList(
-                    [
-                        CrossAttentionBlock(
-                            query_dim=query_dim,
-                            key_dim=ch,
-                            value_dim=ch,
-                            num_heads=8 if query_dim >= 128 else 4,
-                        )
-                        for _ in range(num_cross_attn_blocks)
-                    ]
-                )
-                for ch in msse_output_channels
-            ]
-        )
-
-        # Self-attention for fusion (operates on concatenated features)
-        fusion_dim = query_dim * self.num_scales  # 128 * 5 = 640
-        self.self_attn_blocks = nn.ModuleList(
-            [SelfAttentionBlock(dim=fusion_dim) for _ in range(num_self_attn_blocks)]
-        )
-
->>>>>>> main
         # Project to final dimension (matches last scale: 1024)
         final_dim = msse_output_channels[-1]
         self.projection = nn.Sequential(
             nn.LayerNorm(fusion_dim),
-<<<<<<< HEAD
             nn.Linear(fusion_dim, final_dim * 4),    # Wider
             nn.GELU(),
             nn.Dropout(0.1),
             nn.Linear(final_dim * 4, final_dim * 2), # Additional layer
-=======
-            nn.Linear(fusion_dim, final_dim * 2),
->>>>>>> main
             nn.GELU(),
             nn.Dropout(0.1),
             nn.Linear(final_dim * 2, final_dim),
@@ -344,15 +242,6 @@ class FontStyleTransformationModule(nn.Module):
             nn.LayerNorm(final_dim),
             nn.Linear(final_dim, final_dim)
         )
-<<<<<<< HEAD
-=======
-
-        # Residual connection projection
-        self.residual_proj = nn.Sequential(
-            nn.LayerNorm(final_dim), nn.Linear(final_dim, final_dim)
-        )
-
->>>>>>> main
     def forward(
         self,
         source_features: list[torch.Tensor],  # f_{x_r}^s = [f^{s,1}, ..., f^{s,n_s}]
