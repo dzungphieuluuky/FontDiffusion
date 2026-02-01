@@ -501,7 +501,7 @@ def upload_files(
 def main():
     """Main execution function."""
     print("\n" + "=" * 70)
-    print("FONTDIFFUSER WEIGHTS CONVERTER & UPLOADER")
+    print("FontDiffuioner Weights Converter & Uploader")
     print("=" * 70)
 
     args = parse_arguments()

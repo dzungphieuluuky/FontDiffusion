@@ -546,7 +546,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         return total_loss, loss_dict    
 
     def save_checkpoint(self, is_final: bool = False):
-        """Save FST training checkpoint."""
+        """Save FST training checkpoint with full state."""
         if not self.accelerator.is_main_process:
             return
 
@@ -600,15 +600,15 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         else:
             # Save standard model
             save_model_checkpoint(
-                unwrapped_model.config.unet.state_dict(),
+                unwrapped_model.diffusion_unet.state_dict(),
                 save_dir / "unet.safetensors",
             )
             save_model_checkpoint(
-                unwrapped_model.config.style_encoder.state_dict(),
+                unwrapped_model.style_encoder.state_dict(),
                 save_dir / "style_encoder.safetensors",
             )
             save_model_checkpoint(
-                unwrapped_model.config.content_encoder.state_dict(),
+                unwrapped_model.content_encoder.state_dict(),
                 save_dir / "content_encoder.safetensors",
             )
 
@@ -616,31 +616,33 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         if self.config.phase_2 and self.scr is not None:
             save_model_checkpoint(self.scr.state_dict(), save_dir / "scr.safetensors")
 
-        # Save optimizer and scheduler states
-        torch.save(
-            {
-                "global_step": self.global_step,
-                "epoch": self.current_epoch,
-                "optimizer_state_dict": self.optimizer.state_dict(),
-                "lr_scheduler_state_dict": self.lr_scheduler.state_dict(),
-                "config": asdict(self.config),
-                "fst_config": {
-                    "use_fst": self.use_fst,
-                    "freeze_original_encoders": self.freeze_original_encoders,
-                    "style_source_same_prob": self.style_source_same_prob,
-                    "fst_feature_channels": self.fst_feature_channels,
-                    "fst_num_queries": self.fst_num_queries,
-                    "fst_query_dim": self.fst_query_dim,
-                    "fst_num_scales": self.fst_num_scales,
-                    "num_consistency_pairs": self.num_consistency_pairs,
-                    "consistency_loss_weight": self.consistency_loss_weight,
-
-                },
+        # Save training state with FULL FST config (including identity loss)
+        training_state = {
+            "global_step": self.global_step,
+            "epoch": self.current_epoch,
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "lr_scheduler_state_dict": self.lr_scheduler.state_dict(),
+            "config": asdict(self.config),
+            "fst_config": {
+                "use_fst": self.use_fst,
+                "freeze_original_encoders": self.freeze_original_encoders,
+                "style_source_same_prob": self.style_source_same_prob,
+                "fst_feature_channels": self.fst_feature_channels,
+                "fst_num_queries": self.fst_num_queries,
+                "fst_query_dim": self.fst_query_dim,
+                "fst_num_scales": self.fst_num_scales,
+                "num_consistency_pairs": self.num_consistency_pairs,
+                "consistency_loss_weight": self.consistency_loss_weight,
+                "num_identity_pairs": self.num_identity_pairs,  # ADD THIS
+                "identity_loss_weight": self.identity_loss_weight,  # ADD THIS
+                "identity_pair_mode": self.identity_pair_mode,  # ADD THIS
             },
-            save_dir / "training_state.pt",
-        )
+        }
 
+        torch.save(training_state, save_dir / "training_state.pt")
+        logger.info(f"✓ Saved training state to {save_dir / 'training_state.pt'}")
         logger.info(f"✓ Saved checkpoint to {save_dir}")
+        
         self.accelerator.log(
             {
                 "checkpoint_saved": True,
@@ -649,6 +651,86 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             }
         )
 
+    def load_checkpoint(self, checkpoint_path: str) -> bool:
+        """Load FST checkpoint with full state restoration."""
+        if not Path(checkpoint_path).exists():
+            logger.warning(f"Checkpoint not found at {checkpoint_path}")
+            return False
+
+        try:
+            logger.info(f"Loading checkpoint from {checkpoint_path}...")
+            checkpoint_dir = Path(checkpoint_path)
+
+            # Load training state
+            training_state_path = checkpoint_dir / "training_state.pt"
+            if training_state_path.exists():
+                training_state = torch.load(training_state_path, map_location="cpu")
+                
+                # Restore global step and epoch
+                self.global_step = training_state.get("global_step", 0)
+                self.current_epoch = training_state.get("epoch", 0)
+                
+                # Restore optimizer and scheduler
+                self.optimizer.load_state_dict(training_state["optimizer_state_dict"])
+                self.lr_scheduler.load_state_dict(training_state["lr_scheduler_state_dict"])
+                
+                logger.info(f"✓ Restored training state (step={self.global_step}, epoch={self.current_epoch})")
+                
+                # Restore FST config if present (for validation/debugging)
+                fst_cfg = training_state.get("fst_config", {})
+                if fst_cfg:
+                    logger.info(f"FST config from checkpoint: {fst_cfg}")
+            else:
+                logger.warning("training_state.pt not found; skipping optimizer/scheduler restore")
+
+            # Load model components
+            unwrapped_model = self.accelerator.unwrap_model(self.model)
+
+            if self.use_fst:
+                logger.info("Loading FST model components...")
+                components = {
+                    "unet": ("unet.safetensors", unwrapped_model.diffusion_unet),
+                    "style_encoder": ("style_encoder.safetensors", unwrapped_model.style_encoder),
+                    "content_encoder": ("content_encoder.safetensors", unwrapped_model.content_encoder),
+                    "mss_encoder": ("mss_encoder.safetensors", unwrapped_model.mss_encoder),
+                    "fst_module": ("fst_module.safetensors", unwrapped_model.fst_module),
+                    "fst_projection": ("fst_projection.safetensors", unwrapped_model.fst_projection),
+                    "original_style_projection": ("original_style_projection.safetensors", unwrapped_model.original_style_projection),
+                }
+            else:
+                logger.info("Loading standard model components...")
+                components = {
+                    "unet": ("unet.safetensors", unwrapped_model.diffusion_unet),
+                    "style_encoder": ("style_encoder.safetensors", unwrapped_model.style_encoder),
+                    "content_encoder": ("content_encoder.safetensors", unwrapped_model.content_encoder),
+                }
+
+            for comp_name, (file_name, module) in components.items():
+                ckpt_path = checkpoint_dir / file_name
+                if ckpt_path.exists():
+                    state_dict = load_model_checkpoint(ckpt_path)
+                    module.load_state_dict(state_dict)
+                    logger.info(f"✓ Loaded {comp_name}")
+                else:
+                    logger.warning(f"Component {comp_name} not found at {ckpt_path}")
+
+            # Load SCR if available
+            if self.config.phase_2 and self.scr is not None:
+                scr_path = checkpoint_dir / "scr.safetensors"
+                if scr_path.exists():
+                    scr_state = load_model_checkpoint(scr_path)
+                    self.scr.load_state_dict(scr_state)
+                    logger.info("✓ Loaded SCR module")
+
+            logger.info(f"✓ Checkpoint loaded successfully from {checkpoint_dir}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to load checkpoint: {e}")
+            logger.debug(traceback.format_exc())
+            return False
+        
+        
     def _setup_logging(self):
         """Setup logging and tracking with FST information."""
         super()._setup_logging()
