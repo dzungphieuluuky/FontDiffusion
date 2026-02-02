@@ -306,7 +306,7 @@ class UltraFastDatasetBuilder:
         except Exception as e:
             logger.debug(f"Failed to process {char}/{style}: {e}")
             return None
-            
+
     def _process_batch(self, batch: dict) -> dict:
         """Process batch using map() pattern (called by Dataset.map())."""
         results = {
@@ -337,14 +337,116 @@ class UltraFastDatasetBuilder:
 
         return results
 
+    @staticmethod
+    def _process_batch_parallel(batch: dict, path_cache: dict, style_cache: dict, 
+                                resize_height: int, spacing: int, jpeg_quality: int) -> dict:
+        """Process a batch of samples in parallel (must be static/module-level for pickling).
+        
+        Args:
+            batch: Dict of lists, e.g. {"character": [...], "style": [...], "font": [...]}
+            path_cache: Pre-built path cache
+            style_cache: Pre-loaded style images
+            resize_height: Target height for resizing
+            spacing: Spacing between images
+            jpeg_quality: JPEG encoding quality
+            
+        Returns:
+            Dict of lists with processed data
+        """
+        batch_size = len(batch["character"])
+        
+        # Initialize result lists
+        results = {
+            "character": [],
+            "style": [],
+            "font": [],
+            "content_image": [],
+            "style_image": [],
+            "target_image": [],
+            "comparison_image": [],
+            "content_hash": [],
+            "target_hash": [],
+        }
+        
+        # Process each sample in the batch
+        for i in range(batch_size):
+            char = batch["character"][i]
+            style = batch["style"][i]
+            font = batch["font"][i]
+            
+            # Fast lookups
+            content_info = path_cache['content'].get(char)
+            target_info = path_cache['target'].get(style, {}).get(char)
+            style_dims = path_cache['style_dims'].get(style)
+            
+            if not all([content_info, target_info, style in style_cache]):
+                continue  # Skip invalid samples
+            
+            try:
+                # Load images
+                content_img = Image.open(content_info['path']).convert("RGB")
+                target_img = Image.open(target_info['path']).convert("RGB")
+                style_img = style_cache[style]
+                
+                # Calculate dimensions
+                c_width, c_height = content_info['width'], content_info['height']
+                t_width, t_height = target_info['width'], target_info['height']
+                s_width, s_height = style_dims
+                
+                c_new_width = int(c_width * (resize_height / c_height))
+                s_new_width = int(s_width * (resize_height / s_height))
+                t_new_width = int(t_width * (resize_height / t_height))
+                
+                # Resize with OpenCV
+                content_resized = UltraFastDatasetBuilder._resize_image_opencv(
+                    content_img, c_new_width, resize_height
+                )
+                style_resized = UltraFastDatasetBuilder._resize_image_opencv(
+                    style_img, s_new_width, resize_height
+                )
+                target_resized = UltraFastDatasetBuilder._resize_image_opencv(
+                    target_img, t_new_width, resize_height
+                )
+                
+                # Create comparison
+                total_width = c_new_width + s_new_width + t_new_width + 2 * spacing
+                comparison = Image.new("RGB", (total_width, resize_height), color=(255, 255, 255))
+                comparison.paste(content_resized, (0, 0))
+                comparison.paste(style_resized, (c_new_width + spacing, 0))
+                comparison.paste(target_resized, (c_new_width + s_new_width + 2 * spacing, 0))
+                
+                # Append to results
+                results["character"].append(char)
+                results["style"].append(style)
+                results["font"].append(font)
+                results["content_image"].append({
+                    "bytes": UltraFastDatasetBuilder._encode_image_to_bytes(content_img, jpeg_quality)
+                })
+                results["style_image"].append({
+                    "bytes": UltraFastDatasetBuilder._encode_image_to_bytes(style_img, jpeg_quality)
+                })
+                results["target_image"].append({
+                    "bytes": UltraFastDatasetBuilder._encode_image_to_bytes(target_img, jpeg_quality)
+                })
+                results["comparison_image"].append({
+                    "bytes": UltraFastDatasetBuilder._encode_image_to_bytes(comparison, jpeg_quality)
+                })
+                results["content_hash"].append(compute_file_hash(char, "", font))
+                results["target_hash"].append(compute_file_hash(char, style, font))
+                
+            except Exception as e:
+                logger.debug(f"Failed to process {char}/{style}: {e}")
+                continue
+        
+        return results
+    
     def build(self) -> Dataset:
-        """Build dataset using map() for native parallel processing."""
-        logger.info("Building dataset with ultra-fast map() pipeline...")
+        """Build dataset using map() with batched=True."""
+        logger.info("Building dataset with batched map() pipeline...")
         
         start_time = time.time()
         
-        # Step 1: Create thin metadata-only dataset from pre-loaded checkpoint
-        logger.info(f"Creating metadata dataset from {len(self.generations)} generations...")
+        # Create metadata dataset
         metadata = {
             "character": [g.get("character", "") for g in self.generations],
             "style": [g.get("style", "") for g in self.generations],
@@ -352,9 +454,8 @@ class UltraFastDatasetBuilder:
         }
         
         thin_dataset = Dataset.from_dict(metadata)
-        logger.info(f"Metadata dataset created: {len(thin_dataset)} samples")
         
-        # Step 2: Define features for output
+        # Define output features
         features = Features({
             "character": Value("string"),
             "style": Value("string"),
@@ -367,32 +468,32 @@ class UltraFastDatasetBuilder:
             "target_hash": Value("string"),
         })
         
-        # Step 3: Process with TRUE parallel processing
-        logger.info(f"Processing images with {self.num_proc} workers...")
+        # ✅ Use batched=True with num_proc for parallel batch processing
+        logger.info(f"Processing with {self.num_proc} workers (batch_size={self.process_batch_size})...")
         
         dataset = thin_dataset.map(
-            self._process_sample,
-            num_proc=self.num_proc,  # ✅ Actually use parallel workers!
+            self._process_batch_parallel,
+            batched=True,  # ✅ Enable batched mode
+            batch_size=self.process_batch_size,  # ✅ Batch size per worker
+            num_proc=self.num_proc,  # ✅ Parallel workers
             features=features,
             remove_columns=thin_dataset.column_names,
-            desc="Processing images with OpenCV + pre-encoding",
+            desc="Processing images",
+            fn_kwargs={
+                "path_cache": self.path_cache,
+                "style_cache": self.style_cache,
+                "resize_height": self.resize_height,
+                "spacing": self.spacing,
+                "jpeg_quality": self.jpeg_quality,
+            },
         )
-
-        # Filter out failed samples (None values)
-        original_size = len(dataset)
-        dataset = dataset.filter(
-            lambda x: x["character"] is not None, 
-            num_proc=self.num_proc
-        )
-        filtered_count = original_size - len(dataset)
         
         build_time = time.time() - start_time
-        
-        logger.info(f"Dataset built: {len(dataset)} valid samples ({filtered_count} filtered) in {build_time:.2f}s")
+        logger.info(f"Dataset built: {len(dataset)} samples in {build_time:.2f}s")
         logger.info(f"Processing speed: {len(dataset)/build_time:.1f} samples/s")
         
         return dataset
-    
+        
     def push_to_hub_streaming(self, dataset: Dataset) -> None:
         """Stream upload with parallel shards."""
         if not self.config.push_to_hub:

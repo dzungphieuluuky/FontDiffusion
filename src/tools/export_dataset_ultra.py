@@ -245,6 +245,71 @@ def _process_single_export(sample: dict, output_dir: str) -> dict:
     
     return result
 
+# Module-level function for pickling
+def _process_batch_export(batch: dict, output_dir: str) -> dict:
+    """Process a batch of samples for export.
+    
+    Args:
+        batch: Dict of lists {"character": [...], "style": [...], ...}
+        output_dir: Root output directory
+        
+    Returns:
+        Dict of lists with metadata
+    """
+    output_path = Path(output_dir)
+    batch_size = len(batch["character"])
+    
+    # Initialize result lists
+    results = {
+        "content_saved": [],
+        "target_saved": [],
+        "content_filename": [],
+        "target_filename": [],
+        "content_hash": [],
+        "target_hash": [],
+    }
+    
+    # Process each sample in batch
+    for i in range(batch_size):
+        char = batch["character"][i]
+        style = batch["style"][i]
+        font = batch.get("font", ["unknown"] * batch_size)[i]
+        
+        content_filename = get_content_filename(char)
+        target_filename = get_target_filename(char, style)
+        
+        # Process content image
+        content_saved = False
+        content_img = batch.get("content_image", [None] * batch_size)[i]
+        if isinstance(content_img, Image.Image):
+            try:
+                final_path = output_path / "ContentImage" / content_filename
+                _atomic_save_image(content_img, final_path)
+                content_saved = True
+            except Exception as e:
+                logger.debug(f"Failed to save content {content_filename}: {e}")
+        
+        # Process target image
+        target_saved = False
+        target_img = batch.get("target_image", [None] * batch_size)[i]
+        if isinstance(target_img, Image.Image):
+            try:
+                final_path = output_path / "TargetImage" / style / target_filename
+                _atomic_save_image(target_img, final_path)
+                target_saved = True
+            except Exception as e:
+                logger.debug(f"Failed to save target {target_filename}: {e}")
+        
+        # Append results
+        results["content_saved"].append(content_saved)
+        results["target_saved"].append(target_saved)
+        results["content_filename"].append(content_filename)
+        results["target_filename"].append(target_filename)
+        results["content_hash"].append(compute_file_hash(char, "", font))
+        results["target_hash"].append(compute_file_hash(char, style, font))
+    
+    return results
+
 class UltraFastDatasetExporter:
     """Ultra-optimized dataset exporter using native Datasets parallelism."""
 
@@ -257,6 +322,7 @@ class UltraFastDatasetExporter:
 
         self.cpu_count = os.cpu_count() or 4
         self.num_workers = min(config.num_workers, self.cpu_count)
+        self.batch_size = config.batch_size
 
         logger.info(f"Ultra-fast exporter initialized:")
         logger.info(f"  Workers: {self.num_workers} parallel processes")
@@ -332,30 +398,21 @@ class UltraFastDatasetExporter:
         logger.info(f"Pre-created {len(unique_styles)} style directories")
 
     def _export_with_map(self, dataset: Dataset) -> dict[str, Any]:
-        """Export images using dataset.map() with num_proc parallelism.
-
-        Args:
-            dataset: Dataset to export
-
-        Returns:
-            Metadata dictionary
-        """
-        logger.info(
-            f"Exporting with dataset.map() using {self.num_workers} workers..."
-        )
-
+        """Export images using batched map()."""
+        logger.info(f"Exporting with {self.num_workers} workers (batch_size={self.batch_size})...")
+        
         checkpoint_path = self.output_dir / "results_checkpoint.json"
-
-        # Process dataset with parallel map
-        logger.info("Processing samples with dataset.map()...")
-
+        
+        # ✅ Process with batched=True
         processed_dataset = dataset.map(
-            _process_single_export,  # ✅ Module-level function for pickling
-            num_proc=self.num_workers,  # ✅ TRUE parallelism across workers
+            _process_batch_export,
+            batched=True,  # ✅ Enable batched mode
+            batch_size=self.batch_size,  # ✅ Batch size
+            num_proc=self.num_workers,  # ✅ Parallel workers
             desc="Exporting images",
             fn_kwargs={"output_dir": str(self.output_dir)},
         )
-
+        
         # Write checkpoint JSON (same as before)
         logger.info("Writing results_checkpoint.json...")
 
