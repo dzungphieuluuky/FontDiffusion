@@ -8,30 +8,26 @@ from src import ContentEncoder, StyleEncoder, UNet, SCR
 from src.model import FontStyleTransformationModule
 from src.model import MultiScaleStyleEncoder
 
-def build_unet(args: argparse.Namespace) -> UNet:
+def build_unet(args):
     unet = UNet(
         sample_size=args.resolution,
         in_channels=3,
         out_channels=3,
         flip_sin_to_cos=True,
         freq_shift=0,
-        down_block_types=(
-            "DownBlock2D",
-            "MCADownBlock2D",
-            "MCADownBlock2D",
-            "DownBlock2D",
-        ),
-        up_block_types=(
-            "UpBlock2D",
-            "StyleRSIUpBlock2D",
-            "StyleRSIUpBlock2D",
-            "UpBlock2D",
-        ),
-        block_out_channels=args.unet_channels,
+        down_block_types=('DownBlock2D', 
+                          'MCADownBlock2D',
+                          'MCADownBlock2D', 
+                          'DownBlock2D'),
+        up_block_types=('UpBlock2D', 
+                        'StyleRSIUpBlock2D',
+                        'StyleRSIUpBlock2D', 
+                        'UpBlock2D'),
+        block_out_channels=args.unet_channels, 
         layers_per_block=2,
         downsample_padding=1,
         mid_block_scale_factor=1,
-        act_fn="silu",
+        act_fn='silu',
         norm_num_groups=32,
         norm_eps=1e-05,
         cross_attention_dim=args.style_start_channel * 16,
@@ -39,11 +35,9 @@ def build_unet(args: argparse.Namespace) -> UNet:
         channel_attn=args.channel_attn,
         content_encoder_downsample_size=args.content_encoder_downsample_size,
         content_start_channel=args.content_start_channel,
-        reduction=32,
-    )
-
+        reduction=32)
+    
     return unet
-
 
 def build_style_encoder(args: argparse.Namespace) -> StyleEncoder:
     style_image_encoder = StyleEncoder(
