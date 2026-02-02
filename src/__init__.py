@@ -18,6 +18,7 @@ from .builders.build import (
     build_fst_projection,
     build_original_style_projection,
     get_unet_cross_attention_dim,
+    build_identity_loss_module,
 )
 from .builders.build_optimized import (
     build_unet_cached,

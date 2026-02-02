@@ -525,6 +525,100 @@ def get_parser():
             "  'same_style': All pairs use same style as main sample (stronger constraint)",
     )
 
+    # ADD THESE NEW PARAMETERS:
+    fst_group.add_argument(
+        "--identity_loss_type",
+        type=str,
+        default="frobenius",
+        choices=["frobenius", "mse", "cosine"],
+        help="Distance metric for identity mapping loss:\n"
+            "  'frobenius': Frobenius norm ||T - I||_F (default, most stable)\n"
+            "  'mse': Mean squared error\n"
+            "  'cosine': Cosine distance (normalized)",
+    )
+    fst_group.add_argument(
+        "--identity_regularization",
+        type=str,
+        default="orthogonal",
+        choices=["orthogonal", "spectral", None],
+        help="Regularization for transformation matrix:\n"
+            "  'orthogonal': Enforce T^T T ≈ I (orthogonality)\n"
+            "  'spectral': Penalize large singular values\n"
+            "  None: No additional regularization",
+    )
+    fst_group.add_argument(
+        "--identity_reg_weight",
+        type=float,
+        default=0.01,
+        help="Weight for identity regularization term (0.0-1.0). "
+            "Controls strength of orthogonality/spectral constraints.",
+    )
+    fst_group.add_argument(
+        "--identity_matrix_size",
+        type=int,
+        default=None,
+        help="Size of transformation matrix for identity loss. "
+            "If None, defaults to fst_num_queries. "
+            "Must match FST output query dimension.",
+    )
+    fst_group.add_argument(
+        "--use_adaptive_identity_loss",
+        action="store_true",
+        default=False,
+        help="Use AdaptiveIdentityMappingLoss that adjusts loss weight based on "
+            "style similarity between pairs (more robust to style variations).",
+    )
+    fst_group.add_argument(
+        "--identity_similarity_threshold",
+        type=float,
+        default=0.8,
+        help="Similarity threshold for adaptive identity loss (0.0-1.0). "
+            "If actual style similarity > threshold, apply strong identity constraint. "
+            "Otherwise, apply weak constraint to avoid false penalties.",
+    )
+    fst_group.add_argument(
+        "--identity_adaptive_max_weight",
+        type=float,
+        default=1.0,
+        help="Maximum weight for adaptive identity loss when styles are very similar.",
+    )
+    fst_group.add_argument(
+        "--identity_adaptive_min_weight",
+        type=float,
+        default=0.1,
+        help="Minimum weight for adaptive identity loss when styles are dissimilar.",
+    )
+    fst_group.add_argument(
+        "--use_pooled_identity_loss",
+        action="store_true",
+        default=False,
+        help="Use PooledIdentityMappingLoss that computes identity constraint over "
+            "multiple same-style pairs simultaneously (stronger constraint).",
+    )
+    fst_group.add_argument(
+        "--identity_pooled_reduction",
+        type=str,
+        default="mean",
+        choices=["mean", "sum", "max"],
+        help="Reduction method for pooled identity loss:\n"
+            "  'mean': Average loss across all pairs\n"
+            "  'sum': Sum loss across all pairs\n"
+            "  'max': Maximum loss across all pairs",
+    )
+    fst_group.add_argument(
+        "--identity_log_metrics",
+        action="store_true",
+        default=True,
+        help="Log detailed identity loss metrics (diagonal/off-diagonal analysis, "
+            "eigenvalue stats) to W&B and console.",
+    )
+    fst_group.add_argument(
+        "--identity_metric_interval",
+        type=int,
+        default=100,
+        help="Log identity loss metrics every N steps.",
+    )
+
     # ==================== Optimization Flags ====================
     optimization_group = parser.add_argument_group("Performance Optimization")
     optimization_group.add_argument(
