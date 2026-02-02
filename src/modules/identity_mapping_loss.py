@@ -101,8 +101,9 @@ class IdentityMappingLoss(nn.Module):
         Compute transformation matrix from source to target features.
         
         Args:
-            source_features: (..., N, D) - Features from source image
-            target_features: (..., N, D) - Features from target image
+            source_features: (B, N, D) - Features from source image
+                where N = num_queries (matrix_size), D = feature_dim
+            target_features: (B, N, D) - Features from target image
             
         Returns:
             transformation_matrix: (B, N, N) - Transformation matrix
@@ -114,17 +115,18 @@ class IdentityMappingLoss(nn.Module):
         B, N, D = source_features.shape
         
         # Normalize features for numerical stability
-        source_norm = F.normalize(source_features, p=2, dim=-1)
-        target_norm = F.normalize(target_features, p=2, dim=-1)
+        source_norm = F.normalize(source_features, p=2, dim=-1)  # (B, N, D)
+        target_norm = F.normalize(target_features, p=2, dim=-1)  # (B, N, D)
         
-        # Compute transformation via least squares
+        # Compute transformation matrix: (B, N, D) @ (B, D, N) = (B, N, N)
+        # This maps N query positions from source to target space
         transformation_matrix = torch.bmm(
-            source_norm.transpose(1, 2),  # (B, D, N)
-            target_norm                     # (B, N, D)
-        ).transpose(1, 2)  # (B, N, N)
+            source_norm,                    # (B, N, D)
+            target_norm.transpose(1, 2)     # (B, D, N)
+        )  # Result: (B, N, N)
         
         return transformation_matrix
-    
+        
     def identity_distance_loss(
         self,
         transformation_matrix: torch.Tensor,
@@ -133,13 +135,16 @@ class IdentityMappingLoss(nn.Module):
         Compute distance between transformation matrix and identity.
         
         Args:
-            transformation_matrix: (B, N, N)
+            transformation_matrix: (B, N, N) where N = matrix_size
             
         Returns:
             Scalar loss measuring distance from identity
         """
         B, N, _ = transformation_matrix.shape
-        identity = self.identity_matrix[:N, :N].unsqueeze(0).expand(B, -1, -1)
+        
+        # Create identity matrix with correct size
+        identity = torch.eye(N, device=transformation_matrix.device, 
+                            dtype=transformation_matrix.dtype).unsqueeze(0).expand(B, -1, -1)
         
         if self.loss_type == "frobenius":
             # Frobenius norm: sqrt(sum((T - I)^2))
@@ -152,7 +157,6 @@ class IdentityMappingLoss(nn.Module):
             
         elif self.loss_type == "cosine":
             # Cosine distance for each row
-            # 1 - mean(cosine_similarity(T[i], I[i]))
             T_flat = transformation_matrix.reshape(B * N, N)
             I_flat = identity.reshape(B * N, N)
             similarity = F.cosine_similarity(T_flat, I_flat, dim=1)
@@ -162,7 +166,7 @@ class IdentityMappingLoss(nn.Module):
             raise ValueError(f"Unknown loss_type: {self.loss_type}")
         
         return loss
-    
+        
     def orthogonality_regularization(
         self,
         transformation_matrix: torch.Tensor,
@@ -184,8 +188,9 @@ class IdentityMappingLoss(nn.Module):
             transformation_matrix
         )  # (B, N, N)
         
-        # Should equal identity
-        identity = self.identity_matrix[:N, :N].unsqueeze(0).expand(B, -1, -1)
+        # Create identity matrix with correct size
+        identity = torch.eye(N, device=transformation_matrix.device,
+                            dtype=transformation_matrix.dtype).unsqueeze(0).expand(B, -1, -1)
         
         # Frobenius norm of difference
         diff = TtT - identity
