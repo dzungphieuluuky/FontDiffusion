@@ -87,7 +87,7 @@ class UltraFastDatasetBuilder:
         
         # Auto-tune performance parameters
         self.cpu_count = os.cpu_count() or 4
-        self.num_proc = max(1, self.cpu_count - 1)
+        self.num_proc = 1
         self.process_batch_size = 2000  # Large batches reduce IPC overhead
         
         # Caches
@@ -373,7 +373,7 @@ class UltraFastDatasetBuilder:
             self._process_batch,
             batched=True,
             batch_size=self.process_batch_size,
-            num_proc=self.num_proc,
+            num_proc=1,
             features=features,
             remove_columns=thin_dataset.column_names,
             desc="Processing images with OpenCV + pre-encoding",
@@ -410,7 +410,7 @@ class UltraFastDatasetBuilder:
                 token=self.config.token,
                 embed_external_files=False,
                 num_shards=self.config.num_shards,
-                num_proc=self.num_proc,
+                num_proc=1,
                 commit_message="Ultra-fast dataset upload with pre-encoded bytes",
             )
             
