@@ -6,6 +6,7 @@ Extends base FontDiffuserTrainer with FST-specific functionality.
 import argparse
 import logging
 import os
+import math
 import traceback
 from dataclasses import asdict
 from pathlib import Path
@@ -935,3 +936,131 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             logger.debug(traceback.format_exc())
             return False
         
+    def train(self):
+        """Main training loop."""
+        num_update_steps_per_epoch = math.ceil(
+            len(self.train_dataloader) / self.config.gradient_accumulation_steps
+        )
+        num_train_epochs = math.ceil(
+            self.config.max_train_steps / num_update_steps_per_epoch
+        )
+
+        # Resume from checkpoint if specified
+        if (
+            hasattr(self.args, "resume_from_checkpoint")
+            and self.args.resume_from_checkpoint
+        ):
+            if not self.load_checkpoint(self.args.resume_from_checkpoint):
+                logger.warning("Starting training from scratch")
+
+        # Setup progress bar
+        progress_bar = HFTqdm(
+            range(self.config.max_train_steps),
+            disable=not self.accelerator.is_local_main_process,
+            desc="Training",
+        )
+
+        # Initialize tracking variables
+        train_loss_accum = 0.0
+        loss_accum_count = 0
+
+        # Training loop
+        for epoch in range(self.current_epoch, num_train_epochs):
+            self.current_epoch = epoch
+
+            for step, samples in enumerate(self.train_dataloader):
+                # Skip steps if resuming
+                if self.global_step >= self.config.max_train_steps:
+                    break
+
+                with self.accelerator.accumulate(self.model):
+                    # Forward pass and loss computation
+                    loss, loss_dict = self.train_step(samples)
+
+                    # Backward pass
+                    self.accelerator.backward(loss)
+
+                    # Gradient clipping
+                    if self.accelerator.sync_gradients:
+                        grad_norm = torch.nn.utils.clip_grad_norm_(
+                            self.model.parameters(), self.config.max_grad_norm
+                        )
+
+                    # Optimization step
+                    self.optimizer.step()
+                    self.lr_scheduler.step()
+                    self.optimizer.zero_grad(set_to_none=True)
+
+                    # Update tracking variables
+                    train_loss_accum += loss.detach().item()
+                    loss_accum_count += 1
+
+                    # Sync and log
+                    if self.accelerator.sync_gradients:
+                        # Update progress bar
+                        progress_bar.update(1)
+                        self.global_step += 1
+
+                        # Compute average loss
+                        avg_train_loss = train_loss_accum / loss_accum_count
+
+                        # Prepare log dictionary
+                        log_dict = {
+                            "train_loss": avg_train_loss,
+                            "learning_rate": self.lr_scheduler.get_last_lr()[0],
+                            "epoch": epoch + step / len(self.train_dataloader),
+                            "global_step": self.global_step,
+                            "grad_norm": (
+                                grad_norm.item()
+                                if self.accelerator.sync_gradients
+                                else 0.0
+                            ),
+                        }
+
+                        # Add individual losses
+                        for loss_name, loss_val in loss_dict.items():
+                            log_dict[f"train/{loss_name}"] = loss_val
+
+                        # Log to tracker
+                        self.accelerator.log(log_dict, step=self.global_step)
+
+                        # Reset accumulators
+                        train_loss_accum = 0.0
+                        loss_accum_count = 0
+
+                        # Log to console
+                        if self.global_step % self.args.log_interval == 0:
+                            logger.info(
+                                f"Step {self.global_step}: "
+                                f"loss={avg_train_loss:.4f}, "
+                                f"lr={self.lr_scheduler.get_last_lr()[0]:.6f}, "
+                                f"grad_norm={grad_norm.item():.4f}"
+                            )
+
+                        # Save checkpoint
+                        if (
+                            self.global_step % self.args.ckpt_interval == 0
+                            and self.accelerator.is_main_process
+                        ):
+                            self.save_checkpoint()
+
+                # Update progress bar description
+                progress_bar.set_postfix(
+                    loss=loss.detach().item(),
+                    lr=self.lr_scheduler.get_last_lr()[0],
+                    step=self.global_step,
+                )
+
+                if self.global_step >= self.config.max_train_steps:
+                    break
+
+            if self.global_step >= self.config.max_train_steps:
+                break
+
+        progress_bar.close()
+
+        # Save final checkpoint
+        if self.accelerator.is_main_process:
+            self.save_checkpoint(is_final=True)
+
+        self.accelerator.end_training()

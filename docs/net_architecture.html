@@ -1,63 +1,223 @@
-<!-- Architecture diagram for FontDiffuserWithFST -->
-<pre>
-Inputs:
-  ┌───────────────────────────────┐
-  │ noisy_latents   (B, 4, H, W) │
-  │ timestep        (B,) or scalar│
-  │ content_img     (B, 1, 96,96) │
-  │ style_source_img(B, 1, 96,96) │
-  │ style_target_img(B, 1, 96,96) │
-  └───────────────────────────────┘
-            │
-            ▼
-ContentEncoder ────────────────┐
-(content_img)                  │
-  │                            │
-  ├─► content_img_feature (B,C1,H1,W1)
-  └─► content_residual_features (list)
-            │
-ContentEncoder ────────────────┐
-(style_target_img)             │
-  │                            │
-  ├─► style_content_feature (B,C1,H1,W1)
-  └─► style_content_res_features (list)
-            │
-StyleEncoder ──────────────────────────────► orig_style_feat (B,C2,H2,W2)
-(style_target_img)                         │
-                                           └─► orig_style_vec (B,D)
-MSSE ──────────────────────────────┐
-(style_source_img)                 │
-  │                                │
-  └─► source_style_features (B,N,D) │
-MSSE ──────────────────────────────┐│
-(style_target_img)                 ││
-  │                                ││
-  └─► target_style_features (B,N,D)││
-            │                     ││
-FST ───────────────────────────────┘│
-(source_style_features, target_style_features)
-  │
-  └─► transformation_features (B,N,D)
-            │
-FSTProjection ──────────────────────► fst_condition (B,N,D')
-            │
-OriginalStyleProjection ────────────► orig_style_projected (B,1,D')
-(orig_style_vec)                     │
-            │                       │
-            └─► combined_style_condition = concat(fst_condition, orig_style_projected) (B,N+1,D')
-            │
-            ▼
-encoder_hidden_states = [
-  orig_style_feat (B,C2,H2,W2),
-  content_residual_features (list),
-  combined_style_condition (B,N+1,D'),
-  style_content_res_features (list)
-]
-            │
-            ▼
-DiffusionUNet
-(noisy_latents, timestep, encoder_hidden_states, ...)
-  │
-  ├─► noise_pred (B,4,H,W)
-  └─► offset_out_sum (B,4,H,W)
-</pre>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FontDiffuserWithFST Architecture</title>
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({ 
+            startOnLoad: true,
+            theme: 'base',
+            securityLevel: 'loose',
+            themeVariables: {
+                primaryColor: '#e1f5fe',
+                edgeLabelBackground: '#ffffff',
+                tertiaryColor: '#f3f4f6'
+            },
+            flowchart: {
+                curve: 'basis',
+                useMaxWidth: false,
+                htmlLabels: true
+            }
+        });
+    </script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f8f9fa;
+            color: #333;
+        }
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+        }
+        .container {
+            width: 100%;
+            overflow-x: auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            box-sizing: border-box;
+        }
+        .legend {
+            margin-top: 20px;
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            font-size: 0.9em;
+            flex-wrap: wrap;
+        }
+        .item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .box { width: 20px; height: 20px; border-radius: 4px; border: 1px solid #333; }
+        .data { background-color: #fff9c4; border-color: #fbc02d; }
+        .module { background-color: #e1f5fe; border-color: #0288d1; }
+        .loss { background-color: #ffcdd2; border-color: #d32f2f; }
+    </style>
+</head>
+<body>
+
+    <h1>FontDiffuserWithFST Architecture</h1>
+    
+    <div class="legend">
+        <div class="item"><div class="box data"></div> Data / Tensor</div>
+        <div class="item"><div class="box module"></div> Network Module</div>
+        <div class="item"><div class="box loss"></div> Output / Loss Term</div>
+    </div>
+
+    <div class="container">
+        <div class="mermaid">
+            %%{init: {'theme': 'base', 'themeVariables': { 'fontSize': '14px', 'fontFamily': 'arial'}}}%%
+            graph TB
+    
+            %% --- INPUTS ---
+            subgraph Inputs [Input Data Batch]
+                style Inputs fill:#f3f4f6,stroke:#9ca3af,stroke-dasharray: 5, 5
+                
+                C_IMG[("Content Image<br/>(B, 3, 96, 96)")]
+                S_SRC[("Style Source Img<br/>(B, 3, 96, 96)")]
+                S_TGT[("Style Target Img<br/>(B, 3, 96, 96)")]
+                LATENT[("Noisy Latents<br/>(B, 3, 96, 96)")]
+                TIME[("Timestep<br/>(B)")]
+                
+                style C_IMG fill:#fff9c4,stroke:#fbc02d
+                style S_SRC fill:#fff9c4,stroke:#fbc02d
+                style S_TGT fill:#fff9c4,stroke:#fbc02d
+                style LATENT fill:#fff9c4,stroke:#fbc02d
+                style TIME fill:#fff9c4,stroke:#fbc02d
+            end
+
+            %% --- ENCODERS ---
+            subgraph Encoders [Feature Encoding Phase]
+                direction TB
+                
+                %% Content Encoder Flow
+                CE_MOD[[Content Encoder]]
+                style CE_MOD fill:#e1f5fe,stroke:#0288d1
+                
+                C_IMG --> CE_MOD
+                S_TGT --"Reference"--> CE_MOD
+                
+                CE_MOD --> C_FEAT["Content Feat<br/>(B, C, H, W)"]
+                CE_MOD --> C_RES["Content Residuals<br/>(List of Tensors)"]
+                CE_MOD --> S_CONT_RES["Style-Content Residuals<br/>(List of Tensors)"]
+
+                %% Original Style Encoder Flow
+                SE_MOD[[Style Encoder]]
+                style SE_MOD fill:#e1f5fe,stroke:#0288d1
+                
+                S_TGT --> SE_MOD
+                SE_MOD --> O_STYLE_FEAT["Orig Style Feat<br/>(B, 1024, 1, 1)"]
+                SE_MOD --> O_STYLE_VEC["Orig Style Vec<br/>(B, 1024)"]
+
+                %% Multi-Scale Style Encoder (MSSE)
+                MSSE[[Multi-Scale Style Encoder<br/>(MSSE)]]
+                style MSSE fill:#bbdefb,stroke:#1565c0
+                
+                S_SRC --> MSSE
+                S_TGT --> MSSE
+                
+                MSSE --"Source Feats"--> SRC_MS_FEATS["List Scale 1..5<br/>(64..1024 ch)"]
+                MSSE --"Target Feats"--> TGT_MS_FEATS["List Scale 1..5<br/>(64..1024 ch)"]
+            end
+
+            %% --- FST MODULE ---
+            subgraph FST_GRP [Font Style Transformation]
+                direction TB
+                style FST_GRP fill:#f3e5f5,stroke:#7b1fa2
+
+                SRC_MS_FEATS --> FST_MOD[[FST Module]]
+                TGT_MS_FEATS --> FST_MOD
+                style FST_MOD fill:#e1bee7,stroke:#8e24aa
+
+                subgraph FST_Internals [FST Internal Logic]
+                    direction TB
+                    POS_ENC[Adaptive Positional Encoding]
+                    CROSS_ATTN[Cross Attention<br/>(Query=Learnable, K,V=Features)]
+                    SUBTRACT[Subtract: L_target - L_source]
+                    SELF_ATTN[Self Attention Fusion]
+                    
+                    POS_ENC ~~~ CROSS_ATTN ~~~ SUBTRACT ~~~ SELF_ATTN
+                end
+
+                FST_MOD --> TRANS_FEATS["Transformation Features<br/>(B, N_L + H*W, 1024)"]
+            end
+
+            %% --- PROJECTION & COMBINATION ---
+            subgraph Conditioning [Conditioning Preparation]
+                FST_PROJ[[FST Projection<br/>Linear]]
+                ORIG_PROJ[[Orig Style Projection<br/>Linear]]
+
+                TRANS_FEATS --> FST_PROJ --> FST_COND["FST Condition<br/>(B, 256, 1280)"]
+                O_STYLE_VEC --> ORIG_PROJ --> ORIG_COND["Orig Condition<br/>(B, 1, 1280)"]
+
+                FST_COND & ORIG_COND --> CONCAT_STYLE{Concat}
+                CONCAT_STYLE --> COMB_STYLE["Combined Style Condition<br/>(B, 257, 1280)"]
+                
+                style FST_COND fill:#fff9c4,stroke:#fbc02d
+                style COMB_STYLE fill:#fff9c4,stroke:#fbc02d
+            end
+
+            %% --- UNET ---
+            subgraph Diffusion [Diffusion U-Net]
+                direction TB
+                UNET_MOD[[UNet w/ MCA Blocks]]
+                style UNET_MOD fill:#c8e6c9,stroke:#2e7d32
+
+                %% Inputs
+                LATENT --> UNET_MOD
+                TIME --> UNET_MOD
+
+                %% Injection Points (Encoder Hidden States)
+                O_STYLE_FEAT --"hidden_states 0"--> UNET_MOD
+                C_RES --"hidden_states 1"--> UNET_MOD
+                COMB_STYLE --"hidden_states 2<br/>(Cross Attn Key/Value)"--> UNET_MOD
+                S_CONT_RES --"hidden_states 3"--> UNET_MOD
+            end
+
+            %% --- OUTPUTS ---
+            subgraph Outputs [Network Outputs]
+                NOISE_PRED([Noise Prediction<br/>(B, 3, 96, 96)])
+                OFFSET_OUT([Offset Out Sum<br/>(For Offset Loss)])
+
+                UNET_MOD --> NOISE_PRED
+                UNET_MOD --> OFFSET_OUT
+
+                style NOISE_PRED fill:#ffcdd2,stroke:#d32f2f
+                style OFFSET_OUT fill:#ffcdd2,stroke:#d32f2f
+            end
+
+            %% --- CONSISTENCY LOSS (Training Only) ---
+            subgraph TrainingLogic [Consistency Loss Logic]
+                style TrainingLogic fill:#fff3e0,stroke:#e65100,stroke-dasharray: 5, 5
+                
+                CONSIST_LOSS{Consistency Loss}
+                TRANS_FEATS -.-> CONSIST_LOSS
+                
+                note_node["Calculated across pairs<br/>with same style transform"]
+                CONSIST_LOSS --- note_node
+            end
+
+        </div>
+    </div>
+
+    <div class="container" style="margin-top: 20px;">
+        <h2>Tensor Shape Key</h2>
+        <ul>
+            <li><strong>B</strong>: Batch Size</li>
+            <li><strong>N_L</strong>: Number of Learnable Queries (Default: 220)</li>
+            <li><strong>H*W</strong>: Spatial tokens from last scale (Default: 6*6=36)</li>
+            <li><strong>CrossAttn Dim</strong>: 1280 (Default from UNet config)</li>
+            <li><strong>MSSE Features</strong>: List of 5 scales [64, 128, 256, 512, 1024] channels</li>
+        </ul>
+    </div>
+
+</body>
+</html>

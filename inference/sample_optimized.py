@@ -46,117 +46,6 @@ from src.tools.filename_utils import (
 
 logger = logging.getLogger(__name__)
 
-
-def arg_parse() -> Namespace:
-    """Parse command line arguments"""
-    from src.configs.fontdiffuser import get_parser
-
-    parser: ArgumentParser = get_parser()
-
-    # Original arguments
-    parser.add_argument("--ckpt_dir", type=str, default=None)
-    parser.add_argument("--demo", action="store_true")
-    parser.add_argument(
-        "--controlnet",
-        type=bool,
-        default=False,
-        help="If in demo mode, the controlnet can be added.",
-    )
-    parser.add_argument("--character_input", action="store_true")
-    parser.add_argument(
-        "--content_character",
-        type=str,
-        default=None,
-        help="Single character, comma-separated list, or path to txt file",
-    )
-    parser.add_argument(
-        "--characters_file",
-        type=str,
-        default=None,
-        help="Path to text file with one character per line",
-    )
-    parser.add_argument("--content_image_path", type=str, default=None)
-    parser.add_argument("--style_image_path", type=str, default=None)
-    parser.add_argument("--save_image", action="store_true")
-    parser.add_argument(
-        "--save_image_dir", type=str, default=None, help="The saving directory."
-    )
-    parser.add_argument("--device", type=str, default="cuda:0")
-    parser.add_argument(
-        "--ttf_path",
-        type=str,
-        default="ttf/KaiXinSongA.ttf",
-        help="Path to single TTF file or directory with multiple fonts",
-    )
-
-    # SAFE optimization arguments
-    parser.add_argument(
-        "--fp16",
-        action="store_true",
-        default=False,
-        help="Use FP16 precision (SAFE - applied after loading weights)",
-    )
-    parser.add_argument(
-        "--batch_size",
-        type=int,
-        default=1,
-        help="Batch size for processing multiple characters",
-    )
-    parser.add_argument(
-        "--channels_last",
-        action="store_true",
-        default=False,
-        help="Use channels-last memory format (SAFE)",
-    )
-    parser.add_argument(
-        "--deterministic",
-        action="store_true",
-        default=False,
-        help="Use deterministic algorithms for reproducibility",
-    )
-
-    # FST-specific arguments
-    parser.add_argument(
-        "--use_fst",
-        action="store_true",
-        default=False,
-        help="Use FST-enhanced model for improved style transfer",
-    )
-    parser.add_argument(
-        "--fst_ckpt_path",
-        type=str,
-        default=None,
-        help="Path to FST module checkpoint (optional)",
-    )
-    parser.add_argument(
-        "--fst_num_queries",
-        type=int,
-        default=256,
-        help="Number of learnable queries in FST module",
-    )
-    parser.add_argument(
-        "--fst_query_dim",
-        type=int,
-        default=128,
-        help="Dimension of FST queries",
-    )
-    parser.add_argument(
-        "--fst_num_scales",
-        type=int,
-        default=5,
-        help="Number of scales in MSSE",
-    )
-
-    args: Namespace = parser.parse_args()
-
-    style_image_size: int = getattr(args, "style_image_size", 96)
-    content_image_size: int = getattr(args, "content_image_size", 96)
-    args.style_image_size = (style_image_size, style_image_size)
-    args.content_image_size = (content_image_size, content_image_size)
-
-    return args
-
-
 class FontManager:
     """Manages single or multiple font files"""
 
@@ -464,6 +353,13 @@ def load_fontdiffuser_pipeline(
         model = torch.compile(model)
         logger.info("✓ Model compiled")
 
+    if getattr(args, "deterministic", False):
+        torch.backends.fp32_precision = "ieee"
+        torch.backends.cuda.matmul.fp32_precision = "ieee"
+        torch.backends.cudnn.fp32_precision = "ieee"
+        torch.backends.cudnn.conv.fp32_precision = "tf32"
+        torch.backends.cudnn.rnn.fp32_precision = "tf32"
+
     # Move to device
     dtype: torch.dtype = (
         torch.float16 if getattr(args, "fp16", False) else torch.float32
@@ -659,7 +555,14 @@ def image_process_batch(
 
 def main() -> None:
     """Main function"""
-    args: Namespace = arg_parse()
+    from src.configs.fontdiffuser import get_parser
+    parser: ArgumentParser = get_parser()
+    args: Namespace = parser.parse_args()
+
+    style_image_size = getattr(args, "style_image_size", 96)
+    content_image_size = getattr(args, "content_image_size", 96)
+    args.style_image_size = (style_image_size, style_image_size)
+    args.content_image_size = (content_image_size, content_image_size)
 
     logger.info("\n" + "=" * 60)
     logger.info("FontDiffuser Optimized Sampling")
