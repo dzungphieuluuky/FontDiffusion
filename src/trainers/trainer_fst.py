@@ -641,11 +641,11 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 "num_identity_pairs": self.num_identity_pairs,  # ADD THIS
                 "identity_loss_weight": self.identity_loss_weight,  # ADD THIS
                 "identity_pair_mode": self.identity_pair_mode,  # ADD THIS
-            },
+            }
         }
 
-        torch.save(training_state, save_dir / "training_state.pt")
-        logger.info(f"✓ Saved training state to {save_dir / 'training_state.pt'}")
+        torch.save(training_state, save_dir / "training_state.pth")
+        logger.info(f"✓ Saved training state to {save_dir / 'training_state.pth'}")
         logger.info(f"✓ Saved checkpoint to {save_dir}")
         
         self.accelerator.log(
@@ -667,7 +667,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             checkpoint_dir = Path(checkpoint_path)
 
             # Load training state
-            training_state_path = checkpoint_dir / "training_state.pt"
+            training_state_path = checkpoint_dir / "training_state.pth"
             if training_state_path.exists():
                 training_state = torch.load(training_state_path, map_location="cpu")
                 
@@ -686,7 +686,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 if fst_cfg:
                     logger.info(f"FST config from checkpoint: {fst_cfg}")
             else:
-                logger.warning("training_state.pt not found; skipping optimizer/scheduler restore")
+                logger.warning("training_state.pth not found; skipping optimizer/scheduler restore")
 
             # Load model components
             unwrapped_model = self.accelerator.unwrap_model(self.model)

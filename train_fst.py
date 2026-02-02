@@ -162,7 +162,7 @@ accelerate launch train_fst.py \
     --data_root="my_dataset" \
     --train_batch_size=4 \
     --max_train_steps=150000 \
-    --resume_from_checkpoint="outputs/fst_training/checkpoint_step_100000/training_state.pt" \
+    --resume_from_checkpoint="outputs/fst_training/checkpoint_step_100000/training_state.pth" \
     --output_dir="outputs/fst_training"
 
 # ============================================================================
