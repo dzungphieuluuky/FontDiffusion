@@ -366,7 +366,7 @@ class UltraFastDatasetExporter:
                 name=self.config.config_name,
                 split=self.config.split,
                 token=self.config.token,
-                num_proc=1,
+                num_proc=self.num_workers,
             )
             
             _validate_dataset_structure(dataset)
@@ -412,7 +412,7 @@ class UltraFastDatasetExporter:
             desc="Exporting images",
             fn_kwargs={"output_dir": str(self.output_dir)},
         )
-        
+
         # Write checkpoint JSON (same as before)
         logger.info("Writing results_checkpoint.json...")
 
