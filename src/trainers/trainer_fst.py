@@ -539,25 +539,41 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                     )
 
 
-        # In the identity loss section of train_step():
         if self.num_identity_pairs > 0 and samples.get("num_identity_pairs_total", 0) > 0:
-            identity_sources = samples["identity_pair_sources"]
-            identity_targets = samples["identity_pair_targets"]
+            identity_sources = samples["identity_pair_sources"]  # (B, 1, H, W)
+            identity_targets = samples["identity_pair_targets"]  # (B, 1, H, W)
             
-            # Use dedicated IdentityMappingLoss module
+            # Extract FST features from identity pairs
+            with torch.no_grad():
+                source_fst_features = self.model.mss_encoder(identity_sources)  # Multi-scale
+                target_fst_features = self.model.mss_encoder(identity_targets)
+            
+            # Apply FST to get transformation features
+            transformation_source = self.model.fst_module(source_fst_features, source_fst_features)
+            transformation_target = self.model.fst_module(target_fst_features, target_fst_features)
+            
+            # Extract query portion (first matrix_size features)
+            # transformation_* shape: (B, N_L + H*W, D)
+            query_source = transformation_source[:, :self.args.fst_num_queries, :]  # (B, N_L, D)
+            query_target = transformation_target[:, :self.args.fst_num_queries, :]
+            
+            # Compute identity loss
             identity_loss, identity_metrics = self.identity_loss_module(
-                identity_sources,
-                identity_targets,
+                query_source,  # (B, N_L, D) - exactly 3D
+                query_target   # (B, N_L, D) - exactly 3D
             )
             
             # Add to total loss
-            total_loss = total_loss + self.identity_loss_weight * identity_loss
+            total_loss = total_loss + self.args.identity_loss_weight * identity_loss
             
-            # Log all metrics from the module
+            # Log metrics
             loss_dict["identity_loss"] = identity_loss.item()
             for key, value in identity_metrics.items():
                 loss_dict[f"identity_{key}"] = value
 
+
+
+                
         return total_loss, loss_dict    
 
     def save_checkpoint(self, is_final: bool = False):

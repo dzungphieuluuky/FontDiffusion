@@ -38,31 +38,59 @@ class IdentityMappingLoss(nn.Module):
         loss_type: str = "frobenius",
         regularization: str = "orthogonal",
         reg_weight: float = 0.01,
+        extract_queries_only: bool = True,
     ):
         """
         Args:
             matrix_size: Size of transformation matrix (typically num_queries)
             loss_type: How to measure distance from identity
-                - "frobenius": Frobenius norm ||T - I||_F
-                - "mse": Mean squared error
-                - "cosine": Cosine distance
-            regularization: Additional regularization
-                - "orthogonal": Encourage orthogonality (T^T T ≈ I)
-                - "spectral": Penalize large singular values
-                - None: No additional regularization
+            regularization: Additional regularization type
             reg_weight: Weight for regularization term
+            extract_queries_only: If True, extract only first matrix_size from features
         """
         super().__init__()
         self.matrix_size = matrix_size
         self.loss_type = loss_type.lower()
         self.regularization = regularization
         self.reg_weight = reg_weight
+        self.extract_queries_only = extract_queries_only
         
         # Pre-compute identity matrix
         self.register_buffer(
             "identity_matrix",
             torch.eye(matrix_size, dtype=torch.float32)
         )
+    
+    def _extract_features(
+        self,
+        features: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Extract relevant features from FST output.
+        
+        FST outputs (B, N_L + H*W, D) where:
+        - N_L = num_queries (learnable portion)
+        - H*W = spatial portion (optional, often ignored)
+        
+        If extract_queries_only=True, extract only first matrix_size features.
+        
+        Args:
+            features: (..., N, D) - Can have >3 dims; flatten to (B, N, D)
+            
+        Returns:
+            features: (B, N, D) - Exactly 3 dimensions
+        """
+        # Flatten batch dimensions if needed
+        original_shape = features.shape
+        if len(original_shape) > 3:
+            # Reshape to (B, N, D) by flattening all but last two dims
+            features = features.reshape(-1, original_shape[-2], original_shape[-1])
+        
+        # Extract only queries if needed
+        if self.extract_queries_only:
+            features = features[:, :self.matrix_size, :]
+        
+        return features
         
     def compute_transformation_matrix(
         self,
@@ -72,40 +100,28 @@ class IdentityMappingLoss(nn.Module):
         """
         Compute transformation matrix from source to target features.
         
-        Uses the query portion of FST features to construct a matrix
-        that represents the style transformation.
-        
         Args:
-            source_features: (B, N, D) - Features from source style image
-            target_features: (B, N, D) - Features from target style image
+            source_features: (..., N, D) - Features from source image
+            target_features: (..., N, D) - Features from target image
             
         Returns:
             transformation_matrix: (B, N, N) - Transformation matrix
         """
-        B, N, D = source_features.shape
+        # Extract and normalize features
+        source_features = self._extract_features(source_features)
+        target_features = self._extract_features(target_features)
         
-        # Method 1: Linear regression approach
-        # Find T such that target ≈ source @ T
-        # T = (source^T @ source)^-1 @ source^T @ target
+        B, N, D = source_features.shape
         
         # Normalize features for numerical stability
         source_norm = F.normalize(source_features, p=2, dim=-1)
         target_norm = F.normalize(target_features, p=2, dim=-1)
         
         # Compute transformation via least squares
-        # T: (B, N, N) such that source_norm @ T ≈ target_norm
         transformation_matrix = torch.bmm(
             source_norm.transpose(1, 2),  # (B, D, N)
             target_norm                     # (B, N, D)
         ).transpose(1, 2)  # (B, N, N)
-        
-        # Alternative: Direct correlation matrix
-        # This measures how each query dimension maps to others
-        # T = target^T @ source / N
-        # transformation_matrix = torch.bmm(
-        #     target_norm.transpose(1, 2),  # (B, D, N)
-        #     source_norm                     # (B, N, D)
-        # ) / N
         
         return transformation_matrix
     
@@ -211,14 +227,19 @@ class IdentityMappingLoss(nn.Module):
         Compute identity mapping loss for same-style pairs.
         
         Args:
-            source_features: (B, N, D) - FST features from source image
-            target_features: (B, N, D) - FST features from target image
-                             Both should have the SAME style
+            source_features: (..., N, D) - FST features from source image
+                            Can be (B, N, D) or (B, N_L + H*W, D)
+            target_features: (..., N, D) - FST features from target image
+                            Both should have the SAME style
             
         Returns:
             loss: Scalar identity loss
             metrics: Dictionary with detailed loss components
         """
+        # Extract and validate features
+        source_features = self._extract_features(source_features)
+        target_features = self._extract_features(target_features)
+        
         # Compute transformation matrix
         T = self.compute_transformation_matrix(source_features, target_features)
         
