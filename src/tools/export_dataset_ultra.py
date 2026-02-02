@@ -197,6 +197,53 @@ class ExportConfig:
 # ULTRA-FAST DATASET EXPORTER
 # ============================================================================
 
+def _process_single_export(sample: dict, output_dir: str) -> dict:
+    """Process a single sample for export (must be at module level for pickling).
+    
+    Args:
+        sample: Single sample dict with character, style, font, images
+        output_dir: Root output directory
+        
+    Returns:
+        Metadata dict for this sample
+    """
+    output_path = Path(output_dir)
+    
+    char = sample["character"]
+    style = sample["style"]
+    font = sample.get("font", "unknown")
+    
+    # Initialize results
+    result = {
+        "content_saved": False,
+        "target_saved": False,
+        "content_filename": get_content_filename(char),
+        "target_filename": get_target_filename(char, style),
+        "content_hash": compute_file_hash(char, "", font),
+        "target_hash": compute_file_hash(char, style, font),
+    }
+    
+    # Process content image
+    content_img = sample.get("content_image")
+    if isinstance(content_img, Image.Image):
+        try:
+            final_path = output_path / "ContentImage" / result["content_filename"]
+            _atomic_save_image(content_img, final_path)
+            result["content_saved"] = True
+        except Exception as e:
+            logger.debug(f"Failed to save content {result['content_filename']}: {e}")
+    
+    # Process target image
+    target_img = sample.get("target_image")
+    if isinstance(target_img, Image.Image):
+        try:
+            final_path = output_path / "TargetImage" / style / result["target_filename"]
+            _atomic_save_image(target_img, final_path)
+            result["target_saved"] = True
+        except Exception as e:
+            logger.debug(f"Failed to save target {result['target_filename']}: {e}")
+    
+    return result
 
 class UltraFastDatasetExporter:
     """Ultra-optimized dataset exporter using native Datasets parallelism."""
@@ -212,7 +259,7 @@ class UltraFastDatasetExporter:
         self.num_workers = min(config.num_workers, self.cpu_count)
 
         logger.info(f"Ultra-fast exporter initialized:")
-        logger.info(f"  Workers: {self.num_workers} (via dataset.map num_proc)")
+        logger.info(f"  Workers: {self.num_workers} parallel processes")
         logger.info(f"  Output: {self.output_dir}")
 
     def _load_dataset(self) -> Dataset:
@@ -287,12 +334,6 @@ class UltraFastDatasetExporter:
     def _export_with_map(self, dataset: Dataset) -> dict[str, Any]:
         """Export images using dataset.map() with num_proc parallelism.
 
-        Key optimizations:
-        - Native HuggingFace Datasets parallelism (Arrow-optimized I/O)
-        - Batch processing for memory efficiency
-        - Incremental JSON writing (constant memory usage)
-        - Atomic file writes (corruption prevention)
-
         Args:
             dataset: Dataset to export
 
@@ -309,15 +350,13 @@ class UltraFastDatasetExporter:
         logger.info("Processing samples with dataset.map()...")
 
         processed_dataset = dataset.map(
-            _process_batch,
-            batched=True,
-            batch_size=self.config.batch_size,
-            num_proc=self.num_workers,
+            _process_single_export,  # ✅ Module-level function for pickling
+            num_proc=self.num_workers,  # ✅ TRUE parallelism across workers
             desc="Exporting images",
             fn_kwargs={"output_dir": str(self.output_dir)},
         )
 
-        # Write checkpoint JSON
+        # Write checkpoint JSON (same as before)
         logger.info("Writing results_checkpoint.json...")
 
         with checkpoint_path.open("w", encoding="utf-8") as json_file:
@@ -328,18 +367,15 @@ class UltraFastDatasetExporter:
             styles = set()
             fonts = set()
 
-            # Iterate through processed dataset
             for i, sample in enumerate(processed_dataset):
                 char = sample["character"]
                 style = sample["style"]
                 font = sample.get("font", "unknown")
 
-                # Track unique values
                 characters.add(char)
                 styles.add(style)
                 fonts.add(font)
 
-                # Write generation record if target was saved
                 if sample.get("target_saved", False):
                     generation = {
                         "character": char,
@@ -357,16 +393,13 @@ class UltraFastDatasetExporter:
                     json.dump(generation, json_file, ensure_ascii=False)
                     generations_count += 1
 
-                # Log progress
                 if (i + 1) % 1000 == 0:
                     progress_pct = (i + 1) * 100 // len(processed_dataset)
                     logger.info(
                         f"Progress: {i + 1}/{len(processed_dataset)} samples "
-                        f"({progress_pct}%) - "
-                        f"{generations_count} target images written"
+                        f"({progress_pct}%) - {generations_count} targets written"
                     )
 
-            # Write JSON footer
             json_file.write("\n  ],\n")
             json_file.write(
                 f'  "characters": {json.dumps(sorted(characters), ensure_ascii=False)},\n'
@@ -381,12 +414,10 @@ class UltraFastDatasetExporter:
             json_file.write(f'  "total_styles": {len(styles)}\n')
             json_file.write("}\n")
 
-        # Count actual content files (they were deduplicated)
         content_count = len(list(self.content_dir.glob("*.png")))
 
         logger.info(
-            f"Exported {content_count} content images, "
-            f"{generations_count} target images"
+            f"Exported {content_count} content images, {generations_count} target images"
         )
 
         return {
@@ -398,7 +429,7 @@ class UltraFastDatasetExporter:
             "total_chars": len(characters),
             "total_styles": len(styles),
         }
-
+    
     def export(self) -> dict[str, Any]:
         """Execute the full export process."""
         logger.info("Starting ultra-fast dataset export...")
