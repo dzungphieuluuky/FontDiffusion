@@ -585,7 +585,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                     "fst_num_scales": self.fst_num_scales,
                 },
             },
-            save_dir / "training_state.pt",
+            save_dir / "training_state.pth",
         )
 
         logger.info(f"✓ Saved checkpoint to {save_dir}")
