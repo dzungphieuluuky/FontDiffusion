@@ -88,7 +88,7 @@ class UltraFastDatasetBuilder:
         # Auto-tune performance parameters
         self.cpu_count = os.cpu_count() or 4
         self.num_proc = max(1, self.cpu_count - 1)
-        self.process_batch_size = 1000  # Large batches reduce IPC overhead
+        self.process_batch_size = 2000  # Large batches reduce IPC overhead
         
         # Caches
         self.style_cache: dict[str, Image.Image] = {}

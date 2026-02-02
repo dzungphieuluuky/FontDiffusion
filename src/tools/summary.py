@@ -37,7 +37,7 @@ def print_model_summary(model: nn.Module, input_shapes: dict, device: str = "cpu
     )
 
 
-from src.model import FontDiffuserModel, print_model_summary
+from src.model import FontDiffuserModel
 
 unet = build_unet()
 style_encoder = build_style_encoder()
