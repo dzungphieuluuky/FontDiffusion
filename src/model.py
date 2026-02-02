@@ -552,7 +552,43 @@ class FontDiffuserWithFST(nn.Module):
         
         return total_loss, metrics    
 
-    
+    def compute_identity_loss_v2(
+        self,
+        identity_pair_sources: torch.Tensor,
+        identity_pair_targets: torch.Tensor,
+        identity_loss_module: nn.Module,
+    ) -> tuple[torch.Tensor, dict[str, float]]:
+        """
+        Compute identity mapping loss using the dedicated IdentityMappingLoss module.
+        
+        Args:
+            identity_pair_sources: (B, 1, H, W) - Source style images (same style)
+            identity_pair_targets: (B, 1, H, W) - Target style images (same style)
+            identity_loss_module: IdentityMappingLoss instance
+            
+        Returns:
+            loss: Scalar loss tensor
+            metrics: Dict with diagnostics from IdentityMappingLoss
+        """
+        # Extract multi-scale features from both
+        source_style_features = self.mss_encoder(identity_pair_sources)
+        target_style_features = self.mss_encoder(identity_pair_targets)
+        
+        # Apply FST to get transformation features
+        transformation_features = self.fst_module(
+            source_style_features,
+            target_style_features,
+        )  # (B, N_L + H*W, D)
+        
+        # Extract learnable query portion only
+        query_features = transformation_features[:, :self.fst_num_queries, :]
+        
+        # Use IdentityMappingLoss module
+        loss, metrics = identity_loss_module(query_features, query_features)
+        
+        return loss, metrics
+
+
 class FontDiffuserModel(ModelMixin, ConfigMixin):
     """Forward function for FontDiffuer with content encoder style encoder and unet."""
 

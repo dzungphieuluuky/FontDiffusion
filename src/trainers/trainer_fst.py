@@ -136,6 +136,18 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                     mss_encoder, fst_module, fst_projection, original_style_projection
                 )
 
+            from src.modules.identity_mapping_loss import IdentityMappingLoss
+            
+            self.identity_loss_module = IdentityMappingLoss(
+                matrix_size=self.fst_num_queries,
+                loss_type="frobenius",
+                regularization="orthogonal",
+                reg_weight=0.01,
+            )
+            
+            logger.info("✓ Created IdentityMappingLoss module")
+
+
             # Create FST model
             self.model = FontDiffuserWithFST(
                 unet=unet,
@@ -365,6 +377,9 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         """Wrap components with accelerator and load FST checkpoints if available."""
         # First wrap with accelerator
         super()._wrap_components()
+        if self.use_fst and hasattr(self, "identity_loss_module"):
+            self.identity_loss_module = self.accelerator.prepare(self.identity_loss_module)
+            logger.info("✓ Prepared IdentityMappingLoss module")
 
         # Then load FST-specific checkpoints if they were found
         if hasattr(self, "_fst_checkpoint") and self.use_fst:
@@ -529,24 +544,24 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                     )
 
 
+        # In the identity loss section of train_step():
         if self.num_identity_pairs > 0 and samples.get("num_identity_pairs_total", 0) > 0:
             identity_sources = samples["identity_pair_sources"]
             identity_targets = samples["identity_pair_targets"]
             
-            # Compute identity loss
-            identity_loss, identity_metrics = self.model.compute_identity_loss(
+            # Use dedicated IdentityMappingLoss module
+            identity_loss, identity_metrics = self.identity_loss_module(
                 identity_sources,
                 identity_targets,
-                num_queries=self.fst_num_queries,
             )
             
             # Add to total loss
             total_loss = total_loss + self.identity_loss_weight * identity_loss
             
-            # Log metrics
+            # Log all metrics from the module
             loss_dict["identity_loss"] = identity_loss.item()
-            loss_dict["identity_diagonal_mean"] = identity_metrics["diagonal_mean"]
-            loss_dict["identity_diagonal_std"] = identity_metrics["diagonal_std"]  # Fixed key name
+            for key, value in identity_metrics.items():
+                loss_dict[f"identity_{key}"] = value
 
         return total_loss, loss_dict    
 
@@ -576,31 +591,42 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 unwrapped_model.diffusion_unet.state_dict(),
                 save_dir / "unet.safetensors",
             )
+            logger.info("✓ Saved diffusion_unet")
             save_model_checkpoint(
                 unwrapped_model.style_encoder.state_dict(),
                 save_dir / "style_encoder.safetensors",
             )
+            logger.info("✓ Saved style_encoder")
             save_model_checkpoint(
                 unwrapped_model.content_encoder.state_dict(),
                 save_dir / "content_encoder.safetensors",
             )
+            logger.info("✓ Saved content_encoder")
             save_model_checkpoint(
                 unwrapped_model.mss_encoder.state_dict(),
                 save_dir / "mss_encoder.safetensors",
             )
+            logger.info("✓ Saved mss_encoder")
             save_model_checkpoint(
                 unwrapped_model.fst_module.state_dict(),
                 save_dir / "fst_module.safetensors",
             )
+            logger.info("✓ Saved fst_module")
             save_model_checkpoint(
                 unwrapped_model.fst_projection.state_dict(),
                 save_dir / "fst_projection.safetensors",
             )
+            logger.info("✓ Saved fst_projection")
             save_model_checkpoint(
                 unwrapped_model.original_style_projection.state_dict(),
                 save_dir / "original_style_projection.safetensors",
             )
-
+            logger.info("✓ Saved original_style_projection")
+            save_model_checkpoint(
+                self.identity_loss_module.state_dict(),
+                save_dir / "identity_loss_module.safetensors",
+            )
+            logger.info("✓ Saved identity_loss_module")
             logger.info("✓ Saved all FST components")
         else:
             # Save standard model
@@ -608,14 +634,17 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 unwrapped_model.diffusion_unet.state_dict(),
                 save_dir / "unet.safetensors",
             )
+            logger.info("✓ Saved diffusion_unet")
             save_model_checkpoint(
                 unwrapped_model.style_encoder.state_dict(),
                 save_dir / "style_encoder.safetensors",
             )
+            logger.info("✓ Saved style_encoder")
             save_model_checkpoint(
                 unwrapped_model.content_encoder.state_dict(),
                 save_dir / "content_encoder.safetensors",
             )
+            logger.info("✓ Saved content_encoder")
 
         # Save SCR for phase 2
         if self.config.phase_2 and self.scr is not None:
