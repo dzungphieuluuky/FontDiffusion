@@ -87,9 +87,8 @@ class UltraFastDatasetBuilder:
         
         # Auto-tune performance parameters
         self.cpu_count = os.cpu_count() or 4
-        self.num_proc = 1
-        self.process_batch_size = 2000  # Large batches reduce IPC overhead
-        
+        self.num_proc = min(self.cpu_count, 8)  # Cap at 8 to avoid overhead
+        self.process_batch_size = 1000  # Batch size per worker        
         # Caches
         self.style_cache: dict[str, Image.Image] = {}
         self.path_cache: dict[str, dict] = {}
@@ -247,7 +246,10 @@ class UltraFastDatasetBuilder:
         return buf.getvalue()
 
     def _process_sample(self, gen: dict) -> Optional[dict]:
-        """Process single sample with pre-encoded bytes (worker function)."""
+        """Process single sample with pre-encoded bytes.
+        
+        This function must be picklable (defined at class level, not nested).
+        """
         char = gen.get("character", "")
         style = gen.get("style", "")
         font = gen.get("font", "unknown")
@@ -288,8 +290,7 @@ class UltraFastDatasetBuilder:
             comparison.paste(style_resized, (c_new_width + self.spacing, 0))
             comparison.paste(target_resized, (c_new_width + s_new_width + 2 * self.spacing, 0))
             
-            # ✅ Pre-encode all images to JPEG bytes in worker process
-            # This avoids main-thread encoding bottleneck
+            # Pre-encode all images to JPEG bytes in worker process
             return {
                 "character": char,
                 "style": style,
@@ -305,7 +306,7 @@ class UltraFastDatasetBuilder:
         except Exception as e:
             logger.debug(f"Failed to process {char}/{style}: {e}")
             return None
-    
+            
     def _process_batch(self, batch: dict) -> dict:
         """Process batch using map() pattern (called by Dataset.map())."""
         results = {
@@ -342,7 +343,8 @@ class UltraFastDatasetBuilder:
         
         start_time = time.time()
         
-        # Create metadata dataset
+        # Step 1: Create thin metadata-only dataset from pre-loaded checkpoint
+        logger.info(f"Creating metadata dataset from {len(self.generations)} generations...")
         metadata = {
             "character": [g.get("character", "") for g in self.generations],
             "style": [g.get("style", "") for g in self.generations],
@@ -350,8 +352,9 @@ class UltraFastDatasetBuilder:
         }
         
         thin_dataset = Dataset.from_dict(metadata)
+        logger.info(f"Metadata dataset created: {len(thin_dataset)} samples")
         
-        # Define features
+        # Step 2: Define features for output
         features = Features({
             "character": Value("string"),
             "style": Value("string"),
@@ -364,26 +367,32 @@ class UltraFastDatasetBuilder:
             "target_hash": Value("string"),
         })
         
-        # Use map() with _process_sample for TRUE parallel processing
+        # Step 3: Process with TRUE parallel processing
+        logger.info(f"Processing images with {self.num_proc} workers...")
+        
         dataset = thin_dataset.map(
-            lambda x: self._process_sample(x) or {},  # Return empty dict if None
-            num_proc=self.cpu_count,  # Actually use parallelization!
+            self._process_sample,
+            num_proc=self.num_proc,  # ✅ Actually use parallel workers!
             features=features,
             remove_columns=thin_dataset.column_names,
             desc="Processing images with OpenCV + pre-encoding",
         )
-        
-        # Filter out failed samples (empty dicts)
+
+        # Filter out failed samples (None values)
+        original_size = len(dataset)
         dataset = dataset.filter(
-            lambda x: bool(x["character"]), 
-            num_proc=self.cpu_count
+            lambda x: x["character"] is not None, 
+            num_proc=self.num_proc
         )
+        filtered_count = original_size - len(dataset)
         
         build_time = time.time() - start_time
+        
+        logger.info(f"Dataset built: {len(dataset)} valid samples ({filtered_count} filtered) in {build_time:.2f}s")
         logger.info(f"Processing speed: {len(dataset)/build_time:.1f} samples/s")
         
         return dataset
-
+    
     def push_to_hub_streaming(self, dataset: Dataset) -> None:
         """Stream upload with parallel shards."""
         if not self.config.push_to_hub:

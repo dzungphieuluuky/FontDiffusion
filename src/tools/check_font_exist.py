@@ -1,6 +1,7 @@
 import cv2
 import copy
 import pygame
+from pygame import freetype
 import numpy as np
 from PIL import Image
 from fontTools.ttLib import TTFont
@@ -16,10 +17,10 @@ def is_char_in_font(font_path, char):
     return False
 
 
-def load_ttf(ttf_path, fsize=128) -> pygame.freetype.Font:
+def load_ttf(ttf_path, fsize=128) -> freetype.Font:
     pygame.init()
 
-    font = pygame.freetype.Font(ttf_path, size=fsize)
+    font = freetype.Font(ttf_path, size=fsize)
     return font
 
 
@@ -72,3 +73,18 @@ def print_font_glyph_counts(fonts_dir: Path | str) -> None:
             print(f"  {font_name}: {num_glyphs} glyphs")
         except Exception as e:
             print(f"  {font_path.name}: Failed to read ({e})")
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Check and print the number of glyphs in each font file within a directory."
+    )
+    parser.add_argument(
+        "fonts_dir",
+        type=Path,
+        help="Directory containing font files (.ttf, .otf) to check.",
+    )
+
+    args = parser.parse_args()
+    print_font_glyph_counts(args.fonts_dir)
