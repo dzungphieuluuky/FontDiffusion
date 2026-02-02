@@ -34,11 +34,13 @@ from src import (
     build_scr,
     build_style_encoder,
     build_unet,
+
     build_fst,
     build_mss_encoder,
     build_fst_projection,
     build_original_style_projection,
     get_unet_cross_attention_dim,
+    build_identity_loss_module
 )
 from src.model import FontDiffuserWithFST
 from src.tools.utilities import (
@@ -136,15 +138,8 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                     mss_encoder, fst_module, fst_projection, original_style_projection
                 )
 
-            from src.modules.identity_mapping_loss import IdentityMappingLoss
-            
-            self.identity_loss_module = IdentityMappingLoss(
-                matrix_size=self.fst_num_queries,
-                loss_type="frobenius",
-                regularization="orthogonal",
-                reg_weight=0.01,
-            )
-            
+            # Create Identity Mapping Loss module
+            self.identity_loss_module = build_identity_loss_module(args=self.args)
             logger.info("✓ Created IdentityMappingLoss module")
 
 
@@ -730,6 +725,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                     "fst_module": ("fst_module.safetensors", unwrapped_model.fst_module),
                     "fst_projection": ("fst_projection.safetensors", unwrapped_model.fst_projection),
                     "original_style_projection": ("original_style_projection.safetensors", unwrapped_model.original_style_projection),
+                    "identity_loss_module": ("identity_loss_module.safetensors", unwrapped_model.identity_loss_module),
                 }
             else:
                 logger.info("Loading standard model components...")

@@ -7,6 +7,11 @@ from torch import nn
 from src import ContentEncoder, StyleEncoder, UNet, SCR
 from src.model import FontStyleTransformationModule
 from src.model import MultiScaleStyleEncoder
+from src.modules.identity_mapping_loss import (
+    IdentityMappingLoss,
+    AdaptiveIdentityMappingLoss,
+    PooledIdentityMappingLoss,
+)
 
 def build_unet(args):
     unet = UNet(
@@ -144,3 +149,18 @@ def get_unet_cross_attention_dim(unet: UNet) -> int:
 
     # Default fallback
     return 1024
+
+def build_identity_loss_module(args: argparse.Namespace) -> IdentityMappingLoss:
+    """Build identity mapping loss module."""
+    identity_loss = IdentityMappingLoss(
+        matrix_size=getattr(args, "fst_num_queries", 256),
+        loss_type=getattr(args, "identity_loss_type", "frobenius"),
+        regularization=getattr(args, "identity_regularization", "orthogonal"),
+        reg_weight=getattr(args, "identity_reg_weight", 0.01),
+    )
+    print(
+        f"✓ Built IdentityMappingLoss "
+        f"(matrix_size={args.fst_num_queries}, "
+        f"loss_type={getattr(args, 'identity_loss_type', 'frobenius')})"
+    )
+    return identity_loss
