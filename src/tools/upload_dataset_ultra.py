@@ -342,8 +342,7 @@ class UltraFastDatasetBuilder:
         
         start_time = time.time()
         
-        # Step 1: Create thin metadata-only dataset from pre-loaded checkpoint
-        logger.info(f"Creating metadata dataset from {len(self.generations)} generations...")
+        # Create metadata dataset
         metadata = {
             "character": [g.get("character", "") for g in self.generations],
             "style": [g.get("style", "") for g in self.generations],
@@ -351,11 +350,8 @@ class UltraFastDatasetBuilder:
         }
         
         thin_dataset = Dataset.from_dict(metadata)
-        logger.info(f"Metadata dataset created: {len(thin_dataset)} samples")
         
-        # Step 2: Use map() for parallel processing with pre-encoded bytes
-        logger.info(f"Processing images with {self.num_proc} workers (batch size: {self.process_batch_size})...")
-        
+        # Define features
         features = Features({
             "character": Value("string"),
             "style": Value("string"),
@@ -368,26 +364,22 @@ class UltraFastDatasetBuilder:
             "target_hash": Value("string"),
         })
         
-        # ✅ Use map() instead of from_generator for native parallelism
+        # Use map() with _process_sample for TRUE parallel processing
         dataset = thin_dataset.map(
-            self._process_batch,
-            batched=True,
-            batch_size=self.process_batch_size,
-            num_proc=1,
+            lambda x: self._process_sample(x) or {},  # Return empty dict if None
+            num_proc=self.cpu_count,  # Actually use parallelization!
             features=features,
             remove_columns=thin_dataset.column_names,
             desc="Processing images with OpenCV + pre-encoding",
         )
-
-
-        # Filter out failed samples (None values become missing rows)
-        original_size = len(dataset)
-        dataset = dataset.filter(lambda x: x["character"] is not None, num_proc=self.num_proc)
-        filtered_count = original_size - len(dataset)
+        
+        # Filter out failed samples (empty dicts)
+        dataset = dataset.filter(
+            lambda x: bool(x["character"]), 
+            num_proc=self.cpu_count
+        )
         
         build_time = time.time() - start_time
-        
-        logger.info(f"Dataset built: {len(dataset)} valid samples ({filtered_count} filtered) in {build_time:.2f}s")
         logger.info(f"Processing speed: {len(dataset)/build_time:.1f} samples/s")
         
         return dataset
