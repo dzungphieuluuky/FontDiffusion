@@ -327,11 +327,6 @@ def load_fontdiffuser_pipeline(
         logger.info("✓ Created standard FontDiffuserModelDPM")
 
     # Apply optimizations
-    if getattr(args, "fp16", False):
-        logger.info("Converting to FP16 precision...")
-        model = model.half()
-        logger.info("✓ Converted to FP16")
-
     if getattr(args, "channels_last", False):
         logger.info("Converting to channels-last memory format...")
         model = model.to(memory_format=torch.channels_last)

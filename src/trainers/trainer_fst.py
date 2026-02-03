@@ -374,7 +374,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         super()._wrap_components()
         if self.use_fst and hasattr(self, "identity_loss_module"):
             self.identity_loss_module = self.accelerator.prepare(self.identity_loss_module)
-            logger.info("✓ Prepared IdentityMappingLoss module")
+            logger.info("✓ Prepared IdentityMappingLoss module with accelerator")
 
         # Then load FST-specific checkpoints if they were found
         if hasattr(self, "_fst_checkpoint") and self.use_fst:
@@ -741,7 +741,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                     "fst_module": ("fst_module.safetensors", unwrapped_model.fst_module),
                     "fst_projection": ("fst_projection.safetensors", unwrapped_model.fst_projection),
                     "original_style_projection": ("original_style_projection.safetensors", unwrapped_model.original_style_projection),
-                    "identity_loss_module": ("identity_loss_module.safetensors", unwrapped_model.identity_loss_module),
+                    "identity_loss_module": ("identity_loss_module.safetensors", self.identity_loss_module),
                 }
             else:
                 logger.info("Loading standard model components...")
