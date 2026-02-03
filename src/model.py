@@ -766,13 +766,13 @@ class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
         logger.info("=" * 80)
 
         components = [
-            ("Content Encoder", self.content_encoder),
-            ("Style Encoder", self.style_encoder),
-            ("Diffusion U-Net", self.unet),
-            ("Multi-Scale Style Encoder (MSSE)", self.mss_encoder),
-            ("Font Style Transformation (FST)", self.fst_module),
-            ("FST Projection", self.fst_projection),
-            ("Original Style Projection", self.original_style_projection),
+            ("Content Encoder", self.config.content_encoder),
+            ("Style Encoder", self.config.style_encoder),
+            ("Diffusion U-Net", self.config.unet),
+            ("Multi-Scale Style Encoder (MSSE)", self.config.mss_encoder),
+            ("Font Style Transformation (FST)", self.config.fst_module),
+            ("FST Projection", self.config.fst_projection),
+            ("Original Style Projection", self.config.original_style_projection),
         ]
 
         logger.info("\nComponent Parameters:")

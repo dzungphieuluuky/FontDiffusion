@@ -1,4 +1,5 @@
 import argparse
+import os
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 import torch
 from torch import nn
@@ -12,6 +13,16 @@ from src.modules.identity_mapping_loss import (
     AdaptiveIdentityMappingLoss,
     PooledIdentityMappingLoss,
 )
+
+def load_state_dict_auto(path: str):
+    if path.endswith(".safetensors"):
+        try:
+            from safetensors.torch import load_file as safe_load_file
+        except ImportError:
+            raise ImportError("Please install safetensors to load .safetensors files.")
+        return safe_load_file(path)
+    else:
+        return torch.load(path, map_location="cpu")
 
 def build_unet(args):
     unet = UNet(
@@ -48,7 +59,7 @@ def build_style_encoder(args: argparse.Namespace) -> StyleEncoder:
     style_image_encoder = StyleEncoder(
         G_ch=args.style_start_channel, resolution=args.style_image_size[0]
     )
-    print("Get CG-GAN Style Encoder!")
+    print("Build CG-GAN Style Encoder!")
     return style_image_encoder
 
 
@@ -56,7 +67,7 @@ def build_content_encoder(args: argparse.Namespace) -> ContentEncoder:
     content_image_encoder = ContentEncoder(
         G_ch=args.content_start_channel, resolution=args.content_image_size[0]
     )
-    print("Get CG-GAN Content Encoder!")
+    print("Build CG-GAN Content Encoder!")
     return content_image_encoder
 
 
@@ -64,7 +75,7 @@ def build_scr(args: argparse.Namespace) -> SCR:
     scr = SCR(
         temperature=args.temperature, mode=args.mode, image_size=args.scr_image_size
     )
-    print("Loaded SCR module for supervision successfully!")
+    print("Build SCR module!")
     return scr
 
 
@@ -78,6 +89,7 @@ def build_ddpm_scheduler(args: argparse.Namespace) -> DDPMScheduler:
         variance_type="fixed_small",
         clip_sample=True,
     )
+    print("Build DDPM Scheduler!")
     return ddpm_scheduler
 
 def build_fst(args: argparse.Namespace) -> FontStyleTransformationModule:
@@ -164,3 +176,71 @@ def build_identity_loss_module(args: argparse.Namespace) -> IdentityMappingLoss:
         f"loss_type={getattr(args, 'identity_loss_type', 'frobenius')})"
     )
     return identity_loss
+
+def build_base_components(args: argparse.Namespace):
+    unet: UNet = build_unet(args)
+    style_encoder: StyleEncoder  = build_style_encoder(args)
+    content_encoder: ContentEncoder = build_content_encoder(args)
+    scr: SCR = build_scr(args)
+    ddpm_scheduler = build_ddpm_scheduler(args)
+    components = {
+        "unet": unet,
+        "style_encoder": style_encoder,
+        "content_encoder": content_encoder,
+        "scr": scr,
+        "ddpm_scheduler": ddpm_scheduler,
+    }
+    print("Built FontDiffuser base components.")
+    return components
+
+def build_fst_components(args: argparse.Namespace) -> dict:
+    """
+    Build all modules necessary for FontDiffuser FST model.
+    Returns a dict of initialized components.
+    """
+    # Core encoders and modules
+    content_encoder: ContentEncoder = build_content_encoder(args)
+    style_encoder: StyleEncoder = build_style_encoder(args)
+    mss_encoder: MultiScaleStyleEncoder = build_mss_encoder(args)
+    fst_module: FontStyleTransformationModule = build_fst(args)
+    unet: UNet = build_unet(args)
+    scr: SCR = build_scr(args)
+    ddpm_scheduler = build_ddpm_scheduler(args)
+
+    # Projections
+    cross_attn_dim = get_unet_cross_attention_dim(unet)
+    fst_proj = build_fst_projection(args.fst_query_dim, cross_attn_dim)
+    style_proj = build_original_style_projection(args.style_start_channel * 16, cross_attn_dim)
+
+    # Loss module
+    identity_loss: IdentityMappingLoss = build_identity_loss_module(args)
+
+    components = {
+        "content_encoder": content_encoder,
+        "style_encoder": style_encoder,
+        "mss_encoder": mss_encoder,
+        "fst_module": fst_module,
+        "unet": unet,
+        "scr": scr,
+        "ddpm_scheduler": ddpm_scheduler,
+        "fst_projection": fst_proj,
+        "style_projection": style_proj,
+        "identity_loss_module": identity_loss,
+    }
+    print("Built FontDiffuser FST components.")
+    return components
+
+def load_components_from_ckpt(components: dict[str, nn.Module], ckpt_path: str):
+    """Load components' state dicts from checkpoint."""
+    for name, module in components.items():
+        module_ckpt_path = f"{ckpt_path}/{name}.safetensors"
+        if not os.path.exists(module_ckpt_path):
+            print(f"Warning: Checkpoint for {name} not found at {module_ckpt_path}. Skipping.")
+            module_ckpt_path = f"{ckpt_path}/{name}.pth"
+        if not os.path.exists(module_ckpt_path):
+            print(f"Warning: Checkpoint for {name} not found at {module_ckpt_path}. Skipping.")
+            continue
+        state_dict = load_state_dict_auto(module_ckpt_path)
+        module.load_state_dict(state_dict)
+        print(f"Loaded {name} from {module_ckpt_path}.")
+            
