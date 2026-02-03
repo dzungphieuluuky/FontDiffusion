@@ -350,10 +350,6 @@ def load_fontdiffuser_pipeline(
 
     if getattr(args, "compile", False):
         logger.info("Compiling model with torch.compile...")
-        torch._inductor.config.conv_1x1_as_mm = True
-        torch._inductor.config.coordinate_descent_tuning = True
-        torch._inductor.config.epilogue_fusion = False
-        torch._inductor.config.coordinate_descent_check_all_directions = True
         model = torch.compile(model)
         logger.info("✓ Model compiled")
 
