@@ -82,7 +82,7 @@ def get_parser():
     model_group.add_argument(
         "--channel_attn",
         action="store_true",
-        default=False,
+        default=True,
         help="Use SE attention in U-Net",
     )
     model_group.add_argument(
