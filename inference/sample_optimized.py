@@ -215,22 +215,11 @@ def get_style_transform(style_image_size: tuple[int, int]) -> transforms.Compose
         ]
     )
 
-
-def load_state_dict_auto(path: str):
-    if path.endswith(".safetensors"):
-        try:
-            from safetensors.torch import load_file as safe_load_file
-        except ImportError:
-            raise ImportError("Please install safetensors to load .safetensors files.")
-        return safe_load_file(path)
-    else:
-        return torch.load(path, map_location="cpu")
-
-
 def load_fontdiffuser_pipeline(
     args: Namespace, use_fst: bool = False
 ) -> FontDiffuserDPMPipeline:
     """Load Font Diffuser pipeline with optimizations"""
+    from src.builders.build import load_state_dict_auto, load_components_from_ckpt
     logger.info(f"Loading FontDiffuser{'WithFST' if use_fst else ''} pipeline...")
 
     # Build base components
