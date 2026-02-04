@@ -209,6 +209,14 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             logger.info("✓ Created FontDiffuserWithFST")
             self.model.log_model_info()
 
+            # Build identity loss module if identity pairs are requested
+            if self.num_identity_pairs > 0:
+                self.identity_loss_module = build_identity_loss_module(args=self.args)
+                logger.info(f"✓ Created IdentityMappingLoss module with {self.num_identity_pairs} pairs")
+            else:
+                self.identity_loss_module = None
+                logger.info("ℹ️ Identity loss disabled (num_identity_pairs=0)")
+
             # Apply freezing based on parsed module list
             if self.freeze_modules:
                 self._apply_module_freezing()
@@ -224,6 +232,9 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             )
             logger.info("✓ Created standard FontDiffuserModel")
             self.model.log_model_info()
+            
+            # No identity loss for base model
+            self.identity_loss_module = None
             
             # Apply freezing for base model if specified
             if self.freeze_modules:
@@ -656,23 +667,31 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                     total_loss += self.consistency_loss_weight * consistency_loss
                     loss_dict["consistency_loss"] = consistency_loss.item()
 
-        # Simplified identity loss logging
-        if self.num_identity_pairs > 0 and samples.get("num_identity_pairs_total", 0) > 0:
+        # Simplified identity loss logging (only if module exists)
+        if (
+            self.use_fst
+            and self.identity_loss_module is not None
+            and self.num_identity_pairs > 0
+            and samples.get("num_identity_pairs_total", 0) > 0
+        ):
             identity_sources = samples["identity_pair_sources"]
             identity_targets = samples["identity_pair_targets"]
             
+            # Get unwrapped model for feature extraction
+            model = self.accelerator.unwrap_model(self.model) if hasattr(self.model, "module") else self.model
+            
             # Extract FST features from identity pairs
             with torch.no_grad():
-                source_fst_features = self.model.mss_encoder(identity_sources)
-                target_fst_features = self.model.mss_encoder(identity_targets)
+                source_fst_features = model.mss_encoder(identity_sources)
+                target_fst_features = model.mss_encoder(identity_targets)
             
             # Apply FST to get transformation features
-            transformation_source = self.model.fst_module(source_fst_features, source_fst_features)
-            transformation_target = self.model.fst_module(target_fst_features, target_fst_features)
+            transformation_source = model.fst_module(source_fst_features, source_fst_features)
+            transformation_target = model.fst_module(target_fst_features, target_fst_features)
             
             # Extract query portion
-            query_source = transformation_source[:, :self.args.fst_num_queries, :]
-            query_target = transformation_target[:, :self.args.fst_num_queries, :]
+            query_source = transformation_source[:, :self.fst_num_queries, :]
+            query_target = transformation_target[:, :self.fst_num_queries, :]
             
             # Compute identity loss
             identity_loss, identity_metrics = self.identity_loss_module(
@@ -681,7 +700,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             )
             
             # Add to total loss
-            total_loss = total_loss + self.args.identity_loss_weight * identity_loss
+            total_loss = total_loss + self.identity_loss_weight * identity_loss
             
             # Only log essential metrics
             loss_dict["identity_loss"] = identity_loss.item()
@@ -747,26 +766,31 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 save_dir / "original_style_projection.safetensors",
             )
             logger.info("✓ Saved original_style_projection")
-            save_model_checkpoint(
-                self.identity_loss_module.state_dict(),
-                save_dir / "identity_loss_module.safetensors",
-            )
-            logger.info("✓ Saved identity_loss_module")
+            
+            # Save identity loss module if it exists
+            if self.identity_loss_module is not None:
+                unwrapped_identity = self.accelerator.unwrap_model(self.identity_loss_module)
+                save_model_checkpoint(
+                    unwrapped_identity.state_dict(),
+                    save_dir / "identity_loss_module.safetensors",
+                )
+                logger.info("✓ Saved identity_loss_module")
+                
             logger.info("✓ Saved all FST components")
         else:
             # Save standard model
             save_model_checkpoint(
-                unwrapped_model.diffusion_unet.state_dict(),
+                unwrapped_model.config.unet.state_dict(),
                 save_dir / "unet.safetensors",
             )
-            logger.info("✓ Saved diffusion_unet")
+            logger.info("✓ Saved unet")
             save_model_checkpoint(
-                unwrapped_model.style_encoder.state_dict(),
+                unwrapped_model.config.style_encoder.state_dict(),
                 save_dir / "style_encoder.safetensors",
             )
             logger.info("✓ Saved style_encoder")
             save_model_checkpoint(
-                unwrapped_model.content_encoder.state_dict(),
+                unwrapped_model.config.content_encoder.state_dict(),
                 save_dir / "content_encoder.safetensors",
             )
             logger.info("✓ Saved content_encoder")
@@ -792,9 +816,9 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 "fst_num_scales": self.fst_num_scales,
                 "num_consistency_pairs": self.num_consistency_pairs,
                 "consistency_loss_weight": self.consistency_loss_weight,
-                "num_identity_pairs": self.num_identity_pairs,  # ADD THIS
-                "identity_loss_weight": self.identity_loss_weight,  # ADD THIS
-                "identity_pair_mode": self.identity_pair_mode,  # ADD THIS
+                "num_identity_pairs": self.num_identity_pairs,
+                "identity_loss_weight": self.identity_loss_weight,
+                "identity_pair_mode": self.identity_pair_mode,
             }
         }
 
@@ -807,6 +831,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 "checkpoint_saved": True,
                 "checkpoint_step": self.global_step,
                 "checkpoint_type": "fst" if self.use_fst else "base",
+                "frozen_modules": self.freeze_modules,
             }
         )
 
@@ -855,14 +880,18 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                     "fst_module": ("fst_module.safetensors", unwrapped_model.fst_module),
                     "fst_projection": ("fst_projection.safetensors", unwrapped_model.fst_projection),
                     "original_style_projection": ("original_style_projection.safetensors", unwrapped_model.original_style_projection),
-                    "identity_loss_module": ("identity_loss_module.safetensors", self.identity_loss_module),
                 }
+                
+                # Add identity loss module if it exists
+                if self.identity_loss_module is not None:
+                    unwrapped_identity = self.accelerator.unwrap_model(self.identity_loss_module)
+                    components["identity_loss_module"] = ("identity_loss_module.safetensors", unwrapped_identity)
             else:
                 logger.info("Loading standard model components...")
                 components = {
-                    "unet": ("unet.safetensors", unwrapped_model.diffusion_unet),
-                    "style_encoder": ("style_encoder.safetensors", unwrapped_model.style_encoder),
-                    "content_encoder": ("content_encoder.safetensors", unwrapped_model.content_encoder),
+                    "unet": ("unet.safetensors", unwrapped_model.config.unet),
+                    "style_encoder": ("style_encoder.safetensors", unwrapped_model.config.style_encoder),
+                    "content_encoder": ("content_encoder.safetensors", unwrapped_model.config.content_encoder),
                 }
 
             for comp_name, (file_name, module) in components.items():
