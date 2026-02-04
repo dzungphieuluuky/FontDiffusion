@@ -209,8 +209,8 @@ class FontDiffuserWithFST(nn.Module):
         fst_module: FontStyleTransformationModule,
         fst_projection: nn.Linear,
         original_style_projection: nn.Linear,
-        use_skeleton_content: bool = False,  # ADD THIS
-        skeleton_fusion_method: str = "concat",  # ADD THIS
+        use_skeleton_content: bool = False,
+        skeleton_fusion_method: str = "concat",
     ):
         """
         Initialize FontDiffuserWithFST with optional skeleton transform support.
@@ -336,15 +336,9 @@ class FontDiffuserWithFST(nn.Module):
         batch_size = noisy_latents.shape[0]
 
         # 1. Content encoding
-        if self.use_skeleton_content:
-            content_img_feature, content_residual_features = self.content_encoder(
-                content_img, 
-                content_encoder_downsample_size
-            )
-        else:
-            content_img_feature, content_residual_features = self.content_encoder(
-                content_img
-            )
+        content_img_feature, content_residual_features = self.content_encoder(
+            content_img
+        )
         content_residual_features.append(content_img_feature)
 
         style_content_feature, style_content_res_features = self.content_encoder(
