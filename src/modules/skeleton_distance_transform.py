@@ -334,7 +334,10 @@ class AdaptiveSkeletonDistanceTransform(SkeletonDistanceTransform):
 
 class DualChannelContentEncoder(nn.Module):
     """
-    Modified content encoder that accepts dual-channel skeleton-distance input.
+    Modified content encoder that accepts BOTH 1-channel and 2-channel input.
+    
+    - If input is 1-channel (normal mode): Pass through directly
+    - If input is 2-channel (skeleton mode): Fuse channels then pass through
     
     This wrapper handles the channel conversion from 2 (skeleton + distance)
     to the expected input channels of the original content encoder.
@@ -359,54 +362,86 @@ class DualChannelContentEncoder(nn.Module):
         
         self.original_encoder = original_encoder
         self.fusion_method = fusion_method
-        
+        self.fusion_conv : nn.Module = nn.Linear(1,1)  # type: ignore
         if fusion_method == "concat":
             # 1x1 conv to reduce 2 channels to 1
             self.fusion_conv = nn.Conv2d(2, 1, kernel_size=1, bias=False)
+            nn.init.xavier_uniform_(self.fusion_conv.weight)
         
         elif fusion_method == "weighted":
             if learnable_weights:
-                # Learnable weights
+                # Learnable weights (initialized to equal weighting)
                 self.skeleton_weight = nn.Parameter(torch.tensor(0.5))
                 self.distance_weight = nn.Parameter(torch.tensor(0.5))
             else:
-                # Fixed weights
+                # Fixed weights (skeleton less important than distance field)
                 self.register_buffer('skeleton_weight', torch.tensor(0.3))
                 self.register_buffer('distance_weight', torch.tensor(0.7))
     
-    def forward(self, dual_channel_input: torch.Tensor) -> Tuple:
+    def forward(
+        self, 
+        content_input: torch.Tensor,
+    ) -> tuple[torch.Tensor, list[torch.Tensor]]:
         """
         Args:
-            dual_channel_input: (B, 2, H, W) - [skeleton, distance]
+            content_input: (B, C, H, W) where C can be 1 or 2
+                - C=1: Normal content image (grayscale)
+                - C=2: Skeleton-distance transformed [skeleton, distance]
             
         Returns:
-            Same as original encoder output
+            Same as original encoder output: (h, residual_features)
+                - h: Final feature map
+                - residual_features: List of intermediate features
         """
-        # Fuse channels
-        if self.fusion_method == "concat":
-            # 1x1 conv
-            fused = self.fusion_conv(dual_channel_input)  # (B, 1, H, W)
+        num_channels = content_input.shape[1]
         
-        elif self.fusion_method == "add":
-            # Simple addition
-            fused = dual_channel_input.sum(dim=1, keepdim=True)  # (B, 1, H, W)
+        # Handle 1-channel input (normal mode - no skeleton transform)
+        if num_channels == 1:
+            # Pass through directly to original encoder
+            return self.original_encoder(content_input)
         
-        elif self.fusion_method == "weighted":
-            # Weighted sum
-            skeleton = dual_channel_input[:, 0:1, :, :]
-            distance = dual_channel_input[:, 1:2, :, :]
+        # Handle 2-channel input (skeleton-distance mode)
+        elif num_channels == 2:
+            # Fuse channels based on method
+            if self.fusion_method == "concat":
+                # 1x1 conv fusion
+                fused = self.fusion_conv(content_input)  # (B, 1, H, W)
             
-            fused = (
-                self.skeleton_weight * skeleton +
-                self.distance_weight * distance
-            )
+            elif self.fusion_method == "add":
+                # Simple addition
+                fused = content_input.sum(dim=1, keepdim=True)  # (B, 1, H, W)
+            
+            elif self.fusion_method == "weighted":
+                # Weighted sum
+                skeleton = content_input[:, 0:1, :, :]
+                distance = content_input[:, 1:2, :, :]
+                
+                fused = (
+                    self.skeleton_weight * skeleton +
+                    self.distance_weight * distance
+                )
+            
+            else:
+                raise ValueError(f"Unknown fusion method: {self.fusion_method}")
+            
+            # Pass fused input through original encoder
+            return self.original_encoder(fused)
         
         else:
-            raise ValueError(f"Unknown fusion method: {self.fusion_method}")
-        
-        # Pass through original encoder
-        return self.original_encoder(fused)
-
+            raise ValueError(
+                f"DualChannelContentEncoder expects 1 or 2 channels, got {num_channels}. "
+                f"Input shape: {content_input.shape}"
+            )
+    
+    def __repr__(self) -> str:
+        """String representation for debugging."""
+        return (
+            f"DualChannelContentEncoder(\n"
+            f"  fusion_method={self.fusion_method},\n"
+            f"  accepts: 1-channel (normal) or 2-channel (skeleton-distance),\n"
+            f"  original_encoder={self.original_encoder.__class__.__name__}\n"
+            f")"
+        )
 
 # ============================================================================
 # Utility Functions
