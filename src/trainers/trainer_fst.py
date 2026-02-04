@@ -704,8 +704,9 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             
             # Only log essential metrics
             loss_dict["identity_loss"] = identity_loss.item()
-            loss_dict["identity_main"] = identity_metrics.get("identity_loss", 0.0)
-            loss_dict["identity_ortho"] = identity_metrics.get("orthogonality_loss", 0.0)
+            loss_dict["identity_diag_mean"] = identity_metrics.get("diagonal_mean", 0.0)
+            loss_dict["identity_diag_std"] = identity_metrics.get("diagonal_std", 0.0)
+            loss_dict["identity_reg_loss"] = identity_metrics.get("reg_loss", 0.0)
                     
         return total_loss, loss_dict
 
