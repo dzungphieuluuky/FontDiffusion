@@ -13,6 +13,7 @@ from src.modules.content_encoder import ContentEncoder
 from src.modules.style_encoder import StyleEncoder
 from src.modules.scr import SCR
 from src.modules.unet import UNet
+from src.modules.skeleton_distance_transform import SkeletonDistanceTransform, DualChannelContentEncoder
 
 logger = logging.getLogger(__name__)
 
@@ -196,10 +197,9 @@ class FontDiffuserModelDPM(ModelMixin, ConfigMixin):
 
 class FontDiffuserWithFST(nn.Module):
     """
-    Enhanced FontDiffuser with FST modules.
-    All modules are passed in (not created internally).
+    FontDiffuser with FST enhancement and optional skeleton-distance transform.
     """
-
+    
     def __init__(
         self,
         unet: UNet,
@@ -209,66 +209,104 @@ class FontDiffuserWithFST(nn.Module):
         fst_module: FontStyleTransformationModule,
         fst_projection: nn.Linear,
         original_style_projection: nn.Linear,
+        use_skeleton_content: bool = False,  # ADD THIS
+        skeleton_fusion_method: str = "concat",  # ADD THIS
     ):
         """
-        Initialize FontDiffuserWithFST.
-
+        Initialize FontDiffuserWithFST with optional skeleton transform support.
+        
         Args:
-            unet: Pre-built U-Net module
-            style_encoder: Pre-built style encoder
-            content_encoder: Pre-built content encoder
-            mss_encoder: Pre-built Multi-Scale Style Encoder
-            fst_module: Pre-built Font Style Transformation module
-            fst_projection: Pre-built projection layer (FST → cross-attn)
-            original_style_projection: Pre-built projection layer (style vec → cross-attn)
+            unet: U-Net for diffusion
+            style_encoder: Style encoder
+            content_encoder: Content encoder
+            mss_encoder: Multi-scale style encoder
+            fst_module: Font style transformation module
+            fst_projection: Projection for FST features
+            original_style_projection: Projection for original style features
+            use_skeleton_content: Whether content images are skeleton-transformed
+            skeleton_fusion_method: How to fuse skeleton channels ("concat", "add", "weighted")
         """
         super().__init__()
+        
+        # Store configuration
+        self.use_skeleton_content = use_skeleton_content
+        
+        # Wrap content encoder if using skeleton transform
+        if use_skeleton_content:
+            # Wrap the original content encoder to handle 2-channel input
+            self.content_encoder = DualChannelContentEncoder(
+                original_encoder=content_encoder,
+                fusion_method=skeleton_fusion_method,
+                learnable_weights=True,  # Make fusion weights learnable
+            )
+            logger.info(
+                f"✓ Content encoder wrapped for skeleton input "
+                f"(fusion: {skeleton_fusion_method})"
+            )
+        else:
+            self.content_encoder = content_encoder
+        
+        # Store other modules
+        self.diffusion_unet = unet
+        self.style_encoder = style_encoder
+        self.mss_encoder = mss_encoder
+        self.fst_module = fst_module
+        self.fst_projection = fst_projection
+        self.original_style_projection = original_style_projection
 
-        # Assign all modules (no internal creation)
-        self.content_encoder: ContentEncoder = content_encoder
-        self.diffusion_unet: UNet = unet
-        self.style_encoder: StyleEncoder = style_encoder
-        self.mss_encoder: MultiScaleStyleEncoder = mss_encoder
-        self.fst_module: FontStyleTransformationModule = fst_module
-        self.fst_projection: nn.Linear = fst_projection
-        self.original_style_projection: nn.Linear = original_style_projection
-
-    def log_model_info(self) -> None:
-        """Log detailed parameter information for the FST model and its components."""
-        logger.info("\n" + "=" * 80)
-        logger.info("FontDiffuserWithFST Model Architecture")
+    def log_model_info(self):
+        """Log model parameter information including skeleton wrapper."""
         logger.info("=" * 80)
-
-        # Log individual component parameters
-        components = [
-            ("Content Encoder", self.content_encoder),
-            ("Style Encoder", self.style_encoder),
-            ("Diffusion U-Net", self.diffusion_unet),
-            ("Multi-Scale Style Encoder (MSSE)", self.mss_encoder),
-            ("Font Style Transformation (FST)", self.fst_module),
-            ("FST Projection", self.fst_projection),
-            ("Original Style Projection", self.original_style_projection),
-        ]
-
-        logger.info("\nComponent Parameters:")
-        logger.info("-" * 80)
-        logger.info(f"{'Component':<45} {'Total':>15} {'Trainable':>15}")
-        logger.info("-" * 80)
-
-        total_all = 0
-        trainable_all = 0
-
-        for name, component in components:
-            total, trainable = count_parameters(component)
-            total_all += total
-            trainable_all += trainable
-            frozen_marker = " [FROZEN]" if trainable == 0 and total > 0 else ""
-            logger.info(f"{name:<45} {total:>15,} {trainable:>15,}{frozen_marker}")
-
-        logger.info("-" * 80)
-        logger.info(f"{'TOTAL':<45} {total_all:>15,} {trainable_all:>15,}")
-        logger.info(f"{'Non-trainable':<45} {'':<15} {total_all - trainable_all:>15,}")
-        logger.info("=" * 80 + "\n")
+        logger.info("FontDiffuserWithFST Model Information")
+        logger.info("=" * 80)
+        
+        # Log skeleton configuration
+        if self.use_skeleton_content:
+            logger.info("✓ Skeleton-Distance Transform: ENABLED")
+            logger.info(f"  Fusion method: {self.content_encoder.fusion_method}")
+            if hasattr(self.content_encoder, "fusion_conv"):
+                fusion_params = sum(p.numel() for p in self.content_encoder.fusion_conv.parameters())
+                logger.info(f"  Fusion parameters: {fusion_params:,}")
+        else:
+            logger.info("ℹ️ Skeleton-Distance Transform: DISABLED")
+        
+        # Log component parameters
+        components = {
+            "U-Net": self.diffusion_unet,
+            "Style Encoder": self.style_encoder,
+            "Content Encoder (wrapped)" if self.use_skeleton_content else "Content Encoder": 
+                self.content_encoder if not self.use_skeleton_content else self.content_encoder.original_encoder,
+            "MSS Encoder": self.mss_encoder,
+            "FST Module": self.fst_module,
+            "FST Projection": self.fst_projection,
+            "Original Style Projection": self.original_style_projection,
+        }
+        
+        total_params = 0
+        trainable_params = 0
+        
+        for name, module in components.items():
+            module_total, module_trainable = count_parameters(module)
+            total_params += module_total
+            trainable_params += module_trainable
+            logger.info(
+                f"{name:30s}: {module_total:12,} total | "
+                f"{module_trainable:12,} trainable"
+            )
+        
+        if self.use_skeleton_content and hasattr(self.content_encoder, "fusion_conv"):
+            fusion_total, fusion_trainable = count_parameters(self.content_encoder.fusion_conv)
+            total_params += fusion_total
+            trainable_params += fusion_trainable
+            logger.info(
+                f"{'Skeleton Fusion Layer':30s}: {fusion_total:12,} total | "
+                f"{fusion_trainable:12,} trainable"
+            )
+        
+        logger.info("=" * 80)
+        logger.info(f"{'TOTAL':30s}: {total_params:12,} total | {trainable_params:12,} trainable")
+        logger.info(f"Trainable ratio: {100 * trainable_params / total_params:.2f}%")
+        logger.info("=" * 80)
 
     def forward(
         self,
