@@ -3,15 +3,16 @@ Enhanced FontDataset for FontDiffuserWithFST.
 Supports both original and FST training modes.
 """
 
-import os
-import random
 from PIL import Image
 from typing import List, Dict, Optional
-
-import torch
 from torch.utils.data import Dataset
-import torchvision.transforms as transforms
+import torch
+import random
 import logging
+import os
+from torchvision import transforms
+
+from src.modules.skeleton_distance_transform import SkeletonDistanceTransform  # ADD THIS IMPORT
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +41,27 @@ class FontDataset(Dataset):
         use_fst: bool = False,
         style_source_same_prob: float = 0.5,
         num_consistency_pairs: int = 0,
-        num_identity_pairs: int = 0,  # ADD THIS
-        identity_pair_mode: str = "random",  # ADD THIS
+        num_identity_pairs: int = 0,
+        identity_pair_mode: str = "random",
+        use_skeleton_transform: bool = False,  # ADD THIS
+        skeleton_config: Optional[dict] = None,  # ADD THIS
     ):
+        """
+        Initialize FontDataset with optional skeleton transform.
+        
+        Args:
+            args: Configuration arguments
+            phase: Dataset phase ("train", "val", "test")
+            transforms: List of transforms for [content, style, target]
+            scr: Whether to use SCR loss
+            use_fst: Whether to use FST model
+            style_source_same_prob: Probability of using same style for source
+            num_consistency_pairs: Number of consistency pairs
+            num_identity_pairs: Number of identity pairs
+            identity_pair_mode: Mode for selecting identity pairs
+            use_skeleton_transform: Whether to apply skeleton-distance transform
+            skeleton_config: Configuration for skeleton transform
+        """
         super().__init__()
         self.root = args.data_root
         self.phase = phase
@@ -60,11 +79,36 @@ class FontDataset(Dataset):
         self.transforms = transforms
         self.nonorm_transforms = get_nonorm_transform(args.resolution)
 
+        self.use_skeleton_transform = use_skeleton_transform
+        
+        if self.use_skeleton_transform:
+            # Default configuration
+            default_config = {
+                "method": "medial_axis",
+                "distance_method": "hybrid",
+                "max_distance": 10.0,
+                "sigma": 3.0,
+                "output_mode": "dual_channel",
+                "normalize": True,
+            }
+            
+            # Update with user config
+            if skeleton_config:
+                default_config.update(skeleton_config)
+            
+            # Create transform
+            self.skeleton_transform = SkeletonDistanceTransform(**default_config)
+            logger.info(f"✓ Skeleton transform enabled: {default_config}")
+        else:
+            self.skeleton_transform = None
+            logger.info("ℹ️ Skeleton transform disabled")
+
         logger.info(
             f"Dataset initialized:\n "
             f"Phase: {phase}\n"
             f"Use_FST: {use_fst}\n"
             f"SCR: {scr}\n"
+            f"Use Skeleton Transform: {self.use_skeleton_transform}\n"
             f"Total samples: {len(self.target_images)}"
         )
 
@@ -376,6 +420,24 @@ class FontDataset(Dataset):
             "target_image_path": target_image_path,
             "nonorm_target_image": nonorm_target_image,
         }
+
+        if self.use_skeleton_transform:
+            # Apply skeleton-distance transform
+            # Input: (C, H, W), Output: (C_out, H, W) where C_out = 1 or 2
+            content_image_skeleton = self.skeleton_transform(content_image.unsqueeze(0))
+            content_image_skeleton = content_image_skeleton.squeeze(0)
+            
+            # Store both original and skeleton version
+            sample["content_image"] = content_image_skeleton  # Use skeleton for training
+            sample["content_image_original"] = content_image  # Keep original for reference
+            
+            logger.debug(
+                f"Applied skeleton transform: "
+                f"original shape {content_image.shape} → "
+                f"skeleton shape {content_image_skeleton.shape}"
+            )
+        else:
+            sample["content_image"] = content_image
 
         # Add source style image for FST
         source_style = None  # Track source style for consistency pairs
