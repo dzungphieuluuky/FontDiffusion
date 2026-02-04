@@ -4,7 +4,6 @@ Simple entry point that initializes and runs the FST trainer.
 """
 
 import argparse
-import logging
 import os
 import sys
 
@@ -12,6 +11,7 @@ from src.configs.fontdiffuser import get_parser
 from src.trainers.trainer_fst import FontDiffuserFSTTrainer
 
 # Setup logging
+import logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
