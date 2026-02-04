@@ -414,7 +414,7 @@ def sampling_batch(
             content_filename = get_content_filename(char)
             pil_img.save(os.path.join(content_dir, content_filename))
 
-    with torch.no_grad():
+    with torch.inference_mode():
         dtype: torch.dtype = (
             torch.float16 if getattr(args, "fp16", False) else torch.float32
         )
