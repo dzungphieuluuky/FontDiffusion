@@ -44,7 +44,19 @@ from src.tools.filename_utils import (
     compute_file_hash,
 )
 
+import logging
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    level=logging.INFO,
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(f"{__name__}.log", mode="a"),
+    ],
+)
 logger = logging.getLogger(__name__)
+
 
 class FontManager:
     """Manages single or multiple font files"""
@@ -215,11 +227,13 @@ def get_style_transform(style_image_size: tuple[int, int]) -> transforms.Compose
         ]
     )
 
+
 def load_fontdiffuser_pipeline(
     args: Namespace, use_fst: bool = False
 ) -> FontDiffuserDPMPipeline:
     """Load Font Diffuser pipeline with optimizations"""
     from src.builders.build import load_state_dict_auto, load_components_from_ckpt
+
     logger.info(f"Loading FontDiffuser{'WithFST' if use_fst else ''} pipeline...")
 
     # Build base components
@@ -540,6 +554,7 @@ def image_process_batch(
 def main() -> None:
     """Main function"""
     from src.configs.fontdiffuser import get_parser
+
     parser: ArgumentParser = get_parser()
     args: Namespace = parser.parse_args()
 

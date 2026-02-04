@@ -71,11 +71,11 @@ def build_fst_model(device: str = "cpu") -> FontDiffuserWithFST:
     content_encoder = build_content_encoder()
     mss_encoder = build_mss_encoder()
     fst_module = build_fst_module()
-    
+
     # Build projection layers
     fst_projection = nn.Linear(fst_module.output_dim, 768)  # Adjust dims as needed
     original_style_projection = nn.Linear(style_encoder.output_dim, 768)
-    
+
     model = FontDiffuserWithFST(
         unet=unet,
         style_encoder=style_encoder,
@@ -104,7 +104,7 @@ def main():
         default="cpu",
         help="Device to use for summary",
     )
-    
+
     args = parser.parse_args()
 
     # Build appropriate model
@@ -117,11 +117,11 @@ def main():
             "content_images": (1, 1, 96, 96),
             "content_encoder_downsample_size": (),
         }
-        print(f"\n{'='*80}")
+        print(f"\n{'=' * 80}")
         print("FontDiffuser Base Model Summary")
-        print(f"{'='*80}\n")
+        print(f"{'=' * 80}\n")
         model.log_model_info()
-        
+
     elif args.model_type == "fst":
         model = build_fst_model(device=args.device)
         input_shapes = {
@@ -132,9 +132,9 @@ def main():
             "style_target_img": (1, 1, 96, 96),
             "content_encoder_downsample_size": (),
         }
-        print(f"\n{'='*80}")
+        print(f"\n{'=' * 80}")
         print("FontDiffuser with FST Model Summary")
-        print(f"{'='*80}\n")
+        print(f"{'=' * 80}\n")
         model.log_model_info()
 
     print_model_summary(model, input_shapes, device=args.device)

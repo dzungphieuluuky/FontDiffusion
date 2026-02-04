@@ -5,9 +5,9 @@ from .scr import SCR
 from .identity_mapping_loss import (
     IdentityMappingLoss,
     PooledIdentityMappingLoss,
-    AdaptiveIdentityMappingLoss
+    AdaptiveIdentityMappingLoss,
 )
 from .skeleton_distance_transform import (
     SkeletonDistanceTransform,
-    AdaptiveSkeletonDistanceTransform
+    AdaptiveSkeletonDistanceTransform,
 )

@@ -74,6 +74,7 @@ def print_font_glyph_counts(fonts_dir: Path | str) -> None:
         except Exception as e:
             print(f"  {font_path.name}: Failed to read ({e})")
 
+
 if __name__ == "__main__":
     import argparse
 

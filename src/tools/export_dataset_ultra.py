@@ -13,7 +13,9 @@ from filename_utils import (
     get_target_filename,
 )
 from utilities import HFTqdm
+
 logger = logging.getLogger(__name__)
+
 
 def _validate_dataset_structure(dataset: Dataset) -> None:
     required_columns = {"character", "style"}
@@ -22,8 +24,7 @@ def _validate_dataset_structure(dataset: Dataset) -> None:
     if not required_columns.issubset(dataset_cols):
         missing = required_columns - dataset_cols
         raise ValueError(
-            f"Dataset missing required columns: {missing}. "
-            f"Has columns: {dataset_cols}"
+            f"Dataset missing required columns: {missing}. Has columns: {dataset_cols}"
         )
     if not image_columns.intersection(dataset_cols):
         raise ValueError(
@@ -31,6 +32,7 @@ def _validate_dataset_structure(dataset: Dataset) -> None:
             f"Has columns: {dataset_cols}"
         )
     logger.info(f"✓ Dataset structure validated. Columns: {dataset_cols}")
+
 
 def _atomic_save_image(img: Image.Image, final_path: Path) -> None:
     final_path.parent.mkdir(parents=True, exist_ok=True)
@@ -47,6 +49,7 @@ def _atomic_save_image(img: Image.Image, final_path: Path) -> None:
         except:
             pass
         raise e
+
 
 @staticmethod
 def _process_batch(batch: dict, output_dir: str) -> dict:
@@ -99,6 +102,7 @@ def _process_batch(batch: dict, output_dir: str) -> dict:
         "target_hash": target_hashes,
     }
 
+
 @dataclass
 class ExportConfig:
     output_dir: Path
@@ -109,6 +113,7 @@ class ExportConfig:
     token: Optional[str] = None
     num_workers: int = 4
     batch_size: int = 1000
+
     def __post_init__(self):
         if isinstance(self.output_dir, str):
             self.output_dir = Path(self.output_dir)
@@ -118,6 +123,7 @@ class ExportConfig:
             raise ValueError(
                 "Must provide either repo_id (Hub) or local_dataset_path (disk)"
             )
+
 
 def _process_single_export(sample: dict, output_dir: str) -> dict:
     output_path = Path(output_dir)
@@ -149,6 +155,7 @@ def _process_single_export(sample: dict, output_dir: str) -> dict:
         except Exception as e:
             logger.debug(f"Failed to save target {result['target_filename']}: {e}")
     return result
+
 
 def _process_batch_export(batch: dict, output_dir: str) -> dict:
     output_path = Path(output_dir)
@@ -192,6 +199,7 @@ def _process_batch_export(batch: dict, output_dir: str) -> dict:
         results["content_hash"].append(compute_file_hash(char, "", font))
         results["target_hash"].append(compute_file_hash(char, style, font))
     return results
+
 
 class UltraFastDatasetExporter:
     def __init__(self, config: ExportConfig):
@@ -259,7 +267,9 @@ class UltraFastDatasetExporter:
         logger.info(f"Pre-created {len(unique_styles)} style directories")
 
     def _export_with_map(self, dataset: Dataset) -> dict[str, Any]:
-        logger.info(f"Exporting with {self.num_workers} workers (batch_size={self.batch_size})...")
+        logger.info(
+            f"Exporting with {self.num_workers} workers (batch_size={self.batch_size})..."
+        )
         checkpoint_path = self.output_dir / "results_checkpoint.json"
         processed_dataset = dataset.map(
             _process_batch_export,
@@ -330,7 +340,7 @@ class UltraFastDatasetExporter:
             "total_chars": len(characters),
             "total_styles": len(styles),
         }
-    
+
     def export(self) -> dict[str, Any]:
         logger.info("Starting ultra-fast dataset export...")
         dataset = self._load_dataset()
@@ -338,6 +348,7 @@ class UltraFastDatasetExporter:
         metadata = self._export_with_map(dataset)
         logger.info("Export completed successfully")
         return metadata
+
 
 def export_dataset(
     output_dir: str | Path,
@@ -362,8 +373,10 @@ def export_dataset(
     exporter = UltraFastDatasetExporter(config)
     return exporter.export()
 
+
 def main():
     import argparse
+
     parser = argparse.ArgumentParser(
         description="Ultra-fast HuggingFace dataset exporter using dataset.map(num_proc=...)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -376,7 +389,9 @@ Examples:
   python src/tools/export_dataset_ultra.py --output-dir ./output --repo-id user/dataset --workers 8
         """,
     )
-    parser.add_argument("--output-dir", type=str, required=True, help="Output directory")
+    parser.add_argument(
+        "--output-dir", type=str, required=True, help="Output directory"
+    )
     parser.add_argument("--repo-id", type=str, help="HuggingFace repository ID")
     parser.add_argument("--local-path", type=str, help="Local dataset path")
     parser.add_argument("--split", type=str, default="train", help="Dataset split")
@@ -421,6 +436,7 @@ Examples:
     except Exception as e:
         logger.exception(f"Export failed: {e}")
         raise SystemExit(1)
+
 
 if __name__ == "__main__":
     main()

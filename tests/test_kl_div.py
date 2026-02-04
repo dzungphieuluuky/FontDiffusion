@@ -47,6 +47,7 @@ def test_consistency_loss_behavior():
     batch_size, num_pairs = 2, 4
     identical_source = torch.randn(batch_size, num_pairs, 1, 96, 96)
     identical_target = identical_source.clone()
+
     # Mock model
     class MockModel:
         def __init__(self):

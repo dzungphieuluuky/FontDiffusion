@@ -1,6 +1,19 @@
 import os
 import argparse
 
+import logging
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    level=logging.INFO,
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(f"{__name__}.log", mode="a"),
+    ],
+)
+logger = logging.getLogger(__name__)
+
 
 def get_parser():
     """
@@ -98,15 +111,15 @@ def get_parser():
         help="Style encoder first layer channels",
     )
     model_group.add_argument(
-    "--freeze_modules",
-    type=str,
-    default="",
-    help="Comma-separated list of modules to freeze during FST training. "
-         "Options: unet, style_encoder, content_encoder, mss_encoder, fst_module, "
-         "fst_projection, original_style_projection. "
-         "Example: 'unet,style_encoder,content_encoder'"
+        "--freeze_modules",
+        type=str,
+        default="",
+        help="Comma-separated list of modules to freeze during FST training. "
+        "Options: unet, style_encoder, content_encoder, mss_encoder, fst_module, "
+        "fst_projection, original_style_projection. "
+        "Example: 'unet,style_encoder,content_encoder'",
     )
-    
+
     # ==================== Training Configuration ====================
     training_group = parser.add_argument_group("Training Configuration")
     training_group.add_argument(
@@ -499,14 +512,14 @@ def get_parser():
         type=int,
         default=0,
         help="Number of same-style pairs for style consistency loss (0 to disable). "
-            "Example: 3 = load 3 pairs per batch where both images have same style.",
+        "Example: 3 = load 3 pairs per batch where both images have same style.",
     )
     fst_group.add_argument(
         "--consistency_loss_weight",
         type=float,
         default=0.1,
         help="Weight for style consistency loss (0.0-1.0). "
-            "Higher values enforce stronger style consistency.",
+        "Higher values enforce stronger style consistency.",
     )
 
     # ==================== Identity Loss for FST ====================
@@ -515,14 +528,14 @@ def get_parser():
         type=int,
         default=0,
         help="Number of same-style pairs for identity mapping loss (0 to disable). "
-            "Example: 3 = load 3 pairs per batch where both images have same style.",
+        "Example: 3 = load 3 pairs per batch where both images have same style.",
     )
     fst_group.add_argument(
         "--identity_loss_weight",
         type=float,
         default=0.1,
         help="Weight for identity mapping loss (0.0-1.0). "
-            "Higher values enforce stronger identity constraint.",
+        "Higher values enforce stronger identity constraint.",
     )
     fst_group.add_argument(
         "--identity_pair_mode",
@@ -530,8 +543,8 @@ def get_parser():
         default="random",
         choices=["random", "same_style"],
         help="How to sample identity pairs:\n"
-            "  'random': Each pair can have different style\n"
-            "  'same_style': All pairs use same style as main sample (stronger constraint)",
+        "  'random': Each pair can have different style\n"
+        "  'same_style': All pairs use same style as main sample (stronger constraint)",
     )
 
     # ADD THESE NEW PARAMETERS:
@@ -541,9 +554,9 @@ def get_parser():
         default="frobenius",
         choices=["frobenius", "mse", "cosine"],
         help="Distance metric for identity mapping loss:\n"
-            "  'frobenius': Frobenius norm ||T - I||_F (default, most stable)\n"
-            "  'mse': Mean squared error\n"
-            "  'cosine': Cosine distance (normalized)",
+        "  'frobenius': Frobenius norm ||T - I||_F (default, most stable)\n"
+        "  'mse': Mean squared error\n"
+        "  'cosine': Cosine distance (normalized)",
     )
     fst_group.add_argument(
         "--identity_regularization",
@@ -551,39 +564,39 @@ def get_parser():
         default="orthogonal",
         choices=["orthogonal", "spectral", None],
         help="Regularization for transformation matrix:\n"
-            "  'orthogonal': Enforce T^T T ≈ I (orthogonality)\n"
-            "  'spectral': Penalize large singular values\n"
-            "  None: No additional regularization",
+        "  'orthogonal': Enforce T^T T ≈ I (orthogonality)\n"
+        "  'spectral': Penalize large singular values\n"
+        "  None: No additional regularization",
     )
     fst_group.add_argument(
         "--identity_reg_weight",
         type=float,
         default=0.01,
         help="Weight for identity regularization term (0.0-1.0). "
-            "Controls strength of orthogonality/spectral constraints.",
+        "Controls strength of orthogonality/spectral constraints.",
     )
     fst_group.add_argument(
         "--identity_matrix_size",
         type=int,
         default=None,
         help="Size of transformation matrix for identity loss. "
-            "If None, defaults to fst_num_queries. "
-            "Must match FST output query dimension.",
+        "If None, defaults to fst_num_queries. "
+        "Must match FST output query dimension.",
     )
     fst_group.add_argument(
         "--use_adaptive_identity_loss",
         action="store_true",
         default=False,
         help="Use AdaptiveIdentityMappingLoss that adjusts loss weight based on "
-            "style similarity between pairs (more robust to style variations).",
+        "style similarity between pairs (more robust to style variations).",
     )
     fst_group.add_argument(
         "--identity_similarity_threshold",
         type=float,
         default=0.8,
         help="Similarity threshold for adaptive identity loss (0.0-1.0). "
-            "If actual style similarity > threshold, apply strong identity constraint. "
-            "Otherwise, apply weak constraint to avoid false penalties.",
+        "If actual style similarity > threshold, apply strong identity constraint. "
+        "Otherwise, apply weak constraint to avoid false penalties.",
     )
     fst_group.add_argument(
         "--identity_adaptive_max_weight",
@@ -602,7 +615,7 @@ def get_parser():
         action="store_true",
         default=False,
         help="Use PooledIdentityMappingLoss that computes identity constraint over "
-            "multiple same-style pairs simultaneously (stronger constraint).",
+        "multiple same-style pairs simultaneously (stronger constraint).",
     )
     fst_group.add_argument(
         "--identity_pooled_reduction",
@@ -610,16 +623,16 @@ def get_parser():
         default="mean",
         choices=["mean", "sum", "max"],
         help="Reduction method for pooled identity loss:\n"
-            "  'mean': Average loss across all pairs\n"
-            "  'sum': Sum loss across all pairs\n"
-            "  'max': Maximum loss across all pairs",
+        "  'mean': Average loss across all pairs\n"
+        "  'sum': Sum loss across all pairs\n"
+        "  'max': Maximum loss across all pairs",
     )
     fst_group.add_argument(
         "--identity_log_metrics",
         action="store_true",
         default=True,
         help="Log detailed identity loss metrics (diagonal/off-diagonal analysis, "
-            "eigenvalue stats) to W&B and console.",
+        "eigenvalue stats) to W&B and console.",
     )
     fst_group.add_argument(
         "--identity_metric_interval",

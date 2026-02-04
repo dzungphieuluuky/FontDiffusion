@@ -252,6 +252,7 @@ def main() -> int:
 
     # Import centralized parser for summary flag
     from src.configs.fontdiffuser import get_parser as get_fd_parser
+
     fd_parser = get_fd_parser()
     fd_args, _ = fd_parser.parse_known_args(remaining_args)
 
@@ -284,11 +285,38 @@ def main() -> int:
 
             with open("model_summary.txt", "w", encoding="utf-8") as f:
                 f.write("UNet:\n")
-                f.write(str(summary(unet, input_size=(1, 1, img_size, img_size), device=device, verbose=0)))
+                f.write(
+                    str(
+                        summary(
+                            unet,
+                            input_size=(1, 1, img_size, img_size),
+                            device=device,
+                            verbose=0,
+                        )
+                    )
+                )
                 f.write("\n\nStyleEncoder:\n")
-                f.write(str(summary(style_encoder, input_size=(1, 1, img_size, img_size), device=device, verbose=0)))
+                f.write(
+                    str(
+                        summary(
+                            style_encoder,
+                            input_size=(1, 1, img_size, img_size),
+                            device=device,
+                            verbose=0,
+                        )
+                    )
+                )
                 f.write("\n\nContentEncoder:\n")
-                f.write(str(summary(content_encoder, input_size=(1, 1, img_size, img_size), device=device, verbose=0)))
+                f.write(
+                    str(
+                        summary(
+                            content_encoder,
+                            input_size=(1, 1, img_size, img_size),
+                            device=device,
+                            verbose=0,
+                        )
+                    )
+                )
             logger.info("✓ Model summary saved to model_summary.txt")
         except ImportError:
             logger.warning("torchinfo not installed; skipping model summary.")

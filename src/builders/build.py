@@ -13,6 +13,19 @@ from src.modules.identity_mapping_loss import (
     AdaptiveIdentityMappingLoss,
     PooledIdentityMappingLoss,
 )
+import logging
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    level=logging.INFO,
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(f"{__name__}.log", mode="a"),
+    ],
+)
+logger = logging.getLogger(__name__)
+
 
 def load_state_dict_auto(path: str):
     if path.endswith(".safetensors"):
@@ -24,6 +37,7 @@ def load_state_dict_auto(path: str):
     else:
         return torch.load(path, map_location="cpu")
 
+
 def build_unet(args):
     unet = UNet(
         sample_size=args.resolution,
@@ -31,19 +45,23 @@ def build_unet(args):
         out_channels=3,
         flip_sin_to_cos=True,
         freq_shift=0,
-        down_block_types=('DownBlock2D', 
-                          'MCADownBlock2D',
-                          'MCADownBlock2D', 
-                          'DownBlock2D'),
-        up_block_types=('UpBlock2D', 
-                        'StyleRSIUpBlock2D',
-                        'StyleRSIUpBlock2D', 
-                        'UpBlock2D'),
-        block_out_channels=args.unet_channels, 
+        down_block_types=(
+            "DownBlock2D",
+            "MCADownBlock2D",
+            "MCADownBlock2D",
+            "DownBlock2D",
+        ),
+        up_block_types=(
+            "UpBlock2D",
+            "StyleRSIUpBlock2D",
+            "StyleRSIUpBlock2D",
+            "UpBlock2D",
+        ),
+        block_out_channels=args.unet_channels,
         layers_per_block=2,
         downsample_padding=1,
         mid_block_scale_factor=1,
-        act_fn='silu',
+        act_fn="silu",
         norm_num_groups=32,
         norm_eps=1e-05,
         cross_attention_dim=args.style_start_channel * 16,
@@ -51,9 +69,11 @@ def build_unet(args):
         channel_attn=args.channel_attn,
         content_encoder_downsample_size=args.content_encoder_downsample_size,
         content_start_channel=args.content_start_channel,
-        reduction=32)
-    
+        reduction=32,
+    )
+
     return unet
+
 
 def build_style_encoder(args: argparse.Namespace) -> StyleEncoder:
     style_image_encoder = StyleEncoder(
@@ -91,6 +111,7 @@ def build_ddpm_scheduler(args: argparse.Namespace) -> DDPMScheduler:
     )
     print("Build DDPM Scheduler!")
     return ddpm_scheduler
+
 
 def build_fst(args: argparse.Namespace) -> FontStyleTransformationModule:
     """Build Font Style Transformation module."""
@@ -162,6 +183,7 @@ def get_unet_cross_attention_dim(unet: UNet) -> int:
     # Default fallback
     return 1024
 
+
 def build_identity_loss_module(args: argparse.Namespace) -> IdentityMappingLoss:
     """Build identity mapping loss module."""
     identity_loss = IdentityMappingLoss(
@@ -177,9 +199,10 @@ def build_identity_loss_module(args: argparse.Namespace) -> IdentityMappingLoss:
     )
     return identity_loss
 
+
 def build_base_components(args: argparse.Namespace):
     unet: UNet = build_unet(args)
-    style_encoder: StyleEncoder  = build_style_encoder(args)
+    style_encoder: StyleEncoder = build_style_encoder(args)
     content_encoder: ContentEncoder = build_content_encoder(args)
     scr: SCR = build_scr(args)
     ddpm_scheduler = build_ddpm_scheduler(args)
@@ -192,6 +215,7 @@ def build_base_components(args: argparse.Namespace):
     }
     print("Built FontDiffuser base components.")
     return components
+
 
 def build_fst_components(args: argparse.Namespace) -> dict:
     """
@@ -210,7 +234,9 @@ def build_fst_components(args: argparse.Namespace) -> dict:
     # Projections
     cross_attn_dim = get_unet_cross_attention_dim(unet)
     fst_proj = build_fst_projection(args.fst_query_dim, cross_attn_dim)
-    style_proj = build_original_style_projection(args.style_start_channel * 16, cross_attn_dim)
+    style_proj = build_original_style_projection(
+        args.style_start_channel * 16, cross_attn_dim
+    )
 
     # Loss module
     identity_loss: IdentityMappingLoss = build_identity_loss_module(args)
@@ -230,17 +256,21 @@ def build_fst_components(args: argparse.Namespace) -> dict:
     print("Built FontDiffuser FST components.")
     return components
 
+
 def load_components_from_ckpt(components: dict[str, nn.Module], ckpt_path: str):
     """Load components' state dicts from checkpoint."""
     for name, module in components.items():
         module_ckpt_path = f"{ckpt_path}/{name}.safetensors"
         if not os.path.exists(module_ckpt_path):
-            print(f"Warning: Checkpoint for {name} not found at {module_ckpt_path}. Skipping.")
+            print(
+                f"Warning: Checkpoint for {name} not found at {module_ckpt_path}. Skipping."
+            )
             module_ckpt_path = f"{ckpt_path}/{name}.pth"
         if not os.path.exists(module_ckpt_path):
-            print(f"Warning: Checkpoint for {name} not found at {module_ckpt_path}. Skipping.")
+            print(
+                f"Warning: Checkpoint for {name} not found at {module_ckpt_path}. Skipping."
+            )
             continue
         state_dict = load_state_dict_auto(module_ckpt_path)
         module.load_state_dict(state_dict)
         print(f"Loaded {name} from {module_ckpt_path}.")
-            

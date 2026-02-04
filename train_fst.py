@@ -12,6 +12,7 @@ from src.trainers.trainer_fst import FontDiffuserFSTTrainer
 
 # Setup logging
 import logging
+
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
@@ -86,7 +87,7 @@ def main():
             logger.info("\nStarting ONNX export...")
             trainer.export_to_onnx()
             logger.info("✓ ONNX export finished!")
-            
+
     except KeyboardInterrupt:
         logger.warning("Training interrupted by user")
         sys.exit(130)

@@ -78,10 +78,10 @@ class CollateFN(object):
         if "consistency_pairs" in batch[0] and batch[0]["consistency_pairs"]:
             # Each batch item has a list of (source_tensor, target_tensor) tuples
             # Each tensor is already (C, H, W)
-            
+
             consistency_sources = []
             consistency_targets = []
-            
+
             for item in batch:
                 pairs = item.get("consistency_pairs", [])
                 if pairs:
@@ -91,7 +91,7 @@ class CollateFN(object):
                     targets = torch.stack([p[1] for p in pairs])  # (k, C, H, W)
                     consistency_sources.append(sources)
                     consistency_targets.append(targets)
-            
+
             # Only add to result if we have valid pairs
             if consistency_sources:
                 # Stack across batch: (B, k, C, H, W)
@@ -100,16 +100,16 @@ class CollateFN(object):
 
         if "identity_pairs" in batch[0]:
             all_identity_pairs = []
-            
+
             for item in batch:
                 pairs = item.get("identity_pairs", [])
                 all_identity_pairs.extend(pairs)
-            
+
             if all_identity_pairs:
                 # Each pair is (source_tensor, target_tensor)
                 sources = torch.stack([pair[0] for pair in all_identity_pairs])
                 targets = torch.stack([pair[1] for pair in all_identity_pairs])
-                
+
                 result["identity_pair_sources"] = sources  # (N_pairs, 1, H, W)
                 result["identity_pair_targets"] = targets  # (N_pairs, 1, H, W)
                 result["num_identity_pairs_total"] = len(all_identity_pairs)

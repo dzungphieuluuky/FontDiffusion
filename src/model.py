@@ -63,6 +63,7 @@ def log_model_parameters(model: nn.Module, model_name: str = "Model") -> None:
 
     logger.info(f"{'=' * 80}\n")
 
+
 class FontDiffuserModel(ModelMixin, ConfigMixin):
     """Forward function for FontDiffuer with content encoder style encoder and unet."""
 
@@ -191,6 +192,7 @@ class FontDiffuserModelDPM(ModelMixin, ConfigMixin):
         noise_pred = out[0]
 
         return noise_pred
+
 
 class FontDiffuserWithFST(nn.Module):
     """
@@ -360,7 +362,7 @@ class FontDiffuserWithFST(nn.Module):
             }
         else:
             return noise_pred, offset_out_sum
-    
+
     def compute_transformation_matrix(
         self,
         style_source_img: torch.Tensor,
@@ -368,29 +370,27 @@ class FontDiffuserWithFST(nn.Module):
     ) -> torch.Tensor:
         """
         Compute the font style transformation features for a pair of images.
-        
+
         This extracts the transformation learned by the FST module without
         going through the full diffusion process.
-        
+
         Args:
             style_source_img: (B, 1, 96, 96) - source style reference
             style_target_img: (B, 1, 96, 96) - target style reference
-            
+
         Returns:
             transformation_features: (B, N, D) - transformation matrix/features
         """
         # Extract multi-scale features from both images
         source_style_features = self.mss_encoder(style_source_img)
         target_style_features = self.mss_encoder(style_target_img)
-        
+
         # Apply FST module to get transformation
         transformation_features = self.fst_module(
-            source_style_features, 
-            target_style_features
+            source_style_features, target_style_features
         )
-        
-        return transformation_features
 
+        return transformation_features
 
     def compute_consistency_loss(
         self,
@@ -399,82 +399,86 @@ class FontDiffuserWithFST(nn.Module):
     ) -> torch.Tensor:
         """
         Compute consistency loss across multiple content pairs.
-        
+
         The FST transformation should be similar for all pairs since they
         share the same source→target style transformation, regardless of content.
-        
+
         Uses John Schulman's k3 estimator for KL divergence:
         KL(P||Q) ≈ E[(exp(log P(x) - log Q(x)) - 1) - (log P(x) - log Q(x))]
         Reference: http://joschu.net/blog/kl-approx.html
-        
+
         Args:
             consistency_source_images: (B, k, 1, 96, 96) - k source images per batch
             consistency_target_images: (B, k, 1, 96, 96) - k target images per batch
-            
+
         Returns:
             consistency_loss: scalar tensor (variance + KL divergence loss)
         """
         batch_size, num_pairs, C, H, W = consistency_source_images.shape
-        
+
         # Flatten and extract features
         source_flat = consistency_source_images.view(-1, C, H, W)
         target_flat = consistency_target_images.view(-1, C, H, W)
-        
+
         source_features = self.mss_encoder(source_flat)
         target_features = self.mss_encoder(target_flat)
-        
+
         # Get transformation features
         transformation_features = self.fst_module(source_features, target_features)
-        
+
         # Reshape: (B*k, N, D) → (B, k, N, D)
         T = transformation_features.view(
-            batch_size, num_pairs, transformation_features.shape[1], transformation_features.shape[2]
+            batch_size,
+            num_pairs,
+            transformation_features.shape[1],
+            transformation_features.shape[2],
         )
-        
+
         # Compute statistics across pairs (dim=1)
-        mean_T = T.mean(dim=1, keepdim=True)  # (B, 1, N, D) - target uniform distribution
-        std_T = T.std(dim=1, keepdim=True)    # (B, 1, N, D)
-        
+        mean_T = T.mean(
+            dim=1, keepdim=True
+        )  # (B, 1, N, D) - target uniform distribution
+        std_T = T.std(dim=1, keepdim=True)  # (B, 1, N, D)
+
         # Coefficient of Variation (scale-invariant variance measure)
         eps = 1e-6
         cv = std_T / (mean_T.abs() + eps)
         variance_loss = cv.mean()
-        
+
         # KL divergence using Schulman's k3 estimator
         # P = uniform distribution (target), Q = empirical distribution (actual)
         # We want KL(P||Q) to be small → transformations are uniformly distributed
-        
+
         # Compute log probability ratio: log P(x) - log Q(x)
         # For standardized Gaussian assumption:
         # log P(x) = -0.5 * x^2 (standard normal)
         # log Q(x) = -0.5 * ((x - μ) / σ)^2 - log(σ)
-        
+
         # Standardize features: z = (T - mean) / std
         z = (T - mean_T) / (std_T + eps)  # (B, k, N, D)
-        
+
         # Log probability under P (standard normal, mean=0, std=1)
-        log_p = -0.5 * (z ** 2)
-        
+        log_p = -0.5 * (z**2)
+
         # Log probability under Q (empirical distribution with learned mean/std)
         # Since z is already standardized, log Q(x) includes the normalization term
-        log_q = -0.5 * (z ** 2) - torch.log(std_T + eps)
-        
+        log_q = -0.5 * (z**2) - torch.log(std_T + eps)
+
         # Log ratio
         logr = log_p - log_q  # (B, k, N, D)
-        
+
         # Schulman's k3 estimator: E[(exp(logr) - 1) - logr]
         # This is an unbiased estimator with lower variance than k1 or k2
         kl_loss = ((logr.exp() - 1.0) - logr).mean()
-        
+
         # Clip KL loss for numerical stability (optional but recommended)
         kl_loss = torch.clamp(kl_loss, min=0.0, max=10.0)
-        
+
         # Combined loss: variance + KL divergence
         # Lower weight on KL since it's already normalized
         total_loss = variance_loss + 0.05 * kl_loss
-        
+
         return total_loss
-    
 
     def compute_identity_loss(
         self,
@@ -484,14 +488,14 @@ class FontDiffuserWithFST(nn.Module):
     ) -> tuple[torch.Tensor, dict[str, float]]:
         """
         Compute identity mapping loss for same-style pairs.
-        
+
         For same-style image pairs, FST should produce near-identity transformation.
-        
+
         Args:
             identity_pair_sources: (B, 1, H, W) - Source style images
             identity_pair_targets: (B, 1, H, W) - Target style images (same style as source)
             num_queries: Number of learnable queries to use
-            
+
         Returns:
             loss: Scalar loss tensor
             metrics: Dict with diagnostics
@@ -499,47 +503,47 @@ class FontDiffuserWithFST(nn.Module):
         # Extract multi-scale features from both
         source_style_features = self.mss_encoder(identity_pair_sources)
         target_style_features = self.mss_encoder(identity_pair_targets)
-        
+
         # Apply FST to get transformation
         transformation_features = self.fst_module(
             source_style_features,
             target_style_features,
         )  # (B, N_L + H*W, D)
-        
+
         # Extract learnable query portion only BEFORE computing correlation
         query_features = transformation_features[:, :num_queries, :]  # (B, N_L, D)
-        
+
         B, N, D = query_features.shape
-        
+
         # For identity mapping, source and target transformation should be same
         # Compute correlation matrix: should be identity
         source_norm = F.normalize(query_features, p=2, dim=-1)
         target_norm = F.normalize(query_features, p=2, dim=-1)
-        
+
         # Self-similarity matrix (should be identity when same-style)
         # (B, D, N) @ (B, N, D) = (B, D, D)
         correlation = torch.bmm(
             source_norm.transpose(1, 2),  # (B, D, N)
-            target_norm                     # (B, N, D)
+            target_norm,  # (B, N, D)
         )  # (B, D, D)
-        
+
         # Distance from identity matrix
-        identity_matrix = torch.eye(D, device=correlation.device).unsqueeze(0).expand(B, -1, -1)  # (B, D, D)
+        identity_matrix = (
+            torch.eye(D, device=correlation.device).unsqueeze(0).expand(B, -1, -1)
+        )  # (B, D, D)
         diff = correlation - identity_matrix
-        
+
         # Frobenius norm: identity loss
-        identity_loss = torch.norm(
-            diff.reshape(B, -1), p='fro', dim=1
-        ).mean()
-        
+        identity_loss = torch.norm(diff.reshape(B, -1), p="fro", dim=1).mean()
+
         # Orthogonality regularization: C^T @ C should also be identity
         CTC = torch.bmm(correlation.transpose(1, 2), correlation)
         ortho_loss = torch.norm(
-            (CTC - identity_matrix).reshape(B, -1), p='fro', dim=1
+            (CTC - identity_matrix).reshape(B, -1), p="fro", dim=1
         ).mean()
-        
+
         total_loss = identity_loss + 0.01 * ortho_loss
-        
+
         # Compute metrics
         with torch.no_grad():
             diagonal = torch.diagonal(correlation, dim1=1, dim2=2)  # (B, D)
@@ -549,8 +553,8 @@ class FontDiffuserWithFST(nn.Module):
                 "diagonal_mean": diagonal.mean().item(),
                 "diagonal_std": diagonal.std().item(),
             }
-        
-        return total_loss, metrics    
+
+        return total_loss, metrics
 
     def compute_identity_loss_v2(
         self,
@@ -560,12 +564,12 @@ class FontDiffuserWithFST(nn.Module):
     ) -> tuple[torch.Tensor, dict[str, float]]:
         """
         Compute identity mapping loss using the dedicated IdentityMappingLoss module.
-        
+
         Args:
             identity_pair_sources: (B, 1, H, W) - Source style images (same style)
             identity_pair_targets: (B, 1, H, W) - Target style images (same style)
             identity_loss_module: IdentityMappingLoss instance
-            
+
         Returns:
             loss: Scalar loss tensor
             metrics: Dict with diagnostics from IdentityMappingLoss
@@ -573,19 +577,19 @@ class FontDiffuserWithFST(nn.Module):
         # Extract multi-scale features from both
         source_style_features = self.mss_encoder(identity_pair_sources)
         target_style_features = self.mss_encoder(identity_pair_targets)
-        
+
         # Apply FST to get transformation features
         transformation_features = self.fst_module(
             source_style_features,
             target_style_features,
         )  # (B, N_L + H*W, D)
-        
+
         # Extract learnable query portion only
-        query_features = transformation_features[:, :self.fst_num_queries, :]
-        
+        query_features = transformation_features[:, : self.fst_num_queries, :]
+
         # Use IdentityMappingLoss module
         loss, metrics = identity_loss_module(query_features, query_features)
-        
+
         return loss, metrics
 
 
