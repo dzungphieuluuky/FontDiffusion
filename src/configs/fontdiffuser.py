@@ -97,7 +97,16 @@ def get_parser():
         default=64,
         help="Style encoder first layer channels",
     )
-
+    model_group.add_argument(
+    "--freeze_modules",
+    type=str,
+    default="",
+    help="Comma-separated list of modules to freeze during FST training. "
+         "Options: unet, style_encoder, content_encoder, mss_encoder, fst_module, "
+         "fst_projection, original_style_projection. "
+         "Example: 'unet,style_encoder,content_encoder'"
+    )
+    
     # ==================== Training Configuration ====================
     training_group = parser.add_argument_group("Training Configuration")
     training_group.add_argument(

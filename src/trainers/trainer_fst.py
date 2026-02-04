@@ -68,8 +68,21 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         """Initialize FST trainer."""
         # Store FST-specific args before calling super
         self.use_fst: bool = getattr(args, "use_fst", True)
-        self.freeze_original_encoders: bool = getattr(args, "freeze_original_encoders", False)
         self.style_source_same_prob: float = getattr(args, "style_source_same_prob", 0.5)
+
+        # Parse freeze_modules argument
+        freeze_modules_str = getattr(args, "freeze_modules", "")
+        self.freeze_modules: list[str] = self._parse_freeze_modules(freeze_modules_str)
+        
+        # Backward compatibility: check old flag
+        if getattr(args, "freeze_original_encoders", False):
+            logger.warning(
+                "⚠️ --freeze_original_encoders is deprecated. "
+                "Use --freeze_modules='unet,style_encoder,content_encoder' instead"
+            )
+            self.freeze_modules.extend(["unet", "style_encoder", "content_encoder"])
+            # Remove duplicates
+            self.freeze_modules = list(set(self.freeze_modules))
 
         # Parse FST configuration
         self.fst_feature_channels: list[int] = self._parse_feature_channels(
@@ -87,6 +100,47 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
 
         # Call parent constructor
         super().__init__(args)
+
+    def _parse_freeze_modules(self, modules_str: str) -> list[str]:
+        """
+        Parse freeze_modules argument from comma-separated string.
+        
+        Args:
+            modules_str: Comma-separated string of module names
+            
+        Returns:
+            List of module names to freeze
+        """
+        if not modules_str or modules_str.strip() == "":
+            return []
+        
+        # Parse and validate module names
+        valid_modules = {
+            "unet",
+            "style_encoder",
+            "content_encoder",
+            "mss_encoder",
+            "fst_module",
+            "fst_projection",
+            "original_style_projection",
+        }
+        
+        modules = [m.strip().lower() for m in modules_str.split(",") if m.strip()]
+        
+        # Validate module names
+        invalid_modules = set(modules) - valid_modules
+        if invalid_modules:
+            logger.warning(
+                f"⚠️ Invalid module names in --freeze_modules: {invalid_modules}. "
+                f"Valid options: {valid_modules}"
+            )
+            modules = [m for m in modules if m in valid_modules]
+        
+        if modules:
+            logger.info(f"Modules to freeze: {modules}")
+        
+        return modules
+
 
     def _parse_feature_channels(self, channels_str: str) -> list[int]:
         """Parse feature channels from comma-separated string."""
@@ -112,6 +166,9 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 content_encoder=content_encoder,
                 ckpt_dir=self.args.phase_1_ckpt_dir,
             )
+        else:
+            logger.warning("⚠️ No phase_1_ckpt_dir specified - training from scratch!")
+            logger.warning("⚠️ This will likely produce poor results. Use pretrained weights!")
 
         # Create model based on FST flag
         if self.use_fst:
@@ -143,7 +200,6 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 unet=unet,
                 style_encoder=style_encoder,
                 content_encoder=content_encoder,
-
                 mss_encoder=mss_encoder,
                 fst_module=fst_module,
                 fst_projection=fst_projection,
@@ -153,19 +209,10 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             logger.info("✓ Created FontDiffuserWithFST")
             self.model.log_model_info()
 
-            # Apply freezing if specified
-            if self.freeze_original_encoders:
-                logger.info("Freezing original encoders...")
-                for param in self.model.content_encoder.parameters():
-                    param.requires_grad = False
-                for param in self.model.style_encoder.parameters():
-                    param.requires_grad = False
-                for param in self.model.diffusion_unet.parameters():
-                    param.requires_grad = False
-                logger.info("✓ Original encoders frozen")
-
-                logger.info("\nTrainable parameters after freezing:")
-                self.model.log_model_info()
+            # Apply freezing based on parsed module list
+            if self.freeze_modules:
+                self._apply_module_freezing()
+                
         else:
             # Standard model without FST
             from src.model import FontDiffuserModel
@@ -177,6 +224,10 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             )
             logger.info("✓ Created standard FontDiffuserModel")
             self.model.log_model_info()
+            
+            # Apply freezing for base model if specified
+            if self.freeze_modules:
+                self._apply_module_freezing()
 
         # Perceptual loss (always used)
         self.perceptual_loss = ContentPerceptualLoss()
@@ -188,6 +239,79 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             if hasattr(self.args, "scr_ckpt_path") and self.args.scr_ckpt_path:
                 self._load_scr_checkpoint(self.args.scr_ckpt_path)
             self.scr.requires_grad_(False)
+
+    def _apply_module_freezing(self):
+        """
+        Freeze specified modules based on self.freeze_modules list.
+        
+        This method maps module names to actual model attributes and freezes them.
+        """
+        if not self.freeze_modules:
+            return
+        
+        logger.info("=" * 80)
+        logger.info("Applying module freezing...")
+        logger.info("=" * 80)
+        
+        # Map module names to model attributes
+        if self.use_fst:
+            module_map = {
+                "unet": ("diffusion_unet", self.model.diffusion_unet),
+                "style_encoder": ("style_encoder", self.model.style_encoder),
+                "content_encoder": ("content_encoder", self.model.content_encoder),
+                "mss_encoder": ("mss_encoder", self.model.mss_encoder),
+                "fst_module": ("fst_module", self.model.fst_module),
+                "fst_projection": ("fst_projection", self.model.fst_projection),
+                "original_style_projection": (
+                    "original_style_projection",
+                    self.model.original_style_projection,
+                ),
+            }
+        else:
+            # For base model, only these modules are available
+            module_map = {
+                "unet": ("diffusion_unet", self.model.config.unet),
+                "style_encoder": ("style_encoder", self.model.config.style_encoder),
+                "content_encoder": ("content_encoder", self.model.config.content_encoder),
+            }
+        
+        frozen_count = 0
+        total_frozen_params = 0
+        
+        for module_name in self.freeze_modules:
+            if module_name not in module_map:
+                logger.warning(
+                    f"⚠️ Module '{module_name}' not found in current model. Skipping."
+                )
+                continue
+            
+            attr_name, module = module_map[module_name]
+            
+            # Count parameters before freezing
+            params_before = sum(1 for p in module.parameters() if p.requires_grad)
+            param_count = sum(p.numel() for p in module.parameters())
+            
+            # Freeze the module
+            for param in module.parameters():
+                param.requires_grad = False
+            
+            logger.info(
+                f"✓ Frozen {attr_name}: "
+                f"{param_count:,} parameters ({params_before} trainable → 0 trainable)"
+            )
+            
+            frozen_count += 1
+            total_frozen_params += param_count
+        
+        logger.info("=" * 80)
+        logger.info(f"✓ Freezing complete: {frozen_count} modules frozen")
+        logger.info(f"✓ Total frozen parameters: {total_frozen_params:,}")
+        logger.info("=" * 80)
+        
+        # Log updated model info
+        logger.info("\nModel parameter summary after freezing:")
+        self.model.log_model_info()
+
 
     def _load_fst_module_states(
         self, mss_encoder, fst_module, fst_projection, original_style_projection
@@ -234,12 +358,13 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             try:
                 ckpt_path = find_checkpoint(ckpt_dir, name)
                 if not ckpt_path.exists():
-                    logger.warning(f"Checkpoint for {name} not found at {ckpt_path}")
+                    logger.warning(f"⚠️ Checkpoint for {name} not found at {ckpt_path}")
+                    logger.warning(f"⚠️ Training {name} from scratch - this may cause poor results!")
                     continue
 
                 state_dict = load_model_checkpoint(ckpt_path)
                 component.load_state_dict(state_dict)
-                logger.info(f"✓ Loaded {name} from {ckpt_path}")
+                logger.info(f"✓ Loaded pretrained {name} from {ckpt_path}")
 
             except Exception as e:
                 logger.error(f"Failed to load {name} from {ckpt_dir}: {e}")
@@ -262,6 +387,8 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                         state_dict = load_model_checkpoint(ckpt_path)
                         self._fst_module_states[module_name] = state_dict
                         logger.info(f"✓ Found {module_name} checkpoint")
+                    else:
+                        logger.info(f"ℹ️ No checkpoint for {module_name} - training from scratch")
                 except Exception as e:
                     logger.debug(f"No checkpoint for {module_name}: {e}")
 
@@ -336,16 +463,16 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 * self.accelerator.num_processes
             )
 
-        # Select trainable parameters
-        if self.use_fst and self.freeze_original_encoders:
-            # Only optimize new FST components
-            trainable_params = [p for p in self.model.parameters() if p.requires_grad]
-            logger.info(
-                f"Training {len(trainable_params)} parameter groups "
-                f"({sum(p.numel() for p in trainable_params):,} parameters, FST only)"
-            )
-        else:
-            trainable_params = self.model.parameters()
+        # Select trainable parameters (only those with requires_grad=True)
+        trainable_params = [p for p in self.model.parameters() if p.requires_grad]
+        
+        num_trainable = sum(p.numel() for p in trainable_params)
+        num_total = sum(p.numel() for p in self.model.parameters())
+        
+        logger.info(
+            f"Optimizer setup: {num_trainable:,} / {num_total:,} trainable parameters "
+            f"({100 * num_trainable / num_total:.1f}%)"
+        )
 
         self.optimizer = torch.optim.AdamW(
             trainable_params,
@@ -518,9 +645,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             consistency_target = samples.get("consistency_target_images")
             
             if consistency_source is not None and consistency_target is not None:
-                # Verify we have actual consistency pairs (not empty batch dimension)
                 if consistency_source.shape[0] > 0 and consistency_source.shape[1] > 0:
-                    # Get the actual model (unwrap if using DDP/accelerate)
                     model = self.accelerator.unwrap_model(self.model) if hasattr(self.model, "module") else self.model
                     
                     consistency_loss = model.compute_consistency_loss(
@@ -530,47 +655,40 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                     
                     total_loss += self.consistency_loss_weight * consistency_loss
                     loss_dict["consistency_loss"] = consistency_loss.item()
-                    loss_dict["weighted_consistency_loss"] = (
-                        self.consistency_loss_weight * consistency_loss.item()
-                    )
 
-
+        # Simplified identity loss logging
         if self.num_identity_pairs > 0 and samples.get("num_identity_pairs_total", 0) > 0:
-            identity_sources = samples["identity_pair_sources"]  # (B, 1, H, W)
-            identity_targets = samples["identity_pair_targets"]  # (B, 1, H, W)
+            identity_sources = samples["identity_pair_sources"]
+            identity_targets = samples["identity_pair_targets"]
             
             # Extract FST features from identity pairs
             with torch.no_grad():
-                source_fst_features = self.model.mss_encoder(identity_sources)  # Multi-scale
+                source_fst_features = self.model.mss_encoder(identity_sources)
                 target_fst_features = self.model.mss_encoder(identity_targets)
             
             # Apply FST to get transformation features
             transformation_source = self.model.fst_module(source_fst_features, source_fst_features)
             transformation_target = self.model.fst_module(target_fst_features, target_fst_features)
             
-            # Extract query portion (first matrix_size features)
-            # transformation_* shape: (B, N_L + H*W, D)
-            query_source = transformation_source[:, :self.args.fst_num_queries, :]  # (B, N_L, D)
+            # Extract query portion
+            query_source = transformation_source[:, :self.args.fst_num_queries, :]
             query_target = transformation_target[:, :self.args.fst_num_queries, :]
             
             # Compute identity loss
             identity_loss, identity_metrics = self.identity_loss_module(
-                query_source,  # (B, N_L, D) - exactly 3D
-                query_target   # (B, N_L, D) - exactly 3D
+                query_source,
+                query_target
             )
             
             # Add to total loss
             total_loss = total_loss + self.args.identity_loss_weight * identity_loss
             
-            # Log metrics
+            # Only log essential metrics
             loss_dict["identity_loss"] = identity_loss.item()
-            for key, value in identity_metrics.items():
-                loss_dict[f"identity_{key}"] = value
-
-
-
-                
-        return total_loss, loss_dict    
+            loss_dict["identity_main"] = identity_metrics.get("identity_loss", 0.0)
+            loss_dict["identity_ortho"] = identity_metrics.get("orthogonality_loss", 0.0)
+                    
+        return total_loss, loss_dict
 
     def save_checkpoint(self, is_final: bool = False):
         """Save FST training checkpoint with full state."""
@@ -666,7 +784,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             "config": asdict(self.config),
             "fst_config": {
                 "use_fst": self.use_fst,
-                "freeze_original_encoders": self.freeze_original_encoders,
+                "freeze_modules": self.freeze_modules,
                 "style_source_same_prob": self.style_source_same_prob,
                 "fst_feature_channels": self.fst_feature_channels,
                 "fst_num_queries": self.fst_num_queries,
@@ -781,7 +899,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         if self.accelerator.is_main_process:
             fst_config = {
                 "fst_enabled": self.use_fst,
-                "freeze_original_encoders": self.freeze_original_encoders,
+                "freeze_modules": self.freeze_modules,  # Log frozen module list
                 "style_source_same_prob": self.style_source_same_prob,
                 "fst_feature_channels": self.fst_feature_channels,
                 "fst_num_queries": self.fst_num_queries,
