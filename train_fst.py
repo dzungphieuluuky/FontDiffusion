@@ -3,6 +3,7 @@ Training runner for FontDiffuserWithFST.
 Simple entry point that initializes and runs the FST trainer.
 """
 
+import argparse
 import logging
 import os
 import sys
@@ -21,8 +22,8 @@ logger = logging.getLogger(__name__)
 
 def get_args():
     """Parse command line arguments with FST-specific options."""
-    parser = get_parser()
-    args = parser.parse_args()
+    parser: argparse.ArgumentParser = get_parser()
+    args: argparse.Namespace = parser.parse_args()
 
     # Handle local rank for distributed training
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -42,7 +43,7 @@ def main():
     """Main training entry point."""
     try:
         # Parse arguments
-        args = get_args()
+        args: argparse.Namespace = get_args()
 
         # Log configuration
         logger.info("=" * 80)
