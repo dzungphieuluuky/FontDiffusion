@@ -640,6 +640,72 @@ def get_parser():
         default=100,
         help="Log identity loss metrics every N steps.",
     )
+    # ==================== Skeleton Distance Transform ====================
+    skeleton_group = parser.add_argument_group("Skeleton Distance Transform")
+    skeleton_group.add_argument(
+        "--use_skeleton_content",
+        action="store_true",
+        help="Use skeleton-distance transform for content images (prevents style leakage)",
+    )
+
+    skeleton_group.add_argument(
+        "--skeleton_method",
+        type=str,
+        default="medial_axis",
+        choices=["skeletonize", "medial_axis", "zhang_suen"],
+        help="Skeletonization algorithm: "
+            "'skeletonize' (morphological thinning), "
+            "'medial_axis' (distance-based, robust for fonts), "
+            "'zhang_suen' (Zhang-Suen algorithm)",
+    )
+
+    skeleton_group.add_argument(
+        "--skeleton_distance_method",
+        type=str,
+        default="hybrid",
+        choices=["edt", "gaussian", "hybrid"],
+        help="Distance field generation method: "
+            "'edt' (Euclidean Distance Transform), "
+            "'gaussian' (Gaussian blur of skeleton), "
+            "'hybrid' (EDT + Gaussian smoothing)",
+    )
+
+    skeleton_group.add_argument(
+        "--skeleton_max_distance",
+        type=float,
+        default=10.0,
+        help="Maximum influence radius for skeleton distance field (in pixels). "
+            "Smaller values = tighter guidance, larger values = more diffuse influence.",
+    )
+
+    skeleton_group.add_argument(
+        "--skeleton_sigma",
+        type=float,
+        default=3.0,
+        help="Gaussian sigma for distance field smoothing (used in 'gaussian' and 'hybrid' methods)",
+    )
+
+    skeleton_group.add_argument(
+        "--skeleton_output_mode",
+        type=str,
+        default="dual_channel",
+        choices=["skeleton_only", "distance_only", "dual_channel"],
+        help="Output mode: "
+            "'skeleton_only' (binary 1-channel), "
+            "'distance_only' (smooth 1-channel), "
+            "'dual_channel' (skeleton + distance, 2-channel)",
+    )
+
+    skeleton_group.add_argument(
+        "--skeleton_fusion_method",
+        type=str,
+        default="concat",
+        choices=["concat", "add", "weighted"],
+        help="How to fuse skeleton and distance channels in content encoder: "
+            "'concat' (1x1 conv to merge), "
+            "'add' (simple addition), "
+            "'weighted' (learnable weighted sum)",
+    )
 
     # ==================== Optimization Flags ====================
     optimization_group = parser.add_argument_group("Performance Optimization")
