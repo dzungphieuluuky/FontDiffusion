@@ -56,6 +56,7 @@ from src.tools.utils import (
 )
 from src.trainers.training_config import TrainingConfig
 from src.trainers.trainer import FontDiffuserTrainer
+from src.modules.skeleton_distance_transform import SkeletonDistanceTransform
 
 # Setup logging
 import logging
@@ -75,26 +76,26 @@ logger = logging.getLogger(__name__)
 class FontDiffuserFSTTrainer(FontDiffuserTrainer):
     """Trainer for FontDiffuserWithFST model with MSSE and FST modules."""
 
+class FontDiffuserFSTTrainer(FontDiffuserTrainer):
+    """Trainer for FontDiffuserWithFST model with skeleton transform support."""
+
     def __init__(self, args: argparse.Namespace):
-        """Initialize FST trainer."""
+        """Initialize FST trainer with skeleton transform parameters."""
         # Store FST-specific args before calling super
         self.use_fst: bool = getattr(args, "use_fst", True)
-        self.style_source_same_prob: float = getattr(
-            args, "style_source_same_prob", 0.5
-        )
+        self.style_source_same_prob: float = getattr(args, "style_source_same_prob", 0.5)
 
         # Parse freeze_modules argument
         freeze_modules_str = getattr(args, "freeze_modules", "")
         self.freeze_modules: list[str] = self._parse_freeze_modules(freeze_modules_str)
-
-        # Backward compatibility: check old flag
+        
+        # Backward compatibility
         if getattr(args, "freeze_original_encoders", False):
             logger.warning(
                 "⚠️ --freeze_original_encoders is deprecated. "
                 "Use --freeze_modules='unet,style_encoder,content_encoder' instead"
             )
             self.freeze_modules.extend(["unet", "style_encoder", "content_encoder"])
-            # Remove duplicates
             self.freeze_modules = list(set(self.freeze_modules))
 
         # Parse FST configuration
@@ -105,13 +106,18 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         self.fst_query_dim: int = getattr(args, "fst_query_dim", 128)
         self.fst_num_scales: int = getattr(args, "fst_num_scales", 5)
         self.num_consistency_pairs: int = getattr(args, "num_consistency_pairs", 0)
-        self.consistency_loss_weight: float = getattr(
-            args, "consistency_loss_weight", 0.1
-        )
-
+        self.consistency_loss_weight: float = getattr(args, "consistency_loss_weight", 0.1)
         self.num_identity_pairs: int = getattr(args, "num_identity_pairs", 0)
         self.identity_loss_weight: float = getattr(args, "identity_loss_weight", 0.1)
         self.identity_pair_mode: str = getattr(args, "identity_pair_mode", "random")
+
+        self.use_skeleton_content: bool = getattr(args, "use_skeleton_content", False)
+        self.skeleton_method: str = getattr(args, "skeleton_method", "medial_axis")
+        self.skeleton_distance_method: str = getattr(args, "skeleton_distance_method", "hybrid")
+        self.skeleton_max_distance: float = getattr(args, "skeleton_max_distance", 10.0)
+        self.skeleton_sigma: float = getattr(args, "skeleton_sigma", 3.0)
+        self.skeleton_output_mode: str = getattr(args, "skeleton_output_mode", "dual_channel")
+        self.skeleton_fusion_method: str = getattr(args, "skeleton_fusion_method", "concat")
 
         # Call parent constructor
         super().__init__(args)
@@ -163,7 +169,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         return channels_str
 
     def _setup_models(self):
-        """Initialize FST model components."""
+        """Initialize FST model components with skeleton support."""
         logger.info("Building model components...")
 
         # Build core components
@@ -182,9 +188,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             )
         else:
             logger.warning("⚠️ No phase_1_ckpt_dir specified - training from scratch!")
-            logger.warning(
-                "⚠️ This will likely produce poor results. Use pretrained weights!"
-            )
+            logger.warning("⚠️ This will likely produce poor results. Use pretrained weights!")
 
         # Create model based on FST flag
         if self.use_fst:
@@ -205,13 +209,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 style_dim=1024, cross_attn_dim=cross_attn_dim
             )
 
-            # Load FST checkpoints if available from phase 1
-            if hasattr(self, "_fst_module_states"):
-                self._load_fst_module_states(
-                    mss_encoder, fst_module, fst_projection, original_style_projection
-                )
-
-            # Create FST model
+            # Create FST model WITH SKELETON SUPPORT
             self.model = FontDiffuserWithFST(
                 unet=unet,
                 style_encoder=style_encoder,
@@ -220,27 +218,41 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 fst_module=fst_module,
                 fst_projection=fst_projection,
                 original_style_projection=original_style_projection,
+                use_skeleton_content=self.use_skeleton_content,  # ADD THIS
+                skeleton_fusion_method=self.skeleton_fusion_method,  # ADD THIS
             )
 
             logger.info("✓ Created FontDiffuserWithFST")
+            
+            # Log skeleton configuration
+            if self.use_skeleton_content:
+                logger.info("=" * 80)
+                logger.info("Skeleton-Distance Transform Configuration")
+                logger.info("=" * 80)
+                logger.info(f"  Method: {self.skeleton_method}")
+                logger.info(f"  Distance Method: {self.skeleton_distance_method}")
+                logger.info(f"  Max Distance: {self.skeleton_max_distance}")
+                logger.info(f"  Sigma: {self.skeleton_sigma}")
+                logger.info(f"  Output Mode: {self.skeleton_output_mode}")
+                logger.info(f"  Fusion Method: {self.skeleton_fusion_method}")
+                logger.info("=" * 80)
+            
             self.model.log_model_info()
 
-            # Build identity loss module if identity pairs are requested
+            # Build identity loss module if needed
             if self.num_identity_pairs > 0:
                 self.identity_loss_module = build_identity_loss_module(args=self.args)
-                logger.info(
-                    f"✓ Created IdentityMappingLoss module with {self.num_identity_pairs} pairs"
-                )
+                logger.info(f"✓ Created IdentityMappingLoss module with {self.num_identity_pairs} pairs")
             else:
                 self.identity_loss_module = None
                 logger.info("ℹ️ Identity loss disabled (num_identity_pairs=0)")
 
-            # Apply freezing based on parsed module list
+            # Apply freezing
             if self.freeze_modules:
                 self._apply_module_freezing()
-
+                
         else:
-            # Standard model without FST
+            # Standard model without FST (no skeleton support needed)
             from src.model import FontDiffuserModel
 
             self.model = FontDiffuserModel(
@@ -250,11 +262,9 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             )
             logger.info("✓ Created standard FontDiffuserModel")
             self.model.log_model_info()
-
-            # No identity loss for base model
+            
             self.identity_loss_module = None
-
-            # Apply freezing for base model if specified
+            
             if self.freeze_modules:
                 self._apply_module_freezing()
 
@@ -268,6 +278,136 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             if hasattr(self.args, "scr_ckpt_path") and self.args.scr_ckpt_path:
                 self._load_scr_checkpoint(self.args.scr_ckpt_path)
             self.scr.requires_grad_(False)
+
+    def _setup_data(self):
+        """Setup FST-compatible data transforms and dataloaders with skeleton support."""
+        content_transforms = transforms.Compose(
+            [
+                transforms.Resize(
+                    self.args.content_image_size,
+                    interpolation=transforms.InterpolationMode.BILINEAR,
+                ),
+                transforms.ToTensor(),
+                transforms.Normalize([0.5], [0.5]),
+            ]
+        )
+
+        style_transforms = transforms.Compose(
+            [
+                transforms.Resize(
+                    self.args.style_image_size,
+                    interpolation=transforms.InterpolationMode.BILINEAR,
+                ),
+                transforms.ToTensor(),
+                transforms.Normalize([0.5], [0.5]),
+            ]
+        )
+
+        target_transforms = transforms.Compose(
+            [
+                transforms.Resize(
+                    (self.args.resolution, self.args.resolution),
+                    interpolation=transforms.InterpolationMode.BILINEAR,
+                ),
+                transforms.ToTensor(),
+                transforms.Normalize([0.5], [0.5]),
+            ]
+        )
+
+        # BUILD SKELETON CONFIG IF ENABLED
+        skeleton_config = None
+        if self.use_skeleton_content:
+            skeleton_config = {
+                "method": self.skeleton_method,
+                "distance_method": self.skeleton_distance_method,
+                "max_distance": self.skeleton_max_distance,
+                "sigma": self.skeleton_sigma,
+                "output_mode": self.skeleton_output_mode,
+                "normalize": True,
+            }
+            logger.info(f"✓ Skeleton config prepared: {skeleton_config}")
+
+        # Use FST-compatible dataset WITH SKELETON SUPPORT
+        train_dataset = FontDatasetFST(
+            args=self.args,
+            phase="train",
+            transforms=[content_transforms, style_transforms, target_transforms],
+            scr=self.config.phase_2,
+            use_fst=self.use_fst,
+            style_source_same_prob=self.style_source_same_prob,
+            num_consistency_pairs=self.num_consistency_pairs,
+            num_identity_pairs=self.num_identity_pairs,
+            identity_pair_mode=self.identity_pair_mode,
+            use_skeleton_transform=self.use_skeleton_content,  # ADD THIS
+            skeleton_config=skeleton_config,  # ADD THIS
+        )
+
+        self.train_dataloader = torch.utils.data.DataLoader(
+            train_dataset,
+            shuffle=True,
+            batch_size=self.config.train_batch_size,
+            collate_fn=CollateFNFST(),
+            num_workers=self.args.num_workers,
+            pin_memory=True,
+            persistent_workers=True,
+        )
+
+        logger.info(f"✓ Loaded FST dataset with {len(train_dataset)} samples")
+        if self.use_skeleton_content:
+            logger.info("✓ Skeleton transform will be applied during data loading")
+
+    def _setup_logging(self):
+        """Setup logging and tracking with FST and skeleton information."""
+        super()._setup_logging()
+
+        # Log FST-specific configuration
+        if self.accelerator.is_main_process:
+            fst_config = {
+                "fst_enabled": self.use_fst,
+                "freeze_modules": self.freeze_modules,
+                "style_source_same_prob": self.style_source_same_prob,
+                "fst_feature_channels": self.fst_feature_channels,
+                "fst_num_queries": self.fst_num_queries,
+                "fst_query_dim": self.fst_query_dim,
+                "fst_num_scales": self.fst_num_scales,
+                "num_consistency_pairs": self.num_consistency_pairs,
+                "consistency_loss_weight": self.consistency_loss_weight,
+                "num_identity_pairs": self.num_identity_pairs,
+                "identity_loss_weight": self.identity_loss_weight,
+                "identity_pair_mode": self.identity_pair_mode,
+            }
+
+            # ADD SKELETON TRANSFORM CONFIG
+            if self.use_skeleton_content:
+                skeleton_config = {
+                    "use_skeleton_content": self.use_skeleton_content,
+                    "skeleton_method": self.skeleton_method,
+                    "skeleton_distance_method": self.skeleton_distance_method,
+                    "skeleton_max_distance": self.skeleton_max_distance,
+                    "skeleton_sigma": self.skeleton_sigma,
+                    "skeleton_output_mode": self.skeleton_output_mode,
+                    "skeleton_fusion_method": self.skeleton_fusion_method,
+                }
+                
+                fst_config.update(skeleton_config)
+                logger.info(f"Skeleton Transform Config: {skeleton_config}")
+
+            if self.use_fst:
+                unwrapped = self.accelerator.unwrap_model(self.model)
+                fst_config["model_info"] = {
+                    "mss_encoder_params": sum(
+                        p.numel() for p in unwrapped.mss_encoder.parameters()
+                    ),
+                    "fst_module_params": sum(
+                        p.numel() for p in unwrapped.fst_module.parameters()
+                    ),
+                    "fst_projection_params": sum(
+                        p.numel() for p in unwrapped.fst_projection.parameters()
+                    ),
+                }
+
+            self.accelerator.log({"fst_config": fst_config})
+            logger.info(f"FST Configuration: {fst_config}")
 
     def _apply_module_freezing(self):
         """
@@ -426,66 +566,6 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                         )
                 except Exception as e:
                     logger.debug(f"No checkpoint for {module_name}: {e}")
-
-    def _setup_data(self):
-        """Setup FST-compatible data transforms and dataloaders."""
-        content_transforms = transforms.Compose(
-            [
-                transforms.Resize(
-                    self.args.content_image_size,
-                    interpolation=transforms.InterpolationMode.BILINEAR,
-                ),
-                transforms.ToTensor(),
-                transforms.Normalize([0.5], [0.5]),
-            ]
-        )
-
-        style_transforms = transforms.Compose(
-            [
-                transforms.Resize(
-                    self.args.style_image_size,
-                    interpolation=transforms.InterpolationMode.BILINEAR,
-                ),
-                transforms.ToTensor(),
-                transforms.Normalize([0.5], [0.5]),
-            ]
-        )
-
-        target_transforms = transforms.Compose(
-            [
-                transforms.Resize(
-                    (self.args.resolution, self.args.resolution),
-                    interpolation=transforms.InterpolationMode.BILINEAR,
-                ),
-                transforms.ToTensor(),
-                transforms.Normalize([0.5], [0.5]),
-            ]
-        )
-
-        # Use FST-compatible dataset
-        train_dataset = FontDatasetFST(
-            args=self.args,
-            phase="train",
-            transforms=[content_transforms, style_transforms, target_transforms],
-            scr=self.config.phase_2,
-            use_fst=self.use_fst,
-            style_source_same_prob=self.style_source_same_prob,
-            num_consistency_pairs=self.num_consistency_pairs,
-            num_identity_pairs=self.num_identity_pairs,  # ADD THIS
-            identity_pair_mode=self.identity_pair_mode,  # ADD THIS
-        )
-
-        self.train_dataloader = torch.utils.data.DataLoader(
-            train_dataset,
-            shuffle=True,
-            batch_size=self.config.train_batch_size,
-            collate_fn=CollateFNFST(),
-            num_workers=self.args.num_workers,
-            pin_memory=True,
-            persistent_workers=True,
-        )
-
-        logger.info(f"✓ Loaded FST dataset with {len(train_dataset)} samples")
 
     def _setup_optimizer(self):
         """Setup optimizer with selective parameter training for FST."""
@@ -994,50 +1074,6 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             logger.debug(traceback.format_exc())
             return False
 
-    def _setup_logging(self):
-        """Setup logging and tracking with FST information."""
-        super()._setup_logging()
-
-        # Log FST-specific configuration
-        if self.accelerator.is_main_process:
-            fst_config = {
-                "fst_enabled": self.use_fst,
-                "freeze_modules": self.freeze_modules,  # Log frozen module list
-                "style_source_same_prob": self.style_source_same_prob,
-                "fst_feature_channels": self.fst_feature_channels,
-                "fst_num_queries": self.fst_num_queries,
-                "fst_query_dim": self.fst_query_dim,
-                "fst_num_scales": self.fst_num_scales,
-                "num_consistency_pairs": self.num_consistency_pairs,
-                "consistency_loss_weight": self.consistency_loss_weight,
-                "num_identity_pairs": self.num_identity_pairs,
-                "identity_loss_weight": self.identity_loss_weight,
-                "identity_pair_mode": self.identity_pair_mode,
-            }
-
-            if self.use_fst:
-                unwrapped = self.accelerator.unwrap_model(self.model)
-                fst_config["model_info"] = {
-                    "mss_encoder_params": sum(
-                        p.numel() for p in unwrapped.mss_encoder.parameters()
-                    ),
-                    "fst_module_params": sum(
-                        p.numel() for p in unwrapped.fst_module.parameters()
-                    ),
-                    "fst_projection_params": sum(
-                        p.numel() for p in unwrapped.fst_projection.parameters()
-                    ),
-                    "total_fst_params": sum(
-                        p.numel()
-                        for p in list(unwrapped.mss_encoder.parameters())
-                        + list(unwrapped.fst_module.parameters())
-                        + list(unwrapped.fst_projection.parameters())
-                    ),
-                }
-
-            self.accelerator.log({"fst_config": fst_config})
-            logger.info(f"FST Configuration: {fst_config}")
-
     def export_to_onnx(self) -> bool:
         """
         Export trained FST model to ONNX format as a single unified model.
@@ -1274,10 +1310,10 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                         # Prepare log dictionary
                         log_dict = {
                             "train_loss": avg_train_loss,
-                            "learning_rate": self.lr_scheduler.get_last_lr()[0],
-                            "epoch": epoch + step / len(self.train_dataloader),
-                            "global_step": self.global_step,
-                            "grad_norm": (
+                            "train/learning_rate": self.lr_scheduler.get_last_lr()[0],
+                            "train/epoch": epoch + step / len(self.train_dataloader),
+                            "train/global_step": self.global_step,
+                            "train/grad_norm": (
                                 grad_norm.item()
                                 if self.accelerator.sync_gradients
                                 else 0.0
@@ -1286,7 +1322,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
 
                         # Add individual losses
                         for loss_name, loss_val in loss_dict.items():
-                            log_dict[f"train/{loss_name}"] = loss_val
+                            log_dict[f"loss/{loss_name}"] = loss_val
 
                         # Log to tracker
                         self.accelerator.log(log_dict, step=self.global_step)

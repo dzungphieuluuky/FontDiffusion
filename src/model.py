@@ -336,9 +336,15 @@ class FontDiffuserWithFST(nn.Module):
         batch_size = noisy_latents.shape[0]
 
         # 1. Content encoding
-        content_img_feature, content_residual_features = self.content_encoder(
-            content_img
-        )
+        if self.use_skeleton_content:
+            content_img_feature, content_residual_features = self.content_encoder(
+                content_img, 
+                content_encoder_downsample_size
+            )
+        else:
+            content_img_feature, content_residual_features = self.content_encoder(
+                content_img
+            )
         content_residual_features.append(content_img_feature)
 
         style_content_feature, style_content_res_features = self.content_encoder(
