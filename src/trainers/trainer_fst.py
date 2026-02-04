@@ -138,16 +138,12 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                     mss_encoder, fst_module, fst_projection, original_style_projection
                 )
 
-            # Create Identity Mapping Loss module
-            self.identity_loss_module = build_identity_loss_module(args=self.args)
-            logger.info("✓ Created IdentityMappingLoss module")
-
-
             # Create FST model
             self.model = FontDiffuserWithFST(
                 unet=unet,
                 style_encoder=style_encoder,
                 content_encoder=content_encoder,
+
                 mss_encoder=mss_encoder,
                 fst_module=fst_module,
                 fst_projection=fst_projection,
@@ -322,7 +318,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             shuffle=True,
             batch_size=self.config.train_batch_size,
             collate_fn=CollateFNFST(),
-            num_workers=getattr(self.args, "num_workers", os.cpu_count() - 1),
+            num_workers=self.args.num_workers,
             pin_memory=True,
             persistent_workers=True,
         )
