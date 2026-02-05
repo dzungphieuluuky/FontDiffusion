@@ -199,7 +199,7 @@ class FontDiffuserWithFST(nn.Module):
     """
     FontDiffuser with FST enhancement and optional skeleton-distance transform.
     """
-    
+    @register_to_config
     def __init__(
         self,
         unet: UNet,

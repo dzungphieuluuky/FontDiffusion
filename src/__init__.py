@@ -20,15 +20,3 @@ from .builders.build import (
     get_unet_cross_attention_dim,
     build_identity_loss_module,
 )
-from .builders.build_optimized import (
-    build_unet_cached,
-    build_style_encoder_cached,
-    build_content_encoder_cached,
-    build_scr_cached,
-    build_unet_optimized,
-    build_style_encoder_optimized,
-    build_content_encoder_optimized,
-    build_scr_optimized,
-    build_ddpm_scheduler_optimized,
-    build_ddpm_scheduler_fast,
-)
