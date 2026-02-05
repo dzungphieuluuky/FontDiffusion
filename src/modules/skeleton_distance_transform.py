@@ -27,10 +27,20 @@ import cv2
 
 class SkeletonDistanceTransform(nn.Module):
     """
-    Transforms binary character images into skeleton-distance representations.
+    Transforms 3-channel RGB character images into skeleton-distance representations.
     
     This removes stroke thickness information while preserving topology,
     preventing the model from copying source image style characteristics.
+    
+    Input: (B, 3, H, W) - RGB images from dataset
+    Output: (B, 3, H, W) - Skeleton-distance fused to 3 channels
+    
+    Internal pipeline:
+    1. RGB → Grayscale (convert to single channel for processing)
+    2. Skeletonization (extract 1-pixel medial axis)
+    3. Distance Field (create smooth influence map)
+    4. Fusion (blend skeleton + distance to 1 channel)
+    5. RGB Expansion (replicate to 3 channels for encoder compatibility)
     """
     
     def __init__(
@@ -41,6 +51,7 @@ class SkeletonDistanceTransform(nn.Module):
         sigma: float = 3.0,
         output_mode: Literal["skeleton_only", "distance_only", "dual_channel"] = "dual_channel",
         normalize: bool = True,
+        fusion_method: Literal["concat", "add", "weighted"] = "weighted",
     ):
         """
         Args:
@@ -54,11 +65,15 @@ class SkeletonDistanceTransform(nn.Module):
                 - "hybrid": EDT with Gaussian smoothing
             max_distance: Maximum influence radius (pixels)
             sigma: Gaussian sigma for smoothing
-            output_mode: What to output
-                - "skeleton_only": Binary skeleton (1 channel)
-                - "distance_only": Distance map (1 channel)
-                - "dual_channel": Both (2 channels)
+            output_mode: What to output (internal)
+                - "skeleton_only": Binary skeleton (1 channel, then expand to 3)
+                - "distance_only": Distance map (1 channel, then expand to 3)
+                - "dual_channel": Both fused (2 channels, then expand to 3)
             normalize: Whether to normalize output to [0, 1]
+            fusion_method: How to fuse skeleton + distance to 1 channel
+                - "concat": Use learnable 1x1 conv
+                - "add": Simple addition
+                - "weighted": Weighted sum (0.3 skeleton + 0.7 distance)
         """
         super().__init__()
         
@@ -68,6 +83,16 @@ class SkeletonDistanceTransform(nn.Module):
         self.sigma = sigma
         self.output_mode = output_mode
         self.normalize = normalize
+        self.fusion_method = fusion_method
+        
+        # Fusion layer (converts 2 channels → 1 channel)
+        if fusion_method == "concat":
+            self.fusion_conv = nn.Conv2d(2, 1, kernel_size=1, bias=False)
+            nn.init.xavier_uniform_(self.fusion_conv.weight)
+        elif fusion_method == "weighted":
+            # Fixed weights (skeleton less important than distance field)
+            self.register_buffer('skeleton_weight', torch.tensor(0.3))
+            self.register_buffer('distance_weight', torch.tensor(0.7))
         
         # Register as buffer (non-trainable but moves with model)
         self.register_buffer('initialized', torch.tensor(True))
@@ -124,14 +149,10 @@ class SkeletonDistanceTransform(nn.Module):
         """
         if self.distance_method == "edt":
             # Euclidean Distance Transform
-            # Compute distance from each pixel to nearest skeleton pixel
             distance = distance_transform_edt(skeleton == 0)
-            
-            # Invert so skeleton has highest values
             distance = self.max_distance - distance
             distance = np.clip(distance, 0, self.max_distance)
             
-            # Normalize to [0, 1]
             if self.normalize:
                 distance = distance / self.max_distance
         
@@ -140,7 +161,6 @@ class SkeletonDistanceTransform(nn.Module):
             distance = gaussian(skeleton, sigma=self.sigma)
             
             if self.normalize:
-                # Normalize to [0, 1]
                 distance = distance / (distance.max() + 1e-8)
         
         elif self.distance_method == "hybrid":
@@ -148,8 +168,6 @@ class SkeletonDistanceTransform(nn.Module):
             distance = distance_transform_edt(skeleton == 0)
             distance = self.max_distance - distance
             distance = np.clip(distance, 0, self.max_distance)
-            
-            # Smooth with Gaussian
             distance = gaussian(distance, sigma=self.sigma)
             
             if self.normalize:
@@ -165,24 +183,28 @@ class SkeletonDistanceTransform(nn.Module):
         Process a single image through the skeleton-distance pipeline.
         
         Args:
-            image: (H, W) or (H, W, C) numpy array
+            image: (C, H, W) or (H, W) numpy array
             
         Returns:
-            output: Processed image (channels depend on output_mode)
+            output: (3, H, W) 3-channel RGB expanded output
         """
-        # Convert to grayscale if needed
+        # Convert to grayscale (handle 3-channel input)
         if len(image.shape) == 3:
-            image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+            # If (C, H, W), use first channel or convert RGB to grayscale
+            if image.shape[0] == 3:
+                # RGB to grayscale: 0.299*R + 0.587*G + 0.114*B
+                image = (0.299 * image[0] + 0.587 * image[1] + 0.114 * image[2])
+            else:
+                # Otherwise take first channel
+                image = image[0]
         
         # Ensure binary
         binary = (image > 0.5).astype(np.float32)
         
         # Handle empty images
         if binary.sum() == 0:
-            if self.output_mode == "dual_channel":
-                return np.zeros((2, *binary.shape), dtype=np.float32)
-            else:
-                return np.zeros_like(binary)
+            # Return 3-channel zeros
+            return np.zeros((3, *binary.shape), dtype=np.float32)
         
         # Step 1: Skeletonization
         skeleton = self.skeletonize_image(binary)
@@ -190,61 +212,78 @@ class SkeletonDistanceTransform(nn.Module):
         # Step 2: Distance field
         distance = self.create_distance_field(skeleton, binary.shape)
         
-        # Step 3: Output based on mode
-        if self.output_mode == "skeleton_only":
-            return skeleton
-        elif self.output_mode == "distance_only":
-            return distance
-        else:  # dual_channel
-            # Stack skeleton and distance as 2 channels
-            return np.stack([skeleton, distance], axis=0)
+        # Step 3: Fuse skeleton + distance to single channel
+        if self.fusion_method == "add":
+            fused = skeleton + distance
+            fused = np.clip(fused, 0, 1)
+        
+        elif self.fusion_method == "weighted":
+            fused = (0.3 * skeleton + 0.7 * distance)
+            fused = np.clip(fused, 0, 1)
+        
+        else:
+            # Default to addition for numpy processing
+            fused = skeleton + distance
+            fused = np.clip(fused, 0, 1)
+        
+        # Step 4: Expand to 3 channels by replication
+        rgb_output = np.stack([fused, fused, fused], axis=0)
+        
+        return rgb_output.astype(np.float32)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Transform batch of images.
+        Transform batch of 3-channel images.
         
         Args:
-            x: (B, C, H, W) - Input images (usually grayscale, C=1)
+            x: (B, 3, H, W) - Input RGB images from dataset
             
         Returns:
-            output: (B, C_out, H, W) where C_out depends on output_mode
-                - skeleton_only: C_out = 1
-                - distance_only: C_out = 1
-                - dual_channel: C_out = 2
+            output: (B, 3, H, W) - Skeleton-distance fused and expanded to RGB
+                All 3 channels contain the same fused skeleton-distance information
         """
         device = x.device
         batch_size = x.shape[0]
+        
+        # Validate input
+        if x.shape[1] != 3:
+            raise ValueError(
+                f"SkeletonDistanceTransform expects 3-channel input, got {x.shape[1]} channels. "
+                f"Input shape: {x.shape}"
+            )
         
         # Process each image in batch
         outputs = []
         
         for i in range(batch_size):
-            # Convert to numpy
+            # Convert to numpy (C, H, W)
             img = x[i].cpu().numpy()
             
-            # If input is multi-channel, use first channel
-            if img.shape[0] > 1:
-                img = img[0]
-            else:
-                img = img.squeeze(0)
-            
-            # Process
-            processed = self.process_single_image(img)
-            
-            # Ensure correct shape
-            if len(processed.shape) == 2:
-                processed = processed[np.newaxis, ...]  # Add channel dim
+            # Process through skeleton-distance pipeline
+            processed = self.process_single_image(img)  # Returns (3, H, W)
             
             outputs.append(processed)
         
-        # Stack batch
+        # Stack batch: (B, 3, H, W)
         output = np.stack(outputs, axis=0)
         
-        # Convert back to tensor
+        # Convert back to tensor on same device
         output = torch.from_numpy(output).to(device)
         
         return output
-
+    
+    def __repr__(self) -> str:
+        """String representation for debugging."""
+        return (
+            f"SkeletonDistanceTransform(\n"
+            f"  method={self.method},\n"
+            f"  distance_method={self.distance_method},\n"
+            f"  fusion_method={self.fusion_method},\n"
+            f"  input: (B, 3, H, W) RGB,\n"
+            f"  output: (B, 3, H, W) skeleton-distance fused,\n"
+            f"  internal: grayscale → skeleton → distance → fused → expand\n"
+            f")"
+        )
 
 class AdaptiveSkeletonDistanceTransform(SkeletonDistanceTransform):
     """
