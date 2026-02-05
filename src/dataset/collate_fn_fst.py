@@ -111,16 +111,22 @@ class CollateFN(object):
             for item in batch:
                 pairs = item.get("identity_pairs", [])
                 if pairs:
-                    sources = torch.stack([p[0] for p in pairs])  # (k, C, H, W)
-                    targets = torch.stack([p[1] for p in pairs])  # (k, C, H, W)
+                    # Each pair is (source_tensor, target_tensor) with shape (C, H, W)
+                    # Stack pairs for this sample: (k, C, H, W)
+                    sources = torch.stack([p[0] for p in pairs])
+                    targets = torch.stack([p[1] for p in pairs])
                     identity_sources.append(sources)
                     identity_targets.append(targets)
             
             if identity_sources:
-                result["identity_pair_sources"] = torch.stack(identity_sources)
-                result["identity_pair_targets"] = torch.stack(identity_targets)
-                result["num_identity_pairs_total"] = len(identity_sources) * identity_sources[0].shape[0]
-        
+                # FIXED: Concatenate instead of stack to avoid extra dimension
+                # sources: list of (k, C, H, W) → concatenate to (B*k, C, H, W)
+                result["identity_pair_sources"] = torch.cat(identity_sources, dim=0)
+                result["identity_pair_targets"] = torch.cat(identity_targets, dim=0)
+                
+                # Track total number of identity pairs
+                result["num_identity_pairs_total"] = result["identity_pair_sources"].shape[0]
+                        
         # Handle SCR negative samples
         if "neg_images" in batch[0]:
             neg_image_tensors = [item["neg_images"] for item in batch]

@@ -1192,9 +1192,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                     input_names=input_names,
                     output_names=output_names,
                     opset_version=self.args.onnx_opset_version,
-                    do_constant_folding=True,
-                    verbose=False,
-                    use_external_data_format=False,
+                    verbose=True,
                     dynamic_axes={
                         "noisy_latents": {0: "batch_size"},
                         "content_img": {0: "batch_size"},
