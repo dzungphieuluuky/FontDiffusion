@@ -373,9 +373,9 @@ class AdaptiveSkeletonDistanceTransform(SkeletonDistanceTransform):
 
 class DualChannelContentEncoder(nn.Module):
     """
-    Modified content encoder that accepts BOTH 1-channel and 2-channel input.
+    Modified content encoder that accepts 3-channel RGB or 2-channel skeleton-distance input.
     
-    - If input is 1-channel (normal mode): Expand to 3 channels (RGB replication)
+    - If input is 3-channel (normal mode): Pass through directly to encoder
     - If input is 2-channel (skeleton mode): Fuse channels, then expand to 3 channels
     
     This ensures ContentEncoder always receives 3-channel input as expected.
@@ -442,8 +442,8 @@ class DualChannelContentEncoder(nn.Module):
     ) -> tuple[torch.Tensor, list[torch.Tensor]]:
         """
         Args:
-            content_input: (B, C, H, W) where C can be 1 or 2
-                - C=1: Normal content image (grayscale)
+            content_input: (B, C, H, W) where C can be 2 or 3
+                - C=3: Normal content image (RGB from dataset)
                 - C=2: Skeleton-distance transformed [skeleton, distance]
             
         Returns:
@@ -453,11 +453,10 @@ class DualChannelContentEncoder(nn.Module):
         """
         num_channels = content_input.shape[1]
         
-        # Handle 1-channel input (normal mode - no skeleton transform)
-        if num_channels == 1:
-            # Expand grayscale to RGB by replication
-            rgb_input = self._expand_to_rgb(content_input)  # (B, 3, H, W)
-            return self.original_encoder(rgb_input)
+        # Handle 3-channel input (normal mode - RGB image from dataset)
+        if num_channels == 3:
+            # Pass through directly to original encoder
+            return self.original_encoder(content_input)
         
         # Handle 2-channel input (skeleton-distance mode)
         elif num_channels == 2:
@@ -491,8 +490,9 @@ class DualChannelContentEncoder(nn.Module):
         
         else:
             raise ValueError(
-                f"DualChannelContentEncoder expects 1 or 2 channels, got {num_channels}. "
-                f"Input shape: {content_input.shape}"
+                f"DualChannelContentEncoder expects 2 or 3 channels, got {num_channels}. "
+                f"Input shape: {content_input.shape}. "
+                f"Expected: (B, 2, H, W) for skeleton-distance or (B, 3, H, W) for RGB."
             )
     
     def __repr__(self) -> str:
@@ -500,11 +500,13 @@ class DualChannelContentEncoder(nn.Module):
         return (
             f"DualChannelContentEncoder(\n"
             f"  fusion_method={self.fusion_method},\n"
-            f"  accepts: 1-channel (normal) or 2-channel (skeleton-distance),\n"
-            f"  expands to 3-channel RGB before passing to original_encoder,\n"
+            f"  accepts: 3-channel (RGB) or 2-channel (skeleton-distance),\n"
+            f"  outputs to original_encoder expecting 3-channel input,\n"
             f"  original_encoder={self.original_encoder.__class__.__name__}\n"
             f")"
         )
+
+
 # ============================================================================
 # Utility Functions
 # ============================================================================
