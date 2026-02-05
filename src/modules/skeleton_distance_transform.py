@@ -336,11 +336,10 @@ class DualChannelContentEncoder(nn.Module):
     """
     Modified content encoder that accepts BOTH 1-channel and 2-channel input.
     
-    - If input is 1-channel (normal mode): Pass through directly
-    - If input is 2-channel (skeleton mode): Fuse channels then pass through
+    - If input is 1-channel (normal mode): Expand to 3 channels (RGB replication)
+    - If input is 2-channel (skeleton mode): Fuse channels, then expand to 3 channels
     
-    This wrapper handles the channel conversion from 2 (skeleton + distance)
-    to the expected input channels of the original content encoder.
+    This ensures ContentEncoder always receives 3-channel input as expected.
     """
     
     def __init__(
@@ -351,7 +350,7 @@ class DualChannelContentEncoder(nn.Module):
     ):
         """
         Args:
-            original_encoder: Original ContentEncoder module
+            original_encoder: Original ContentEncoder module (expects 3 channels)
             fusion_method: How to combine skeleton and distance channels
                 - "concat": Concatenate and use 1x1 conv to reduce to 1 channel
                 - "add": Simple addition
@@ -362,7 +361,8 @@ class DualChannelContentEncoder(nn.Module):
         
         self.original_encoder = original_encoder
         self.fusion_method = fusion_method
-        self.fusion_conv : nn.Module = nn.Linear(1,1)  # type: ignore
+        self.fusion_conv: nn.Module = nn.Linear(1, 1)  # type: ignore
+        
         if fusion_method == "concat":
             # 1x1 conv to reduce 2 channels to 1
             self.fusion_conv = nn.Conv2d(2, 1, kernel_size=1, bias=False)
@@ -377,6 +377,25 @@ class DualChannelContentEncoder(nn.Module):
                 # Fixed weights (skeleton less important than distance field)
                 self.register_buffer('skeleton_weight', torch.tensor(0.3))
                 self.register_buffer('distance_weight', torch.tensor(0.7))
+    
+    def _expand_to_rgb(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Expand single-channel tensor to 3-channel RGB by replication.
+        
+        Args:
+            x: (B, 1, H, W) single-channel tensor
+            
+        Returns:
+            (B, 3, H, W) RGB tensor
+        """
+        if x.shape[1] == 1:
+            return x.repeat(1, 3, 1, 1)
+        elif x.shape[1] == 3:
+            return x
+        else:
+            raise ValueError(
+                f"Expected 1 or 3 channels, got {x.shape[1]} channels"
+            )
     
     def forward(
         self, 
@@ -397,8 +416,9 @@ class DualChannelContentEncoder(nn.Module):
         
         # Handle 1-channel input (normal mode - no skeleton transform)
         if num_channels == 1:
-            # Pass through directly to original encoder
-            return self.original_encoder(content_input)
+            # Expand grayscale to RGB by replication
+            rgb_input = self._expand_to_rgb(content_input)  # (B, 3, H, W)
+            return self.original_encoder(rgb_input)
         
         # Handle 2-channel input (skeleton-distance mode)
         elif num_channels == 2:
@@ -419,13 +439,16 @@ class DualChannelContentEncoder(nn.Module):
                 fused = (
                     self.skeleton_weight * skeleton +
                     self.distance_weight * distance
-                )
+                )  # (B, 1, H, W)
             
             else:
                 raise ValueError(f"Unknown fusion method: {self.fusion_method}")
             
-            # Pass fused input through original encoder
-            return self.original_encoder(fused)
+            # Expand fused (1-channel) to RGB
+            rgb_input = self._expand_to_rgb(fused)  # (B, 3, H, W)
+            
+            # Pass through original encoder
+            return self.original_encoder(rgb_input)
         
         else:
             raise ValueError(
@@ -439,10 +462,10 @@ class DualChannelContentEncoder(nn.Module):
             f"DualChannelContentEncoder(\n"
             f"  fusion_method={self.fusion_method},\n"
             f"  accepts: 1-channel (normal) or 2-channel (skeleton-distance),\n"
+            f"  expands to 3-channel RGB before passing to original_encoder,\n"
             f"  original_encoder={self.original_encoder.__class__.__name__}\n"
             f")"
         )
-
 # ============================================================================
 # Utility Functions
 # ============================================================================
