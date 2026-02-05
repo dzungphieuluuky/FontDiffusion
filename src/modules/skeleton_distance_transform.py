@@ -284,7 +284,7 @@ class SkeletonDistanceTransform(nn.Module):
             f"  internal: grayscale → skeleton → distance → fused → expand\n"
             f")"
         )
-
+    
 class AdaptiveSkeletonDistanceTransform(SkeletonDistanceTransform):
     """
     Adaptive version that adjusts parameters based on stroke thickness.
