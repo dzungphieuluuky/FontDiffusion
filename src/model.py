@@ -257,14 +257,14 @@ class FontDiffuserWithFST(ModelMixin, ConfigMixin):
         
         # Log component parameters
         components = {
-            "U-Net": self.config.diffusion_unet,
-            "Style Encoder": self.config.style_encoder,
+            "U-Net": self.diffusion_unet,
+            "Style Encoder": self.style_encoder,
             "Content Encoder (wrapped)" if self.use_skeleton_content else "Content Encoder": 
-                self.config.content_encoder if not self.use_skeleton_content else self.config.content_encoder.original_encoder,
-            "MSS Encoder": self.config.mss_encoder,
-            "FST Module": self.config.fst_module,
-            "FST Projection": self.config.fst_projection,
-            "Original Style Projection": self.config.original_style_projection,
+                self.content_encoder if not self.use_skeleton_content else self.content_encoder.original_encoder,
+            "MSS Encoder": self.mss_encoder,
+            "FST Module": self.fst_module,
+            "FST Projection": self.fst_projection,
+            "Original Style Projection": self.original_style_projection,
         }
         
         total_params = 0
