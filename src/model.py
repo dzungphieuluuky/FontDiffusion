@@ -195,10 +195,11 @@ class FontDiffuserModelDPM(ModelMixin, ConfigMixin):
         return noise_pred
 
 
-class FontDiffuserWithFST(nn.Module):
+class FontDiffuserWithFST(ModelMixin, ConfigMixin):
     """
     FontDiffuser with FST enhancement and optional skeleton-distance transform.
     """
+    @register_to_config
     def __init__(
         self,
         unet: UNet,
@@ -358,9 +359,9 @@ class FontDiffuserWithFST(nn.Module):
         batch_size = noisy_latents.shape[0]
         
         # Apply skeleton-distance transform if enabled
-        if self.use_skeleton_content:
+        if self.config.use_skeleton_content:
             # content_img is (B, C, H, W), skeleton transform expects (B, 3, H, W)
-            content_image_transformed = self.skeleton_transform(content_img)  # (B, 3, H, W)
+            content_image_transformed = self.config.skeleton_transform(content_img)  # (B, 3, H, W)
             logger.debug(
                 f"Applied skeleton transform: "
                 f"input shape {content_img.shape} → "
@@ -370,33 +371,33 @@ class FontDiffuserWithFST(nn.Module):
             content_image_transformed = content_img
 
         # 1. Content encoding
-        content_img_feature, content_residual_features = self.content_encoder(
+        content_img_feature, content_residual_features = self.config.content_encoder(
             content_image_transformed
         )
         content_residual_features.append(content_img_feature)
 
-        style_content_feature, style_content_res_features = self.content_encoder(
+        style_content_feature, style_content_res_features = self.config.content_encoder(
             style_target_img
         )
         style_content_res_features.append(style_content_feature)
 
         # 2. Original style encoding
-        orig_style_feat, orig_style_vec, orig_style_residuals = self.style_encoder(
+        orig_style_feat, orig_style_vec, orig_style_residuals = self.config.style_encoder(
             style_target_img
         )
 
         # 3. Multi-scale style encoding
-        source_style_features = self.mss_encoder(style_source_img)
-        target_style_features = self.mss_encoder(style_target_img)
+        source_style_features = self.config.mss_encoder(style_source_img)
+        target_style_features = self.config.mss_encoder(style_target_img)
 
         # 4. Font style transformation
-        transformation_features = self.fst_module(
+        transformation_features = self.config.fst_module(
             source_style_features, target_style_features
         )
 
         # 5. Prepare U-Net conditions
-        fst_condition = self.fst_projection(transformation_features)
-        orig_style_projected = self.original_style_projection(orig_style_vec)
+        fst_condition = self.config.fst_projection(transformation_features)
+        orig_style_projected = self.config.original_style_projection(orig_style_vec)
         orig_style_projected = orig_style_projected.unsqueeze(1)
 
         # Combine FST and original style features
@@ -413,7 +414,7 @@ class FontDiffuserWithFST(nn.Module):
         ]
 
         # 7. Diffusion U-Net forward
-        noise_pred, offset_out_sum = self.diffusion_unet(
+        noise_pred, offset_out_sum = self.config.diffusion_unet(
             noisy_latents,
             timestep,
             encoder_hidden_states=encoder_hidden_states,
@@ -453,11 +454,11 @@ class FontDiffuserWithFST(nn.Module):
             transformation_features: (B, N, D) - transformation matrix/features
         """
         # Extract multi-scale features from both images
-        source_style_features = self.mss_encoder(style_source_img)
-        target_style_features = self.mss_encoder(style_target_img)
+        source_style_features = self.config.mss_encoder(style_source_img)
+        target_style_features = self.config.mss_encoder(style_target_img)
 
         # Apply FST module to get transformation
-        transformation_features = self.fst_module(
+        transformation_features = self.config.fst_module(
             source_style_features, target_style_features
         )
 
@@ -491,11 +492,11 @@ class FontDiffuserWithFST(nn.Module):
         source_flat = consistency_source_images.view(-1, C, H, W)
         target_flat = consistency_target_images.view(-1, C, H, W)
 
-        source_features = self.mss_encoder(source_flat)
-        target_features = self.mss_encoder(target_flat)
+        source_features = self.config.mss_encoder(source_flat)
+        target_features = self.config.mss_encoder(target_flat)
 
         # Get transformation features
-        transformation_features = self.fst_module(source_features, target_features)
+        transformation_features = self.config.fst_module(source_features, target_features)
 
         # Reshape: (B*k, N, D) → (B, k, N, D)
         T = transformation_features.view(
@@ -572,11 +573,11 @@ class FontDiffuserWithFST(nn.Module):
             metrics: Dict with diagnostics
         """
         # Extract multi-scale features from both
-        source_style_features = self.mss_encoder(identity_pair_sources)
-        target_style_features = self.mss_encoder(identity_pair_targets)
+        source_style_features = self.config.mss_encoder(identity_pair_sources)
+        target_style_features = self.config.mss_encoder(identity_pair_targets)
 
         # Apply FST to get transformation
-        transformation_features = self.fst_module(
+        transformation_features = self.config.fst_module(
             source_style_features,
             target_style_features,
         )  # (B, N_L + H*W, D)
@@ -646,17 +647,17 @@ class FontDiffuserWithFST(nn.Module):
             metrics: Dict with diagnostics from IdentityMappingLoss
         """
         # Extract multi-scale features from both
-        source_style_features = self.mss_encoder(identity_pair_sources)
-        target_style_features = self.mss_encoder(identity_pair_targets)
+        source_style_features = self.config.mss_encoder(identity_pair_sources)
+        target_style_features = self.config.mss_encoder(identity_pair_targets)
 
         # Apply FST to get transformation features
-        transformation_features = self.fst_module(
+        transformation_features = self.config.fst_module(
             source_style_features,
             target_style_features,
         )  # (B, N_L + H*W, D)
 
         # Extract learnable query portion only
-        query_features = transformation_features[:, : self.fst_num_queries, :]
+        query_features = transformation_features[:, : self.config.fst_num_queries, :]
 
         # Use IdentityMappingLoss module
         loss, metrics = identity_loss_module(query_features, query_features)
@@ -796,7 +797,7 @@ class FontDiffuserModelDPM(ModelMixin, ConfigMixin):
 
 class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
     """
-    DPM Forward function for FontDiffuser with FST enhancement.
+    DPM Forward function for FontDiffuser with FST enhancement and optional skeleton-distance transform.
     All modules are passed in (not created internally).
     """
 
@@ -810,6 +811,9 @@ class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
         fst_module: FontStyleTransformationModule,
         fst_projection: nn.Linear,
         original_style_projection: nn.Linear,
+        use_skeleton_content: bool = False,
+        skeleton_fusion_method: str = "concat",
+        skeleton_config: Optional[dict] = None,
     ):
         """
         Initialize FontDiffuserModelDPMWithFST.
@@ -822,13 +826,55 @@ class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
             fst_module: Pre-built Font Style Transformation module
             fst_projection: Pre-built projection layer (FST → cross-attn)
             original_style_projection: Pre-built projection layer (style vec → cross-attn)
+            use_skeleton_content: Whether content images are skeleton-transformed
+            skeleton_fusion_method: How to fuse skeleton channels ("concat", "add", "weighted")
+            skeleton_config: Configuration for skeleton transform
         """
         super().__init__()
+
+        # Store skeleton configuration
+        self.use_skeleton_content = use_skeleton_content
+
+        if self.use_skeleton_content:
+            # Default configuration
+            default_config = {
+                "method": "medial_axis",
+                "distance_method": "hybrid",
+                "max_distance": 10.0,
+                "sigma": 3.0,
+                "output_mode": "dual_channel",
+                "normalize": True,
+            }
+
+            # Update with user config
+            if skeleton_config:
+                default_config.update(skeleton_config)
+
+            # Create transform
+            self.skeleton_transform = SkeletonDistanceTransform(**default_config)
+            logger.info(f"✓ Skeleton transform enabled: {default_config}")
+        else:
+            self.skeleton_transform = None
+            logger.info("ℹ️ Skeleton transform disabled")
+
+        # Wrap content encoder if using skeleton transform
+        if use_skeleton_content:
+            # Wrap the original content encoder to handle 2-channel input
+            self.content_encoder = DualChannelContentEncoder(
+                original_encoder=content_encoder,
+                fusion_method=skeleton_fusion_method,
+                learnable_weights=True,  # Make fusion weights learnable
+            )
+            logger.info(
+                f"✓ Content encoder wrapped for skeleton input "
+                f"(fusion: {skeleton_fusion_method})"
+            )
+        else:
+            self.content_encoder = content_encoder
 
         # Assign all modules (no internal creation)
         self.unet: UNet = unet
         self.style_encoder: StyleEncoder = style_encoder
-        self.content_encoder: ContentEncoder = content_encoder
         self.mss_encoder: MultiScaleStyleEncoder = mss_encoder
         self.fst_module: FontStyleTransformationModule = fst_module
         self.fst_projection: nn.Linear = fst_projection
@@ -840,8 +886,27 @@ class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
         logger.info("FontDiffuserModelDPMWithFST Model Architecture")
         logger.info("=" * 80)
 
+        # Log skeleton configuration
+        if self.use_skeleton_content:
+            logger.info("✓ Skeleton-Distance Transform: ENABLED")
+            logger.info(f"  Fusion method: {self.content_encoder.fusion_method}")
+            if hasattr(self.content_encoder, "fusion_conv"):
+                fusion_params = sum(
+                    p.numel() for p in self.content_encoder.fusion_conv.parameters()
+                )
+                logger.info(f"  Fusion parameters: {fusion_params:,}")
+        else:
+            logger.info("ℹ️ Skeleton-Distance Transform: DISABLED")
+
+        # Get actual content encoder for parameter counting
+        content_encoder_for_counting = (
+            self.content_encoder.original_encoder
+            if self.use_skeleton_content
+            else self.content_encoder
+        )
+
         components = [
-            ("Content Encoder", self.config.content_encoder),
+            ("Content Encoder", content_encoder_for_counting),
             ("Style Encoder", self.config.style_encoder),
             ("Diffusion U-Net", self.config.unet),
             ("Multi-Scale Style Encoder (MSSE)", self.config.mss_encoder),
@@ -865,9 +930,22 @@ class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
             frozen_marker = " [FROZEN]" if trainable == 0 and total > 0 else ""
             logger.info(f"{name:<45} {total:>15,} {trainable:>15,}{frozen_marker}")
 
+        # Add skeleton fusion layer if enabled
+        if self.use_skeleton_content and hasattr(self.content_encoder, "fusion_conv"):
+            fusion_total, fusion_trainable = count_parameters(
+                self.content_encoder.fusion_conv
+            )
+            total_all += fusion_total
+            trainable_all += fusion_trainable
+            logger.info(
+                f"{'Skeleton Fusion Layer':<45} {fusion_total:>15,} {fusion_trainable:>15,}"
+            )
+
         logger.info("-" * 80)
         logger.info(f"{'TOTAL':<45} {total_all:>15,} {trainable_all:>15,}")
-        logger.info(f"{'Non-trainable':<45} {'':<15} {total_all - trainable_all:>15,}")
+        logger.info(
+            f"{'Non-trainable':<45} {'':<15} {total_all - trainable_all:>15,}"
+        )
         logger.info("=" * 80 + "\n")
 
     def forward(
@@ -879,7 +957,7 @@ class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
         version: str = None,
     ) -> torch.Tensor:
         """
-        DPM-compatible forward pass with FST enhancement.
+        DPM-compatible forward pass with FST enhancement and optional skeleton transform.
 
         Args:
             x_t: (B, 4, H, W) - noisy latent representations
@@ -893,6 +971,18 @@ class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
         """
         content_images = cond[0]
         style_images = cond[1]
+
+        # Apply skeleton-distance transform if enabled
+        if self.use_skeleton_content:
+            # content_images is (B, C, H, W), skeleton transform expects (B, 3, H, W)
+            content_images_transformed = self.skeleton_transform(content_images)
+            logger.debug(
+                f"Applied skeleton transform: "
+                f"input shape {content_images.shape} → "
+                f"output shape {content_images_transformed.shape}"
+            )
+        else:
+            content_images_transformed = content_images
 
         # 1. Original style encoding
         style_img_feature, style_vec, style_residual_features = (
@@ -918,12 +1008,12 @@ class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
         )
 
         # 5. Content encoding
-        content_img_feature, content_residual_features = self.config.content_encoder(
-            content_images
+        content_img_feature, content_residual_features = self.content_encoder(
+            content_images_transformed
         )
         content_residual_features.append(content_img_feature)
 
-        style_content_feature, style_content_res_features = self.config.content_encoder(
+        style_content_feature, style_content_res_features = self.content_encoder(
             style_images
         )
         style_content_res_features.append(style_content_feature)

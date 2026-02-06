@@ -117,6 +117,7 @@ FontDiffuser is a modular toolkit for font style transfer and generation using d
 - Write clear, concise docstrings for all new functions and classes.
 - Always implement saving checkpoints and loading checkpoints thoroughly for any new model components.
 - When providing code, ensure the indentation uses 4 spaces per level and share the same indentation as that code in the current codebase.
+- Ensure the implementation for the DPM class for inference is consistent with the non-DPM model class that use for training.
 
 ---
 For further details, consult the README or open an issue for project-specific questions.
