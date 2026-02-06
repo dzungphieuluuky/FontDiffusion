@@ -231,7 +231,7 @@ def get_style_transform(style_image_size: tuple[int, int]) -> transforms.Compose
 def load_fontdiffuser_pipeline(
     args: Namespace, use_fst: bool = False
 ) -> FontDiffuserDPMPipeline:
-    """Load Font Diffuser pipeline with optimizations"""
+    """Load Font Diffuser pipeline with optimizations and skeleton transform support"""
     from src.builders.build import load_state_dict_auto, load_components_from_ckpt
 
     logger.info(f"Loading FontDiffuser{'WithFST' if use_fst else ''} pipeline...")
@@ -256,12 +256,52 @@ def load_fontdiffuser_pipeline(
     )
     style_encoder.load_state_dict(load_state_dict_auto(style_encoder_ckpt_path))
 
+    # Load content encoder with skeleton transform compatibility
     content_encoder_ckpt_path = (
         f"{args.ckpt_dir}/content_encoder.safetensors"
         if os.path.exists(f"{args.ckpt_dir}/content_encoder.safetensors")
         else f"{args.ckpt_dir}/content_encoder.pth"
     )
-    content_encoder.load_state_dict(load_state_dict_auto(content_encoder_ckpt_path))
+    
+    content_encoder_state = load_state_dict_auto(content_encoder_ckpt_path)
+    
+    # Check if checkpoint is from skeleton-wrapped encoder
+    is_wrapped_checkpoint = any(
+        k.startswith("original_encoder.") or k.startswith("fusion_conv.")
+        for k in content_encoder_state.keys()
+    )
+    
+    if is_wrapped_checkpoint:
+        # Use wrapped encoder if checkpoint was saved as wrapped
+        if use_fst and getattr(args, "use_skeleton_content", False):
+            from src.modules.skeleton_distance_transform import DualChannelContentEncoder
+            
+            content_encoder = DualChannelContentEncoder(
+                original_encoder=content_encoder,
+                fusion_method=getattr(args, "skeleton_fusion_method", "concat"),
+                learnable_weights=True,
+            )
+            content_encoder.load_state_dict(content_encoder_state)
+            logger.info("✓ Loaded skeleton-wrapped content encoder")
+        else:
+            # Extract original encoder keys from wrapped checkpoint
+            original_state = {}
+            for k, v in content_encoder_state.items():
+                if k.startswith("original_encoder."):
+                    new_k = k.replace("original_encoder.", "")
+                    original_state[new_k] = v
+            
+            if original_state:
+                content_encoder.load_state_dict(original_state)
+                logger.info("✓ Extracted and loaded original encoder from wrapped checkpoint")
+            else:
+                raise RuntimeError(
+                    "Could not extract original encoder state from wrapped checkpoint"
+                )
+    else:
+        # Plain checkpoint - load normally
+        content_encoder.load_state_dict(content_encoder_state)
+        logger.info("✓ Loaded plain content encoder")
 
     logger.info("✓ Loaded base model components (unet, style_encoder, content_encoder)")
 
@@ -386,7 +426,6 @@ def load_fontdiffuser_pipeline(
     logger.info("✓ Created DPM-Solver pipeline")
 
     return pipe
-
 
 def sampling_batch(
     args: Namespace,
