@@ -716,9 +716,9 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             model_output = self.model(
                 noisy_latents=noisy_target_images,
                 timestep=timesteps,
-                content_img=content_images,
-                style_source_img=style_source_images,
-                style_target_img=style_images,
+                content_images=content_images,
+                style_source_images=style_source_images,
+                style_target_images=style_images,
                 content_encoder_downsample_size=self.args.content_encoder_downsample_size,
             )
             noise_pred = model_output["noise_pred"]
@@ -1106,17 +1106,17 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             dummy_inputs = (
                 torch.randn(batch_size, 4, 12, 12, device=device),  # noisy_latents
                 torch.tensor([0], dtype=torch.long, device=device),  # timestep
-                torch.randn(batch_size, 1, 96, 96, device=device),  # content_img
-                torch.randn(batch_size, 1, 96, 96, device=device),  # style_source_img
-                torch.randn(batch_size, 1, 96, 96, device=device),  # style_target_img
+                torch.randn(batch_size, 1, 96, 96, device=device),  # content_images
+                torch.randn(batch_size, 1, 96, 96, device=device),  # style_source_images
+                torch.randn(batch_size, 1, 96, 96, device=device),  # style_target_images
             )
 
             input_names = [
                 "noisy_latents",
                 "timestep",
-                "content_img",
-                "style_source_img",
-                "style_target_img",
+                "content_images",
+                "style_source_images",
+                "style_target_images",
             ]
 
             output_names = [
@@ -1149,16 +1149,16 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                     self,
                     noisy_latents,
                     timestep,
-                    content_img,
-                    style_source_img,
-                    style_target_img,
+                    content_images,
+                    style_source_images,
+                    style_target_images,
                 ):
                     output_dict = self.model(
                         noisy_latents=noisy_latents,
                         timestep=timestep,
-                        content_img=content_img,
-                        style_source_img=style_source_img,
-                        style_target_img=style_target_img,
+                        content_images=content_images,
+                        style_source_images=style_source_images,
+                        style_target_images=style_target_images,
                         content_encoder_downsample_size=self.model.model.content_encoder_downsample_size
                         if hasattr(self.model, "model")
                         else 4,
@@ -1193,9 +1193,9 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                     verbose=True,
                     dynamic_axes={
                         "noisy_latents": {0: "batch_size"},
-                        "content_img": {0: "batch_size"},
-                        "style_source_img": {0: "batch_size"},
-                        "style_target_img": {0: "batch_size"},
+                        "content_images": {0: "batch_size"},
+                        "style_source_images": {0: "batch_size"},
+                        "style_target_images": {0: "batch_size"},
                         "timestep": {0: "batch_size"},
                         "noise_pred": {0: "batch_size"},
                         "offset_out_sum": {0: "batch_size"},
