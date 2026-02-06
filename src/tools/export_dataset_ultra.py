@@ -201,7 +201,7 @@ def _process_batch_export(batch: dict, output_dir: str) -> dict:
     return results
 
 
-class UltraFastDatasetExporter:
+class DatasetExporter:
     def __init__(self, config: ExportConfig):
         self.config = config
         self.output_dir = config.output_dir
@@ -370,7 +370,7 @@ def export_dataset(
         num_workers=num_workers,
         batch_size=batch_size,
     )
-    exporter = UltraFastDatasetExporter(config)
+    exporter = DatasetExporter(config)
     return exporter.export()
 
 

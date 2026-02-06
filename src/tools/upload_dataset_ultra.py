@@ -56,7 +56,7 @@ class DatasetConfig:
             self.style_images_dir = Path(self.style_images_dir)
 
 
-class UltraFastDatasetBuilder:
+class DatasetBuilder:
     REQUIRED_DIRS = ["ContentImage", "TargetImage"]
     CHECKPOINT_FILE = "results_checkpoint.json"
 
@@ -325,13 +325,13 @@ class UltraFastDatasetBuilder:
                 s_new_width = int(s_width * (resize_height / s_height))
                 t_new_width = int(t_width * (resize_height / t_height))
 
-                content_resized = UltraFastDatasetBuilder._resize_image_opencv(
+                content_resized = DatasetBuilder._resize_image_opencv(
                     content_img, c_new_width, resize_height
                 )
-                style_resized = UltraFastDatasetBuilder._resize_image_opencv(
+                style_resized = DatasetBuilder._resize_image_opencv(
                     style_img, s_new_width, resize_height
                 )
-                target_resized = UltraFastDatasetBuilder._resize_image_opencv(
+                target_resized = DatasetBuilder._resize_image_opencv(
                     target_img, t_new_width, resize_height
                 )
 
@@ -350,28 +350,28 @@ class UltraFastDatasetBuilder:
                 results["font"].append(font)
                 results["content_image"].append(
                     {
-                        "bytes": UltraFastDatasetBuilder._encode_image_to_bytes(
+                        "bytes": DatasetBuilder._encode_image_to_bytes(
                             content_img, jpeg_quality
                         )
                     }
                 )
                 results["style_image"].append(
                     {
-                        "bytes": UltraFastDatasetBuilder._encode_image_to_bytes(
+                        "bytes": DatasetBuilder._encode_image_to_bytes(
                             style_img, jpeg_quality
                         )
                     }
                 )
                 results["target_image"].append(
                     {
-                        "bytes": UltraFastDatasetBuilder._encode_image_to_bytes(
+                        "bytes": DatasetBuilder._encode_image_to_bytes(
                             target_img, jpeg_quality
                         )
                     }
                 )
                 results["comparison_image"].append(
                     {
-                        "bytes": UltraFastDatasetBuilder._encode_image_to_bytes(
+                        "bytes": DatasetBuilder._encode_image_to_bytes(
                             comparison, jpeg_quality
                         )
                     }
@@ -495,7 +495,7 @@ def create_dataset_ultra(
         jpeg_quality=jpeg_quality,
         num_shards=num_shards,
     )
-    builder = UltraFastDatasetBuilder(config)
+    builder = DatasetBuilder(config)
     dataset = builder.build()
     if local_save_path:
         builder.save_local(dataset, Path(local_save_path))
