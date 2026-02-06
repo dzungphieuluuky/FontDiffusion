@@ -673,7 +673,7 @@ def get_parser():
     skeleton_group.add_argument(
         "--skeleton_max_distance",
         type=float,
-        default=10.0,
+        default=12.0,
         help="Maximum influence radius for skeleton distance field (in pixels). "
             "Smaller values = tighter guidance, larger values = more diffuse influence.",
     )
@@ -681,7 +681,7 @@ def get_parser():
     skeleton_group.add_argument(
         "--skeleton_sigma",
         type=float,
-        default=3.0,
+        default=1.5,
         help="Gaussian sigma for distance field smoothing (used in 'gaussian' and 'hybrid' methods)",
     )
 
