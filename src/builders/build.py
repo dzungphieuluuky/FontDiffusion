@@ -230,14 +230,16 @@ def build_skeleton_transform(args: argparse.Namespace) -> SkeletonDistanceTransf
 
 
 def build_dual_channel_content_encoder(
-    content_encoder: ContentEncoder, fusion_method: str = "concat"
+    args: argparse.Namespace,
 ) -> DualChannelContentEncoder:
     """Build dual-channel content encoder for skeleton transform."""
-    print(f"Building Dual-Channel Content Encoder (fusion method: {fusion_method})...")
+    print(f"Building Dual-Channel Content Encoder (fusion method: {args.skeleton_fusion_method})...")
+    content_encoder = build_content_encoder(args)
+    fusion_method = getattr(args, "skeleton_fusion_method", "concat")
     dual_channel_content_encoder = DualChannelContentEncoder(
         original_encoder=content_encoder,
         fusion_method=fusion_method,
-        learnable_weights=True,
+        learnable_weights=False,
     )
     print("✓ Dual-Channel Content Encoder built successfully.")
     return dual_channel_content_encoder
@@ -269,7 +271,7 @@ def build_identity_loss_module(args: argparse.Namespace) -> IdentityMappingLoss:
     print("✓ Identity Mapping Loss module built successfully.")
     return identity_loss
 
-def load_components(components: dict, args) -> None:
+def load_components(components: dict, args: argparse.Namespace) -> None:
     """
     Load state_dict for each module in components from its checkpoint in args.ckpt_dir.
 
