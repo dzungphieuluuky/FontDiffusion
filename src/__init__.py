@@ -19,4 +19,6 @@ from .builders.build import (
     build_original_style_projection,
     get_unet_cross_attention_dim,
     build_identity_loss_module,
+    build_dual_channel_content_encoder,
+    build_skeleton_transform
 )
