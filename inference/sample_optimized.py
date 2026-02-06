@@ -44,6 +44,23 @@ from src.tools.filename_utils import (
     compute_file_hash,
 )
 
+from src.builders.build import (
+    build_fst_projection,
+    build_original_style_projection,
+    get_unet_cross_attention_dim,
+    build_unet,
+    build_style_encoder,
+    build_content_encoder,
+    build_skeleton_transform,
+    build_dual_channel_content_encoder,
+    build_ddpm_scheduler,
+    build_fst,
+    build_identity_loss_module,
+    build_mss_encoder,
+    build_scr,
+    load_components
+)
+
 import logging
 
 logging.basicConfig(
@@ -232,7 +249,7 @@ def load_fontdiffuser_pipeline(
     args: Namespace, use_fst: bool = False
 ) -> FontDiffuserDPMPipeline:
     """Load Font Diffuser pipeline with optimizations and skeleton transform support"""
-    from src.builders.build import load_state_dict_auto, load_components_from_ckpt
+    from src.builders.build import load_state_dict_auto
 
     logger.info(f"Loading FontDiffuser{'WithFST' if use_fst else ''} pipeline...")
 
@@ -240,7 +257,6 @@ def load_fontdiffuser_pipeline(
     unet: UNet = build_unet(args=args)
     style_encoder: StyleEncoder = build_style_encoder(args=args)
     content_encoder: ContentEncoder = build_content_encoder(args=args)
-
     # Load base component weights
     unet_ckpt_path = (
         f"{args.ckpt_dir}/unet.safetensors"
@@ -273,16 +289,15 @@ def load_fontdiffuser_pipeline(
     
     if is_wrapped_checkpoint:
         # Use wrapped encoder if checkpoint was saved as wrapped
-        if use_fst and getattr(args, "use_skeleton_content", False):
-            from src.modules.skeleton_distance_transform import DualChannelContentEncoder
-            
-            content_encoder = DualChannelContentEncoder(
-                original_encoder=content_encoder,
-                fusion_method=getattr(args, "skeleton_fusion_method", "concat"),
-                learnable_weights=True,
+        if getattr(args, "use_skeleton_content", False):
+            # Wrap content encoder with skeleton transform
+            skeleton_transform = build_skeleton_transform(args=args)
+            content_encoder = build_dual_channel_content_encoder(
+                content_encoder=content_encoder,
+                skeleton_fusion_method=getattr(args, "skeleton_fusion_method", "concat"),
             )
             content_encoder.load_state_dict(content_encoder_state)
-            logger.info("✓ Loaded skeleton-wrapped content encoder")
+            logger.info("✓ Wrapped ContentEncoder with DualChannelContentEncoder for skeleton transform")
         else:
             # Extract original encoder keys from wrapped checkpoint
             original_state = {}
@@ -307,14 +322,6 @@ def load_fontdiffuser_pipeline(
 
     if use_fst:
         from src.model import FontDiffuserModelDPMWithFST
-        from src.builders.build import (
-            build_fst,
-            build_mss_encoder,
-            build_fst_projection,
-            build_original_style_projection,
-            get_unet_cross_attention_dim,
-        )
-
         logger.info("Building FST modules...")
 
         # Build FST modules
@@ -348,20 +355,10 @@ def load_fontdiffuser_pipeline(
                 "fst_projection": fst_projection,
                 "original_style_projection": original_style_projection,
             }
-
-            for name, module in fst_components.items():
-                ckpt_path = f"{fst_ckpt_dir}/{name}.safetensors"
-                if not os.path.exists(ckpt_path):
-                    ckpt_path = f"{fst_ckpt_dir}/{name}.pth"
-
-                if os.path.exists(ckpt_path):
-                    module.load_state_dict(load_state_dict_auto(ckpt_path))
-                    logger.info(f"  ✓ Loaded {name}")
-                else:
-                    logger.warning(f"  ⚠ {name} checkpoint not found")
+            load_components(fst_components, args.ckpt_dir)
         else:
             logger.warning("No FST checkpoint path provided - using random weights")
-
+        
         # Create FST-enhanced model
         model: FontDiffuserModelDPMWithFST = FontDiffuserModelDPMWithFST(
             unet=unet,
@@ -371,12 +368,15 @@ def load_fontdiffuser_pipeline(
             fst_module=fst_module,
             fst_projection=fst_projection,
             original_style_projection=original_style_projection,
+            skeleton_transform=skeleton_transform
         )
         logger.info("✓ Created FontDiffuserModelDPMWithFST")
     else:
         # Standard model (non-FST)
         model: FontDiffuserModelDPM = FontDiffuserModelDPM(
-            unet=unet, style_encoder=style_encoder, content_encoder=content_encoder
+            unet=unet, 
+            style_encoder=style_encoder, 
+            content_encoder=content_encoder
         )
         logger.info("✓ Created standard FontDiffuserModelDPM")
 
