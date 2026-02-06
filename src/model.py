@@ -210,6 +210,7 @@ class FontDiffuserWithFST(nn.Module):
         original_style_projection: nn.Linear,
         use_skeleton_content: bool = False,
         skeleton_fusion_method: str = "concat",
+        skeleton_config: Optional[dict] = None,
     ):
         """
         Initialize FontDiffuserWithFST with optional skeleton transform support.
@@ -230,6 +231,28 @@ class FontDiffuserWithFST(nn.Module):
         # Store configuration
         self.use_skeleton_content = use_skeleton_content
         
+        if self.use_skeleton_content:
+            # Default configuration
+            default_config = {
+                "method": "medial_axis",
+                "distance_method": "hybrid",
+                "max_distance": 10.0,
+                "sigma": 3.0,
+                "output_mode": "dual_channel",
+                "normalize": True,
+            }
+            
+            # Update with user config
+            if skeleton_config:
+                default_config.update(skeleton_config)
+            
+            # Create transform
+            self.skeleton_transform = SkeletonDistanceTransform(**default_config)
+            logger.info(f"✓ Skeleton transform enabled: {default_config}")
+        else:
+            self.skeleton_transform = None
+            logger.info("ℹ️ Skeleton transform disabled")
+
         # Wrap content encoder if using skeleton transform
         if use_skeleton_content:
             # Wrap the original content encoder to handle 2-channel input
@@ -311,7 +334,7 @@ class FontDiffuserWithFST(nn.Module):
         self,
         noisy_latents: torch.Tensor,
         timestep: torch.Tensor,
-        content_img: torch.Tensor,
+        content_img: torch.Tensor,  # (B, C, H, W) - batch of images
         style_source_img: torch.Tensor,
         style_target_img: torch.Tensor,
         content_encoder_downsample_size: int = 4,
@@ -323,9 +346,9 @@ class FontDiffuserWithFST(nn.Module):
         Args:
             noisy_latents: (B, 4, H, W) - noisy latent representations
             timestep: (B,) or scalar - diffusion timestep
-            content_img: (B, 1, 96, 96) - source font character
-            style_source_img: (B, 1, 96, 96) - reference char in source font
-            style_target_img: (B, 1, 96, 96) - same reference char in target font
+            content_img: (B, 1, 96, 96) - batch of source font characters
+            style_source_img: (B, 1, 96, 96) - batch of reference chars in source font
+            style_target_img: (B, 1, 96, 96) - batch of reference chars in target font
             content_encoder_downsample_size: downsampling factor
             return_dict: whether to return dict or tuple
 
@@ -333,10 +356,22 @@ class FontDiffuserWithFST(nn.Module):
             Dictionary containing model outputs
         """
         batch_size = noisy_latents.shape[0]
+        
+        # Apply skeleton-distance transform if enabled
+        if self.use_skeleton_content:
+            # content_img is (B, C, H, W), skeleton transform expects (B, 3, H, W)
+            content_image_transformed = self.skeleton_transform(content_img)  # (B, 3, H, W)
+            logger.debug(
+                f"Applied skeleton transform: "
+                f"input shape {content_img.shape} → "
+                f"output shape {content_image_transformed.shape}"
+            )
+        else:
+            content_image_transformed = content_img
 
         # 1. Content encoding
         content_img_feature, content_residual_features = self.content_encoder(
-            content_img
+            content_image_transformed
         )
         content_residual_features.append(content_img_feature)
 
@@ -399,7 +434,6 @@ class FontDiffuserWithFST(nn.Module):
             }
         else:
             return noise_pred, offset_out_sum
-
     def compute_transformation_matrix(
         self,
         style_source_img: torch.Tensor,

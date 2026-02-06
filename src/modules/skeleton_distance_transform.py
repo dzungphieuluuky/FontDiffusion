@@ -615,8 +615,8 @@ def example_usage():
     transform = SkeletonDistanceTransform(
         method="medial_axis",
         distance_method="hybrid",
-        max_distance=10.0,
-        sigma=3.0,
+        max_distance=2.0,
+        sigma=1.5,
         output_mode="dual_channel",
     )
     
