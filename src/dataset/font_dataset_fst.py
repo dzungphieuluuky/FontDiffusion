@@ -78,37 +78,11 @@ class FontDataset(Dataset):
         self.get_path()
         self.transforms = transforms
         self.nonorm_transforms = get_nonorm_transform(args.resolution)
-
-        self.use_skeleton_transform = use_skeleton_transform
-        
-        if self.use_skeleton_transform:
-            # Default configuration
-            default_config = {
-                "method": "medial_axis",
-                "distance_method": "hybrid",
-                "max_distance": 10.0,
-                "sigma": 3.0,
-                "output_mode": "dual_channel",
-                "normalize": True,
-            }
-            
-            # Update with user config
-            if skeleton_config:
-                default_config.update(skeleton_config)
-            
-            # Create transform
-            self.skeleton_transform = SkeletonDistanceTransform(**default_config)
-            logger.info(f"✓ Skeleton transform enabled: {default_config}")
-        else:
-            self.skeleton_transform = None
-            logger.info("ℹ️ Skeleton transform disabled")
-
         logger.info(
             f"Dataset initialized:\n "
             f"Phase: {phase}\n"
             f"Use_FST: {use_fst}\n"
             f"SCR: {scr}\n"
-            f"Use Skeleton Transform: {self.use_skeleton_transform}\n"
             f"Total samples: {len(self.target_images)}"
         )
 
@@ -420,25 +394,6 @@ class FontDataset(Dataset):
             "target_image_path": target_image_path,
             "nonorm_target_image": nonorm_target_image,
         }
-
-        if self.use_skeleton_transform:
-            # Apply skeleton-distance transform
-            # Input: (C, H, W), Output: (C_out, H, W) where C_out = 1 or 2
-            content_image_skeleton = self.skeleton_transform(content_image.unsqueeze(0))
-            content_image_skeleton = content_image_skeleton.squeeze(0)
-            
-            # Store both original and skeleton version
-            sample["content_image"] = content_image_skeleton  # Use skeleton for training
-            sample["content_image_original"] = content_image  # Keep original for reference
-            
-            logger.debug(
-                f"Applied skeleton transform: "
-                f"original shape {content_image.shape} → "
-                f"skeleton shape {content_image_skeleton.shape}"
-            )
-        else:
-            sample["content_image"] = content_image
-
         # Add source style image for FST
         source_style = None  # Track source style for consistency pairs
         if self.use_fst:
