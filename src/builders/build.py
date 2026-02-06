@@ -4,14 +4,12 @@ from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 import torch
 from torch import nn
 
-
 from src import ContentEncoder, StyleEncoder, UNet, SCR
-from src.model import FontStyleTransformationModule
-from src.model import MultiScaleStyleEncoder
-from src.modules.identity_mapping_loss import (
-    IdentityMappingLoss,
-    AdaptiveIdentityMappingLoss,
-    PooledIdentityMappingLoss,
+from src.model import FontStyleTransformationModule, MultiScaleStyleEncoder
+from src.modules.identity_mapping_loss import IdentityMappingLoss
+from src.modules.skeleton_distance_transform import (
+    SkeletonDistanceTransform,
+    DualChannelContentEncoder,
 )
 import logging
 
@@ -28,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 def load_state_dict_auto(path: str):
+    """Load state dict from .safetensors or .pth file."""
     if path.endswith(".safetensors"):
         try:
             from safetensors.torch import load_file as safe_load_file
@@ -38,7 +37,15 @@ def load_state_dict_auto(path: str):
         return torch.load(path, map_location="cpu")
 
 
-def build_unet(args):
+def build_unet(args: argparse.Namespace) -> UNet:
+    """Build U-Net model.
+    Args:
+        args (argparse.Namespace): Configuration arguments.
+
+    Returns:
+        UNet: U-Net model instance.
+    """
+    print("Building U-Net...")
     unet = UNet(
         sample_size=args.resolution,
         in_channels=3,
@@ -71,35 +78,63 @@ def build_unet(args):
         content_start_channel=args.content_start_channel,
         reduction=32,
     )
-
+    print("✓ U-Net built successfully.")
     return unet
 
 
 def build_style_encoder(args: argparse.Namespace) -> StyleEncoder:
-    style_image_encoder = StyleEncoder(
+    """Build style encoder.
+    Args:
+        args (argparse.Namespace): Configuration arguments.
+    Returns:
+        StyleEncoder: Style encoder instance.
+    """
+    print("Building Style Encoder...")
+    style_encoder = StyleEncoder(
         G_ch=args.style_start_channel, resolution=args.style_image_size[0]
     )
-    print("Build CG-GAN Style Encoder!")
-    return style_image_encoder
+    print("✓ Style Encoder built successfully.")
+    return style_encoder
 
 
 def build_content_encoder(args: argparse.Namespace) -> ContentEncoder:
-    content_image_encoder = ContentEncoder(
+    """Build content encoder.
+    Args:
+        args (argparse.Namespace): Configuration arguments.
+    Returns:
+        ContentEncoder: Content encoder instance.
+    """
+    print("Building Content Encoder...")
+    content_encoder = ContentEncoder(
         G_ch=args.content_start_channel, resolution=args.content_image_size[0]
     )
-    print("Build CG-GAN Content Encoder!")
-    return content_image_encoder
+    print("✓ Content Encoder built successfully.")
+    return content_encoder
 
 
 def build_scr(args: argparse.Namespace) -> SCR:
+    """Build SCR module.
+    Args:
+        args (argparse.Namespace): Configuration arguments.
+    Returns:
+        SCR: SCR module instance.
+    """
+    print("Building SCR module...")
     scr = SCR(
         temperature=args.temperature, mode=args.mode, image_size=args.scr_image_size
     )
-    print("Build SCR module!")
+    print("✓ SCR module built successfully.")
     return scr
 
 
 def build_ddpm_scheduler(args: argparse.Namespace) -> DDPMScheduler:
+    """Build DDPM scheduler.
+    Args:
+        args (argparse.Namespace): Configuration arguments.
+    Returns:
+        DDPMScheduler: DDPM scheduler instance.
+    """
+    print("Building DDPM Scheduler...")
     ddpm_scheduler = DDPMScheduler(
         num_train_timesteps=1000,
         beta_start=0.0001,
@@ -109,13 +144,19 @@ def build_ddpm_scheduler(args: argparse.Namespace) -> DDPMScheduler:
         variance_type="fixed_small",
         clip_sample=True,
     )
-    print("Build DDPM Scheduler!")
+    print("✓ DDPM Scheduler built successfully.")
     return ddpm_scheduler
 
 
 def build_fst(args: argparse.Namespace) -> FontStyleTransformationModule:
-    """Build Font Style Transformation module."""
-    # Parse feature channels if string
+    """Build Font Style Transformation (FST) module.
+    Args:
+        args (argparse.Namespace): Configuration arguments.
+
+    Returns:
+        FontStyleTransformationModule: FST module instance.
+    """
+    print("Building Font Style Transformation (FST) module...")
     feature_channels = args.fst_feature_channels
     if isinstance(feature_channels, str):
         feature_channels = [int(x.strip()) for x in feature_channels.split(",")]
@@ -126,16 +167,21 @@ def build_fst(args: argparse.Namespace) -> FontStyleTransformationModule:
         msse_output_channels=feature_channels,
     )
     print(
-        f"✓ Built FST module (queries={args.fst_num_queries}, dim={args.fst_query_dim})"
+        f"✓ FST module built successfully (queries={args.fst_num_queries}, dim={args.fst_query_dim})."
     )
     return fst_module
 
 
 def build_mss_encoder(args: argparse.Namespace) -> MultiScaleStyleEncoder:
-    """Build Multi-Scale Style Encoder."""
-    num_scales = getattr(args, "mss_num_scales", None) or getattr(
-        args, "fst_num_scales", 5
-    )
+    """Bulding Multi-Scale Style Encoder (MSSE).
+    Args:
+        args (argparse.Namespace): Configuration arguments.
+
+    Returns:
+        MultiScaleStyleEncoder: Multi-Scale Style Encoder instance.
+    """
+    print("Building Multi-Scale Style Encoder (MSSE)...")
+    num_scales = getattr(args, "mss_num_scales", 5)
     base_channels = getattr(args, "mss_base_channels", 64)
 
     mss_encoder = MultiScaleStyleEncoder(
@@ -143,134 +189,101 @@ def build_mss_encoder(args: argparse.Namespace) -> MultiScaleStyleEncoder:
         base_channels=base_channels,
         num_scales=num_scales,
     )
-    print(f"✓ Built MSSE (scales={num_scales}, base_ch={base_channels})")
+    print(f"✓ MSSE built successfully (scales={num_scales}, base_channels={base_channels}).")
     return mss_encoder
 
 
 def build_fst_projection(feature_dim: int, cross_attn_dim: int) -> nn.Linear:
-    """Build FST projection layer."""
+    """Build FST projection layer.
+    Args:
+        feature_dim (int): Dimension of FST features.
+        cross_attn_dim (int): Dimension of U-Net cross-attention.
+    """
+    print(f"Building FST projection layer ({feature_dim} → {cross_attn_dim})...")
     projection = nn.Linear(feature_dim, cross_attn_dim)
-    print(f"✓ Built FST projection ({feature_dim} → {cross_attn_dim})")
+    print("✓ FST projection layer built successfully.")
     return projection
 
 
 def build_original_style_projection(style_dim: int, cross_attn_dim: int) -> nn.Linear:
     """Build original style projection layer."""
+    print(f"Building original style projection layer ({style_dim} → {cross_attn_dim})...")
     projection = nn.Linear(style_dim, cross_attn_dim)
-    print(f"✓ Built style projection ({style_dim} → {cross_attn_dim})")
+    print("✓ Original style projection layer built successfully.")
     return projection
 
 
+def build_skeleton_transform(args: argparse.Namespace) -> SkeletonDistanceTransform:
+    """Build skeleton-distance transform module."""
+    print("Building Skeleton-Distance Transform...")
+    skeleton_config = {
+        "method": getattr(args, "skeleton_method", "medial_axis"),
+        "distance_method": getattr(args, "skeleton_distance_method", "hybrid"),
+        "max_distance": getattr(args, "skeleton_max_distance", 12.0),
+        "sigma": getattr(args, "skeleton_sigma", 1.5),
+        "output_mode": getattr(args, "skeleton_output_mode", "dual_channel"),
+        "normalize": True,
+    }
+    skeleton_transform = SkeletonDistanceTransform(**skeleton_config)
+    print(f"✓ Skeleton-Distance Transform built successfully: {skeleton_config}")
+    return skeleton_transform
+
+
+def build_dual_channel_content_encoder(
+    content_encoder: ContentEncoder, fusion_method: str = "concat"
+) -> DualChannelContentEncoder:
+    """Build dual-channel content encoder for skeleton transform."""
+    print(f"Building Dual-Channel Content Encoder (fusion method: {fusion_method})...")
+    dual_channel_content_encoder = DualChannelContentEncoder(
+        original_encoder=content_encoder,
+        fusion_method=fusion_method,
+        learnable_weights=True,
+    )
+    print("✓ Dual-Channel Content Encoder built successfully.")
+    return dual_channel_content_encoder
+
+
 def get_unet_cross_attention_dim(unet: UNet) -> int:
-    """
-    Infer cross-attention dimension from U-Net.
-
-    Args:
-        unet: U-Net module
-
-    Returns:
-        Cross-attention dimension
-    """
-    # Try to get from config
+    """Infer cross-attention dimension from U-Net."""
+    print("Inferring cross-attention dimension from U-Net...")
     if hasattr(unet, "config") and hasattr(unet.config, "cross_attention_dim"):
         return unet.config.cross_attention_dim
 
-    # Inspect first cross-attention layer
     for module in unet.modules():
         if hasattr(module, "to_k") and isinstance(module.to_k, nn.Linear):
             return module.to_k.in_features
 
-    # Default fallback
+    logger.warning("Cross-attention dimension not found in U-Net. Using default value of 1024.")
     return 1024
 
 
 def build_identity_loss_module(args: argparse.Namespace) -> IdentityMappingLoss:
     """Build identity mapping loss module."""
+    print("Building Identity Mapping Loss module...")
     identity_loss = IdentityMappingLoss(
         matrix_size=getattr(args, "fst_num_queries", 256),
         loss_type=getattr(args, "identity_loss_type", "frobenius"),
         regularization=getattr(args, "identity_regularization", "orthogonal"),
         reg_weight=getattr(args, "identity_reg_weight", 0.01),
     )
-    print(
-        f"✓ Built IdentityMappingLoss "
-        f"(matrix_size={args.fst_num_queries}, "
-        f"loss_type={getattr(args, 'identity_loss_type', 'frobenius')})"
-    )
+    print("✓ Identity Mapping Loss module built successfully.")
     return identity_loss
 
-
-def build_base_components(args: argparse.Namespace):
-    unet: UNet = build_unet(args)
-    style_encoder: StyleEncoder = build_style_encoder(args)
-    content_encoder: ContentEncoder = build_content_encoder(args)
-    scr: SCR = build_scr(args)
-    ddpm_scheduler = build_ddpm_scheduler(args)
-    components = {
-        "unet": unet,
-        "style_encoder": style_encoder,
-        "content_encoder": content_encoder,
-        "scr": scr,
-        "ddpm_scheduler": ddpm_scheduler,
-    }
-    print("Built FontDiffuser base components.")
-    return components
-
-
-def build_fst_components(args: argparse.Namespace) -> dict:
+def load_components(components: dict, args) -> None:
     """
-    Build all modules necessary for FontDiffuser FST model.
-    Returns a dict of initialized components.
+    Load state_dict for each module in components from its checkpoint in args.ckpt_dir.
+
+    Args:
+        components (dict): Mapping of module name (str) to module object.
+        args: Namespace or object with 'ckpt_dir' attribute.
     """
-    # Core encoders and modules
-    content_encoder: ContentEncoder = build_content_encoder(args)
-    style_encoder: StyleEncoder = build_style_encoder(args)
-    mss_encoder: MultiScaleStyleEncoder = build_mss_encoder(args)
-    fst_module: FontStyleTransformationModule = build_fst(args)
-    unet: UNet = build_unet(args)
-    scr: SCR = build_scr(args)
-    ddpm_scheduler = build_ddpm_scheduler(args)
-
-    # Projections
-    cross_attn_dim = get_unet_cross_attention_dim(unet)
-    fst_proj = build_fst_projection(args.fst_query_dim, cross_attn_dim)
-    style_proj = build_original_style_projection(
-        args.style_start_channel * 16, cross_attn_dim
-    )
-
-    # Loss module
-    identity_loss: IdentityMappingLoss = build_identity_loss_module(args)
-
-    components = {
-        "content_encoder": content_encoder,
-        "style_encoder": style_encoder,
-        "mss_encoder": mss_encoder,
-        "fst_module": fst_module,
-        "unet": unet,
-        "scr": scr,
-        "ddpm_scheduler": ddpm_scheduler,
-        "fst_projection": fst_proj,
-        "style_projection": style_proj,
-        "identity_loss_module": identity_loss,
-    }
-    print("Built FontDiffuser FST components.")
-    return components
-
-
-def load_components_from_ckpt(components: dict[str, nn.Module], ckpt_path: str):
-    """Load components' state dicts from checkpoint."""
     for name, module in components.items():
-        module_ckpt_path = f"{ckpt_path}/{name}.safetensors"
-        if not os.path.exists(module_ckpt_path):
-            print(
-                f"Warning: Checkpoint for {name} not found at {module_ckpt_path}. Skipping."
-            )
-            module_ckpt_path = f"{ckpt_path}/{name}.pth"
-        if not os.path.exists(module_ckpt_path):
-            print(
-                f"Warning: Checkpoint for {name} not found at {module_ckpt_path}. Skipping."
-            )
-            continue
-        state_dict = load_state_dict_auto(module_ckpt_path)
-        module.load_state_dict(state_dict)
-        print(f"Loaded {name} from {module_ckpt_path}.")
+        ckpt_path = os.path.join(args.ckpt_dir, f"{name}.safetensors")
+        if not os.path.exists(ckpt_path):
+            ckpt_path = os.path.join(args.ckpt_dir, f"{name}.pth")
+        if os.path.exists(ckpt_path):
+            state_dict = load_state_dict_auto(ckpt_path)
+            module.load_state_dict(state_dict)
+            logger.info(f"✓ Loaded weights for '{name}' from {ckpt_path}")
+        else:
+            logger.warning(f"⚠ Checkpoint for '{name}' not found in {args.ckpt_dir}")
