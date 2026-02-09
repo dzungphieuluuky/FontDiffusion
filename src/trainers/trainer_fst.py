@@ -86,15 +86,6 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         freeze_modules_str = getattr(args, "freeze_modules", "")
         self.freeze_modules: list[str] = self._parse_freeze_modules(freeze_modules_str)
         
-        # Backward compatibility
-        if getattr(args, "freeze_original_encoders", False):
-            logger.warning(
-                "⚠️ --freeze_original_encoders is deprecated. "
-                "Use --freeze_modules='unet,style_encoder,content_encoder' instead"
-            )
-            self.freeze_modules.extend(["unet", "style_encoder", "content_encoder"])
-            self.freeze_modules = list(set(self.freeze_modules))
-
         # Parse FST configuration
         self.fst_feature_channels: list[int] = self._parse_feature_channels(
             getattr(args, "fst_feature_channels", "64,128,256,512,1024")

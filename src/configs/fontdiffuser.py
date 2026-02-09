@@ -488,11 +488,6 @@ def get_parser():
         default=0.5,
         help="Probability that source and target style use same font style",
     )
-    fst_group.add_argument(
-        "--freeze_original_encoders",
-        action="store_true",
-        help="Freeze original style and content encoders during training",
-    )
     # MSS Encoder specific
     fst_group.add_argument(
         "--mss_base_channels",

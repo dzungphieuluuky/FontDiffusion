@@ -58,7 +58,6 @@ def main():
             logger.info(f"  Num queries: {args.fst_num_queries}")
             logger.info(f"  Query dim: {args.fst_query_dim}")
             logger.info(f"  Num scales: {args.fst_num_scales}")
-            logger.info(f"  Freeze encoders: {args.freeze_original_encoders}")
             logger.info(f"  Style source same prob: {args.style_source_same_prob}")
         logger.info(f"Phase 2 (SCR): {args.phase_2}")
         logger.info(f"Batch size: {args.train_batch_size}")
@@ -139,7 +138,6 @@ accelerate launch train_fst.py \
     --max_train_steps=50000 \
     --learning_rate=1e-5 \
     --output_dir="outputs/fst_training_phase2" \
-    --freeze_original_encoders \
     --mixed_precision="fp16"
 
 # ============================================================================
@@ -202,7 +200,6 @@ accelerate launch train_fst.py \
 # ============================================================================
 accelerate launch train_fst.py \
     --use_fst \
-    --freeze_original_encoders \
     --phase_1_ckpt_dir="pretrained/fontdiffuser_base" \
     --experience_name="fontdiffuser_fst_finetune" \
     --data_root="my_dataset" \
