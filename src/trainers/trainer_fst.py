@@ -196,10 +196,11 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             original_style_projection = build_original_style_projection(
                 style_dim=1024, cross_attn_dim=cross_attn_dim
             )
+            skeleton_transform = None
             if self.use_skeleton_content:
                 skeleton_transform = build_skeleton_transform(args=self.args)
                 content_encoder = build_dual_channel_content_encoder(args=self.args)
-            # Create FST model WITH SKELETON SUPPORT
+            
             self.model = FontDiffuserWithFST(
                 unet=unet,
                 style_encoder=style_encoder,
