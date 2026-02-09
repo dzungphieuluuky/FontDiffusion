@@ -355,7 +355,7 @@ def load_fontdiffuser_pipeline(
                 "fst_projection": fst_projection,
                 "original_style_projection": original_style_projection,
             }
-            load_components(fst_components, args.ckpt_dir)
+            load_components(fst_components, args)
         else:
             logger.warning("No FST checkpoint path provided - using random weights")
         
