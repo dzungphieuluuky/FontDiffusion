@@ -199,12 +199,12 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             skeleton_transform = None
             if self.use_skeleton_content:
                 skeleton_transform = build_skeleton_transform(args=self.args)
-                content_encoder = build_dual_channel_content_encoder(args=self.args)
+                dual_channel_content_encoder = build_dual_channel_content_encoder(args=self.args)
             
             self.model = FontDiffuserWithFST(
                 unet=unet,
                 style_encoder=style_encoder,
-                content_encoder=content_encoder,
+                content_encoder=dual_channel_content_encoder if self.use_skeleton_content else content_encoder,
                 mss_encoder=mss_encoder,
                 fst_module=fst_module,
                 fst_projection=fst_projection,
@@ -822,13 +822,9 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         if not self.accelerator.is_main_process:
             return
 
-        # Determine checkpoint name
-        if is_final:
-            save_dir = Path(self.args.output_dir) / "final"
-        else:
-            save_dir = (
-                Path(self.args.output_dir) / f"checkpoint_step_{self.global_step}"
-            )
+        save_dir = (
+            Path(self.args.output_dir) / f"checkpoint_step_{self.global_step}"
+        )
 
         save_dir.mkdir(parents=True, exist_ok=True)
 
@@ -849,11 +845,18 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 save_dir / "style_encoder.safetensors",
             )
             logger.info("✓ Saved style_encoder")
-            save_model_checkpoint(
-                unwrapped_model.content_encoder.state_dict(),
-                save_dir / "content_encoder.safetensors",
-            )
-            logger.info("✓ Saved content_encoder")
+            if self.use_skeleton_content:
+                save_model_checkpoint(
+                    unwrapped_model.content_encoder.state_dict(),
+                    save_dir / "dual_channel_content_encoder.safetensors",
+                )
+                logger.info("✓ Saved DualChannelContentEncoder")
+            else:
+                save_model_checkpoint(
+                    unwrapped_model.content_encoder.state_dict(),
+                    save_dir / "content_encoder.safetensors",
+                )
+                logger.info("✓ Saved content_encoder")
             save_model_checkpoint(
                 unwrapped_model.mss_encoder.state_dict(),
                 save_dir / "mss_encoder.safetensors",
@@ -890,17 +893,17 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         else:
             # Save standard model
             save_model_checkpoint(
-                unwrapped_model.config.unet.state_dict(),
+                unwrapped_model.unet.state_dict(),
                 save_dir / "unet.safetensors",
             )
             logger.info("✓ Saved unet")
             save_model_checkpoint(
-                unwrapped_model.config.style_encoder.state_dict(),
+                unwrapped_model.style_encoder.state_dict(),
                 save_dir / "style_encoder.safetensors",
             )
             logger.info("✓ Saved style_encoder")
             save_model_checkpoint(
-                unwrapped_model.config.content_encoder.state_dict(),
+                unwrapped_model.content_encoder.state_dict(),
                 save_dir / "content_encoder.safetensors",
             )
             logger.info("✓ Saved content_encoder")
