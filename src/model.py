@@ -92,19 +92,19 @@ class FontDiffuserModel(ModelMixin, ConfigMixin):
         content_images,
         content_encoder_downsample_size,
     ):
-        style_img_feature, _, _ = self.config.style_encoder(style_images)
+        style_img_feature, _, _ = self.style_encoder(style_images)
 
         batch_size, channel, height, width = style_img_feature.shape
         style_hidden_states = style_img_feature.permute(0, 2, 3, 1).reshape(
             batch_size, height * width, channel
         )
 
-        content_img_feature, content_residual_features = self.config.content_encoder(
+        content_img_feature, content_residual_features = self.content_encoder(
             content_images
         )
         content_residual_features.append(content_img_feature)
 
-        style_content_feature, style_content_res_features = self.config.content_encoder(
+        style_content_feature, style_content_res_features = self.content_encoder(
             style_images
         )
         style_content_res_features.append(style_content_feature)
@@ -116,7 +116,7 @@ class FontDiffuserModel(ModelMixin, ConfigMixin):
             style_content_res_features,
         ]
 
-        out = self.config.unet(
+        out = self.unet(
             x_t,
             timesteps,
             encoder_hidden_states=input_hidden_states,
@@ -158,7 +158,7 @@ class FontDiffuserModelDPM(ModelMixin, ConfigMixin):
         content_images = cond[0]
         style_images = cond[1]
 
-        style_img_feature, _, style_residual_features = self.config.style_encoder(
+        style_img_feature, _, style_residual_features = self.style_encoder(
             style_images
         )
 
@@ -167,12 +167,12 @@ class FontDiffuserModelDPM(ModelMixin, ConfigMixin):
             batch_size, height * width, channel
         )
 
-        content_img_feture, content_residual_features = self.config.content_encoder(
+        content_img_feture, content_residual_features = self.content_encoder(
             content_images
         )
         content_residual_features.append(content_img_feture)
 
-        style_content_feature, style_content_res_features = self.config.content_encoder(
+        style_content_feature, style_content_res_features = self.content_encoder(
             style_images
         )
         style_content_res_features.append(style_content_feature)
@@ -184,7 +184,7 @@ class FontDiffuserModelDPM(ModelMixin, ConfigMixin):
             style_content_res_features,
         ]
 
-        out = self.config.unet(
+        out = self.unet(
             x_t,
             timesteps,
             encoder_hidden_states=input_hidden_states,
@@ -248,23 +248,23 @@ class FontDiffuserWithFST(ModelMixin, ConfigMixin):
         # Log skeleton configuration
         if self.use_skeleton_content:
             logger.info("✓ Skeleton-Distance Transform: ENABLED")
-            logger.info(f"  Fusion method: {self.config.content_encoder.fusion_method}")
-            if hasattr(self.config.content_encoder, "fusion_conv"):
-                fusion_params = sum(p.numel() for p in self.config.content_encoder.fusion_conv.parameters())
+            logger.info(f"  Fusion method: {self.content_encoder.fusion_method}")
+            if hasattr(self.content_encoder, "fusion_conv"):
+                fusion_params = sum(p.numel() for p in self.content_encoder.fusion_conv.parameters())
                 logger.info(f"  Fusion parameters: {fusion_params:,}")
         else:
             logger.info("ℹ️ Skeleton-Distance Transform: DISABLED")
         
         # Log component parameters
         components = {
-            "U-Net": self.config.diffusion_unet,
-            "Style Encoder": self.config.style_encoder,
+            "U-Net": self.diffusion_unet,
+            "Style Encoder": self.style_encoder,
             "Content Encoder (wrapped)" if self.use_skeleton_content else "Content Encoder": 
-                self.config.content_encoder if not self.use_skeleton_content else self.config.content_encoder.original_encoder,
-            "MSS Encoder": self.config.mss_encoder,
-            "FST Module": self.config.fst_module,
-            "FST Projection": self.config.fst_projection,
-            "Original Style Projection": self.config.original_style_projection,
+                self.content_encoder if not self.use_skeleton_content else self.content_encoder.original_encoder,
+            "MSS Encoder": self.mss_encoder,
+            "FST Module": self.fst_module,
+            "FST Projection": self.fst_projection,
+            "Original Style Projection": self.original_style_projection,
         }
         
         total_params = 0
@@ -279,8 +279,8 @@ class FontDiffuserWithFST(ModelMixin, ConfigMixin):
                 f"{module_trainable:12,} trainable"
             )
         
-        if self.use_skeleton_content and hasattr(self.config.content_encoder, "fusion_conv"):
-            fusion_total, fusion_trainable = count_parameters(self.config.content_encoder.fusion_conv)
+        if self.use_skeleton_content and hasattr(self.content_encoder, "fusion_conv"):
+            fusion_total, fusion_trainable = count_parameters(self.content_encoder.fusion_conv)
             total_params += fusion_total
             trainable_params += fusion_trainable
             logger.info(
@@ -321,9 +321,9 @@ class FontDiffuserWithFST(ModelMixin, ConfigMixin):
         batch_size = noisy_latents.shape[0]
         
         # Apply skeleton-distance transform if enabled
-        if self.config.use_skeleton_content:
+        if self.use_skeleton_content:
             # content_images is (B, C, H, W), skeleton transform expects (B, 3, H, W)
-            content_image_transformed = self.config.skeleton_transform(content_images)  # (B, 3, H, W)
+            content_image_transformed = self.skeleton_transform(content_images)  # (B, 3, H, W)
             logger.debug(
                 f"Applied skeleton transform: "
                 f"input shape {content_images.shape} → "
@@ -333,33 +333,33 @@ class FontDiffuserWithFST(ModelMixin, ConfigMixin):
             content_image_transformed = content_images
 
         # 1. Content encoding
-        content_img_feature, content_residual_features = self.config.content_encoder(
+        content_img_feature, content_residual_features = self.content_encoder(
             content_image_transformed
         )
         content_residual_features.append(content_img_feature)
 
-        style_content_feature, style_content_res_features = self.config.content_encoder(
+        style_content_feature, style_content_res_features = self.content_encoder(
             style_target_images
         )
         style_content_res_features.append(style_content_feature)
 
         # 2. Original style encoding
-        orig_style_feat, orig_style_vec, orig_style_residuals = self.config.style_encoder(
+        orig_style_feat, orig_style_vec, orig_style_residuals = self.style_encoder(
             style_target_images
         )
 
         # 3. Multi-scale style encoding
-        source_style_features = self.config.mss_encoder(style_source_images)
-        target_style_features = self.config.mss_encoder(style_target_images)
+        source_style_features = self.mss_encoder(style_source_images)
+        target_style_features = self.mss_encoder(style_target_images)
 
         # 4. Font style transformation
-        transformation_features = self.config.fst_module(
+        transformation_features = self.fst_module(
             source_style_features, target_style_features
         )
 
         # 5. Prepare U-Net conditions
-        fst_condition = self.config.fst_projection(transformation_features)
-        orig_style_projected = self.config.original_style_projection(orig_style_vec)
+        fst_condition = self.fst_projection(transformation_features)
+        orig_style_projected = self.original_style_projection(orig_style_vec)
         orig_style_projected = orig_style_projected.unsqueeze(1)
 
         # Combine FST and original style features
@@ -376,7 +376,7 @@ class FontDiffuserWithFST(ModelMixin, ConfigMixin):
         ]
 
         # 7. Diffusion U-Net forward
-        noise_pred, offset_out_sum = self.config.diffusion_unet(
+        noise_pred, offset_out_sum = self.diffusion_unet(
             noisy_latents,
             timestep,
             encoder_hidden_states=encoder_hidden_states,
@@ -416,11 +416,11 @@ class FontDiffuserWithFST(ModelMixin, ConfigMixin):
             transformation_features: (B, N, D) - transformation matrix/features
         """
         # Extract multi-scale features from both images
-        source_style_features = self.config.mss_encoder(style_source_images)
-        target_style_features = self.config.mss_encoder(style_target_images)
+        source_style_features = self.mss_encoder(style_source_images)
+        target_style_features = self.mss_encoder(style_target_images)
 
         # Apply FST module to get transformation
-        transformation_features = self.config.fst_module(
+        transformation_features = self.fst_module(
             source_style_features, target_style_features
         )
 
@@ -454,11 +454,11 @@ class FontDiffuserWithFST(ModelMixin, ConfigMixin):
         source_flat = consistency_source_images.view(-1, C, H, W)
         target_flat = consistency_target_images.view(-1, C, H, W)
 
-        source_features = self.config.mss_encoder(source_flat)
-        target_features = self.config.mss_encoder(target_flat)
+        source_features = self.mss_encoder(source_flat)
+        target_features = self.mss_encoder(target_flat)
 
         # Get transformation features
-        transformation_features = self.config.fst_module(source_features, target_features)
+        transformation_features = self.fst_module(source_features, target_features)
 
         # Reshape: (B*k, N, D) → (B, k, N, D)
         T = transformation_features.view(
@@ -535,11 +535,11 @@ class FontDiffuserWithFST(ModelMixin, ConfigMixin):
             metrics: Dict with diagnostics
         """
         # Extract multi-scale features from both
-        source_style_features = self.config.mss_encoder(identity_pair_sources)
-        target_style_features = self.config.mss_encoder(identity_pair_targets)
+        source_style_features = self.mss_encoder(identity_pair_sources)
+        target_style_features = self.mss_encoder(identity_pair_targets)
 
         # Apply FST to get transformation
-        transformation_features = self.config.fst_module(
+        transformation_features = self.fst_module(
             source_style_features,
             target_style_features,
         )  # (B, N_L + H*W, D)
@@ -609,17 +609,17 @@ class FontDiffuserWithFST(ModelMixin, ConfigMixin):
             metrics: Dict with diagnostics from IdentityMappingLoss
         """
         # Extract multi-scale features from both
-        source_style_features = self.config.mss_encoder(identity_pair_sources)
-        target_style_features = self.config.mss_encoder(identity_pair_targets)
+        source_style_features = self.mss_encoder(identity_pair_sources)
+        target_style_features = self.mss_encoder(identity_pair_targets)
 
         # Apply FST to get transformation features
-        transformation_features = self.config.fst_module(
+        transformation_features = self.fst_module(
             source_style_features,
             target_style_features,
         )  # (B, N_L + H*W, D)
 
         # Extract learnable query portion only
-        query_features = transformation_features[:, : self.config.fst_num_queries, :]
+        query_features = transformation_features[:, : self.fst_num_queries, :]
 
         # Use IdentityMappingLoss module
         loss, metrics = identity_loss_module(query_features, query_features)
@@ -701,12 +701,12 @@ class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
 
         components = [
             ("Content Encoder", content_encoder_for_counting),
-            ("Style Encoder", self.config.style_encoder),
-            ("Diffusion U-Net", self.config.unet),
-            ("Multi-Scale Style Encoder (MSSE)", self.config.mss_encoder),
-            ("Font Style Transformation (FST)", self.config.fst_module),
-            ("FST Projection", self.config.fst_projection),
-            ("Original Style Projection", self.config.original_style_projection),
+            ("Style Encoder", self.style_encoder),
+            ("Diffusion U-Net", self.unet),
+            ("Multi-Scale Style Encoder (MSSE)", self.mss_encoder),
+            ("Font Style Transformation (FST)", self.fst_module),
+            ("FST Projection", self.fst_projection),
+            ("Original Style Projection", self.original_style_projection),
         ]
 
         logger.info("\nComponent Parameters:")
@@ -769,7 +769,7 @@ class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
         # Apply skeleton-distance transform if enabled
         if self.use_skeleton_content:
             # content_images is (B, C, H, W), skeleton transform expects (B, 3, H, W)
-            content_images_transformed = self.config.skeleton_transform(content_images)
+            content_images_transformed = self.skeleton_transform(content_images)
             logger.debug(
                 f"Applied skeleton transform: "
                 f"input shape {content_images.shape} → "
@@ -780,21 +780,21 @@ class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
 
         # 1. Original style encoding
         style_img_feature, style_vec, style_residual_features = (
-            self.config.style_encoder(style_images)
+            self.style_encoder(style_images)
         )
 
         # 2. Multi-scale style encoding
-        target_style_features = self.config.mss_encoder(style_images)
+        target_style_features = self.mss_encoder(style_images)
         source_style_features = target_style_features  # Single-style mode
 
         # 3. Font style transformation
-        transformation_features = self.config.fst_module(
+        transformation_features = self.fst_module(
             source_style_features, target_style_features
         )
 
         # 4. Prepare enhanced style condition
-        fst_condition = self.config.fst_projection(transformation_features)
-        orig_style_projected = self.config.original_style_projection(style_vec)
+        fst_condition = self.fst_projection(transformation_features)
+        orig_style_projected = self.original_style_projection(style_vec)
         orig_style_projected = orig_style_projected.unsqueeze(1)
 
         combined_style_condition = torch.cat(
@@ -821,7 +821,7 @@ class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
         ]
 
         # 7. Diffusion U-Net forward
-        out = self.config.unet(
+        out = self.unet(
             x_t,
             timesteps,
             encoder_hidden_states=input_hidden_states,
