@@ -199,7 +199,6 @@ class FontDiffuserWithFST(ModelMixin, ConfigMixin):
     """
     FontDiffuser with FST enhancement and optional skeleton-distance transform.
     """
-    @register_to_config
     def __init__(
         self,
         unet: UNet,
@@ -632,7 +631,6 @@ class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
     All modules are passed in (not created internally).
     """
 
-    @register_to_config
     def __init__(
         self,
         unet: UNet,
