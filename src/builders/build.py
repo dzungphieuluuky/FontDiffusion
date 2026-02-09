@@ -11,6 +11,7 @@ from src.modules.skeleton_distance_transform import (
     SkeletonDistanceTransform,
     DualChannelContentEncoder,
 )
+from src.modules.adversarial import StyleDiscriminator, AdversarialContentStyleLoss, StyleLabelExtractor
 import logging
 
 logging.basicConfig(
@@ -270,6 +271,103 @@ def build_identity_loss_module(args: argparse.Namespace) -> IdentityMappingLoss:
     )
     print("✓ Identity Mapping Loss module built successfully.")
     return identity_loss
+
+def build_style_discriminator(args: argparse.Namespace) -> StyleDiscriminator:
+    """Build style discriminator for adversarial content-style disentanglement.
+    
+    Args:
+        args (argparse.Namespace): Configuration arguments with:
+            - use_adversarial_disc: Whether to use adversarial training
+            - num_styles: Number of style families
+            - adversarial_hidden_dims: Hidden layer dimensions (optional)
+            - adversarial_dropout: Dropout probability (optional)
+    
+    Returns:
+        StyleDiscriminator: Style discriminator module instance.
+    """    
+    if not getattr(args, "use_adversarial_disc", False):
+        print("Adversarial discriminator disabled - skipping build")
+        return None
+    
+    print("Building Style Discriminator for adversarial training...")
+    
+    num_styles = getattr(args, "num_styles", 10)
+    input_channels = getattr(args, "adversarial_input_channels", 256)
+    hidden_dims = getattr(args, "adversarial_hidden_dims", [512, 256, 128])
+    dropout = getattr(args, "adversarial_dropout", 0.3)
+    use_spectral_norm = getattr(args, "adversarial_spectral_norm", True)
+    
+    discriminator = StyleDiscriminator(
+        input_channels=input_channels,
+        num_styles=num_styles,
+        hidden_dims=hidden_dims,
+        dropout=dropout,
+        use_spectral_norm=use_spectral_norm,
+    )
+    
+    print(
+        f"✓ Style Discriminator built successfully "
+        f"({num_styles} styles, input_channels={input_channels})."
+    )
+    return discriminator
+
+
+def build_adversarial_loss_module(args: argparse.Namespace) -> AdversarialContentStyleLoss:
+    """Build adversarial loss module for content-style disentanglement.
+    
+    Args:
+        args (argparse.Namespace): Configuration arguments with:
+            - num_styles: Number of style families
+            - adversarial_weight: Weight for adversarial loss
+            - adversarial_entropy_weight: Weight for entropy regularization
+            - adversarial_lambda: Gradient reversal strength
+    
+    Returns:
+        AdversarialContentStyleLoss: Adversarial loss module instance.
+    """    
+    if not getattr(args, "use_adversarial_disc", False):
+        print("Adversarial discriminator disabled - skipping loss module build")
+        return None
+    
+    print("Building Adversarial Content-Style Loss module...")
+    
+    num_styles = getattr(args, "num_styles", 10)
+    adversarial_weight = getattr(args, "adversarial_weight", 0.5)
+    entropy_weight = getattr(args, "adversarial_entropy_weight", 0.1)
+    gradient_reversal_lambda = getattr(args, "adversarial_lambda", 1.0)
+    
+    loss_module = AdversarialContentStyleLoss(
+        num_styles=num_styles,
+        adversarial_weight=adversarial_weight,
+        entropy_weight=entropy_weight,
+        gradient_reversal_lambda=gradient_reversal_lambda,
+    )
+    
+    print(
+        f"✓ Adversarial Loss module built successfully "
+        f"(weight={adversarial_weight}, entropy_weight={entropy_weight})."
+    )
+    return loss_module
+
+
+def build_style_label_extractor(args: argparse.Namespace) -> StyleLabelExtractor:
+    """Build style label extractor for filename-based style annotation.
+    
+    Args:
+        args (argparse.Namespace): Configuration arguments (minimal deps)
+    
+    Returns:
+        StyleLabelExtractor: Style label extractor instance.
+    """    
+    if not getattr(args, "use_adversarial_disc", False):
+        return None
+    
+    print("Building Style Label Extractor...")
+    
+    extractor = StyleLabelExtractor()
+    
+    print("✓ Style Label Extractor built successfully.")
+    return extractor
 
 def load_components(components: dict, args: argparse.Namespace) -> None:
     """

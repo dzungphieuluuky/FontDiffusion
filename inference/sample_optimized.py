@@ -286,7 +286,7 @@ def load_fontdiffuser_pipeline(
         k.startswith("original_encoder.") or k.startswith("fusion_conv.")
         for k in content_encoder_state.keys()
     )
-    
+    skeleton_transform = None
     if is_wrapped_checkpoint:
         # Use wrapped encoder if checkpoint was saved as wrapped
         if getattr(args, "use_skeleton_content", False):

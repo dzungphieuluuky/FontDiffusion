@@ -702,6 +702,83 @@ def get_parser():
             "'weighted' (learnable weighted sum)",
     )
 
+    # ==================== Adversarial Discriminator Arguments ====================
+    adversarial = parser.add_argument_group("Adversarial Discriminator")
+    adversarial.add_argument(
+        "--use_adversarial_disc",
+        action="store_true",
+        help="Enable adversarial discriminator for style-invariant content encoding",
+    )
+
+    adversarial.add_argument(
+        "--num_styles",
+        type=int,
+        default=10,
+        help="Number of style families (will be auto-detected from dataset if not set)",
+    )
+
+    adversarial.add_argument(
+        "--adversarial_weight",
+        type=float,
+        default=0.5,
+        help="Weight for adversarial loss in total loss computation",
+    )
+
+    adversarial.add_argument(
+        "--adversarial_entropy_weight",
+        type=float,
+        default=0.1,
+        help="Weight for discriminator entropy regularization",
+    )
+
+    adversarial.add_argument(
+        "--adversarial_input_channels",
+        type=int,
+        default=256,
+        help="Number of input channels for style discriminator (content encoder output channels)",
+    )
+
+    adversarial.add_argument(
+        "--adversarial_hidden_dims",
+        type=str,
+        default="512,256,128",
+        help="Comma-separated hidden layer dimensions for discriminator MLP",
+    )
+
+    adversarial.add_argument(
+        "--adversarial_dropout",
+        type=float,
+        default=0.3,
+        help="Dropout probability in discriminator",
+    )
+
+    adversarial.add_argument(
+        "--adversarial_spectral_norm",
+        action="store_true",
+        default=True,
+        help="Use spectral normalization in discriminator for training stability",
+    )
+
+    adversarial.add_argument(
+        "--adversarial_lambda",
+        type=float,
+        default=1.0,
+        help="Gradient reversal strength (higher = stronger adversarial signal)",
+    )
+
+    adversarial.add_argument(
+        "--disc_update_interval",
+        type=int,
+        default=1,
+        help="Update discriminator every N training steps",
+    )
+
+    adversarial.add_argument(
+        "--disc_learning_rate_factor",
+        type=float,
+        default=0.5,
+        help="Learning rate factor for discriminator (relative to main LR)",
+    )
     # ==================== Optimization Flags ====================
     optimization_group = parser.add_argument_group("Performance Optimization")
     optimization_group.add_argument(
