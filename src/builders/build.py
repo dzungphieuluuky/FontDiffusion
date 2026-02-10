@@ -13,18 +13,9 @@ from src.modules.skeleton_distance_transform import (
 )
 from src.modules.adversarial import StyleDiscriminator, AdversarialContentStyleLoss, StyleLabelExtractor
 import logging
+from src.tools.utilities import setup_logger
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    level=logging.INFO,
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(f"{__name__}.log", mode="a"),
-    ],
-)
-logger = logging.getLogger(__name__)
-
+logger = setup_logger(__name__, logging.INFO)
 
 def load_state_dict_auto(path: str):
     """Load state dict from .safetensors or .pth file."""
