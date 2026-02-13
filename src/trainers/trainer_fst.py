@@ -818,13 +818,17 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         return total_loss, loss_dict
 
     def save_checkpoint(self, is_final: bool = False):
-        """Save FST training checkpoint with full state."""
+        """Save FST training checkpoint."""
         if not self.accelerator.is_main_process:
             return
 
-        save_dir = (
-            Path(self.args.output_dir) / f"checkpoint_step_{self.global_step}"
-        )
+        # Determine checkpoint name
+        if is_final:
+            save_dir = Path(self.args.output_dir) / "final"
+        else:
+            save_dir = (
+                Path(self.args.output_dir) / f"checkpoint_step_{self.global_step}"
+            )
 
         save_dir.mkdir(parents=True, exist_ok=True)
 
@@ -839,112 +843,78 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 unwrapped_model.diffusion_unet.state_dict(),
                 save_dir / "unet.safetensors",
             )
-            logger.info("✓ Saved diffusion_unet")
             save_model_checkpoint(
                 unwrapped_model.style_encoder.state_dict(),
                 save_dir / "style_encoder.safetensors",
             )
-            logger.info("✓ Saved style_encoder")
-            if self.use_skeleton_content:
-                save_model_checkpoint(
-                    unwrapped_model.content_encoder.state_dict(),
-                    save_dir / "dual_channel_content_encoder.safetensors",
-                )
-                logger.info("✓ Saved DualChannelContentEncoder")
-            else:
-                save_model_checkpoint(
-                    unwrapped_model.content_encoder.state_dict(),
-                    save_dir / "content_encoder.safetensors",
-                )
-                logger.info("✓ Saved content_encoder")
+            save_model_checkpoint(
+                unwrapped_model.content_encoder.state_dict(),
+                save_dir / "content_encoder.safetensors",
+            )
             save_model_checkpoint(
                 unwrapped_model.mss_encoder.state_dict(),
                 save_dir / "mss_encoder.safetensors",
             )
-            logger.info("✓ Saved mss_encoder")
             save_model_checkpoint(
                 unwrapped_model.fst_module.state_dict(),
                 save_dir / "fst_module.safetensors",
             )
-            logger.info("✓ Saved fst_module")
             save_model_checkpoint(
                 unwrapped_model.fst_projection.state_dict(),
                 save_dir / "fst_projection.safetensors",
             )
-            logger.info("✓ Saved fst_projection")
             save_model_checkpoint(
                 unwrapped_model.original_style_projection.state_dict(),
                 save_dir / "original_style_projection.safetensors",
             )
-            logger.info("✓ Saved original_style_projection")
-
-            # Save identity loss module if it exists
-            if self.identity_loss_module is not None:
-                unwrapped_identity = self.accelerator.unwrap_model(
-                    self.identity_loss_module
-                )
-                save_model_checkpoint(
-                    unwrapped_identity.state_dict(),
-                    save_dir / "identity_loss_module.safetensors",
-                )
-                logger.info("✓ Saved identity_loss_module")
 
             logger.info("✓ Saved all FST components")
         else:
             # Save standard model
             save_model_checkpoint(
-                unwrapped_model.unet.state_dict(),
+                unwrapped_model.config.unet.state_dict(),
                 save_dir / "unet.safetensors",
             )
-            logger.info("✓ Saved unet")
             save_model_checkpoint(
-                unwrapped_model.style_encoder.state_dict(),
+                unwrapped_model.config.style_encoder.state_dict(),
                 save_dir / "style_encoder.safetensors",
             )
-            logger.info("✓ Saved style_encoder")
             save_model_checkpoint(
-                unwrapped_model.content_encoder.state_dict(),
+                unwrapped_model.config.content_encoder.state_dict(),
                 save_dir / "content_encoder.safetensors",
             )
-            logger.info("✓ Saved content_encoder")
 
         # Save SCR for phase 2
         if self.config.phase_2 and self.scr is not None:
             save_model_checkpoint(self.scr.state_dict(), save_dir / "scr.safetensors")
 
-        # Save training state with FULL FST config (including identity loss)
-        training_state = {
-            "global_step": self.global_step,
-            "epoch": self.current_epoch,
-            "optimizer_state_dict": self.optimizer.state_dict(),
-            "lr_scheduler_state_dict": self.lr_scheduler.state_dict(),
-            "config": asdict(self.config),
-            "fst_config": {
-                "use_fst": self.use_fst,
-                "freeze_modules": self.freeze_modules,
-                "style_source_same_prob": self.style_source_same_prob,
-                "fst_feature_channels": self.fst_feature_channels,
-                "fst_num_queries": self.fst_num_queries,
-                "fst_query_dim": self.fst_query_dim,
-                "fst_num_scales": self.fst_num_scales,
-                "num_consistency_pairs": self.num_consistency_pairs,
-                "consistency_loss_weight": self.consistency_loss_weight,
-                "num_identity_pairs": self.num_identity_pairs,
-                "identity_loss_weight": self.identity_loss_weight,
-                "identity_pair_mode": self.identity_pair_mode,
+        # Save optimizer and scheduler states
+        torch.save(
+            {
+                "global_step": self.global_step,
+                "epoch": self.current_epoch,
+                "optimizer_state_dict": self.optimizer.state_dict(),
+                "lr_scheduler_state_dict": self.lr_scheduler.state_dict(),
+                "config": asdict(self.config),
+                "fst_config": {
+                    "use_fst": self.use_fst,
+                    "freeze_original_encoders": self.freeze_original_encoders,
+                    "style_source_same_prob": self.style_source_same_prob,
+                    "fst_feature_channels": self.fst_feature_channels,
+                    "fst_num_queries": self.fst_num_queries,
+                    "fst_query_dim": self.fst_query_dim,
+                    "fst_num_scales": self.fst_num_scales,
+                },
             },
-        }
+            save_dir / "training_state.pt",
+        )
 
-        torch.save(training_state, save_dir / "training_state.pth")
-        logger.info(f"✓ Saved training state to {save_dir / 'training_state.pth'}")
         logger.info(f"✓ Saved checkpoint to {save_dir}")
-
         self.accelerator.log(
             {
                 "checkpoint_saved": True,
                 "checkpoint_step": self.global_step,
                 "checkpoint_type": "fst" if self.use_fst else "base",
-                "frozen_modules": self.freeze_modules,
             }
         )
 

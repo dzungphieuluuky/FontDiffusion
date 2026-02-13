@@ -19,8 +19,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 STYLE_IMAGES = [
-    "thanh1", "thanh2", "thanh3", "thanh4",
-    "thanh5", "thanh6", "thanh7", "thanh8"
 ]
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tiff"}
 
@@ -190,6 +188,10 @@ def main() -> None:
     target_files = []
     
     # Collect target files from style subdirectories
+    if not STYLE_IMAGES:
+        # Use all available styles in style_dir if STYLE_IMAGES is empty
+        STYLE_IMAGES.extend([d.name for d in target_dir.iterdir() if d.is_dir()])
+
     for style_name in STYLE_IMAGES:
         style_subdir = target_dir / style_name
         if not style_subdir.exists():
