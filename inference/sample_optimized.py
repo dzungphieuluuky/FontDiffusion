@@ -248,7 +248,7 @@ def get_style_transform(style_image_size: tuple[int, int]) -> transforms.Compose
 def load_fontdiffuser_pipeline(
     args: Namespace, use_fst: bool = False
 ) -> FontDiffuserDPMPipeline:
-    """Load Font Diffuser pipeline with optimizations and skeleton transform support"""
+    """Load Font Diffuser pipeline with optimizations, skeleton transform, and frequency decomposition support"""
     from src.builders.build import load_state_dict_auto
 
     logger.info(f"Loading FontDiffuser{'WithFST' if use_fst else ''} pipeline...")
@@ -257,6 +257,7 @@ def load_fontdiffuser_pipeline(
     unet: UNet = build_unet(args=args)
     style_encoder: StyleEncoder = build_style_encoder(args=args)
     content_encoder: ContentEncoder = build_content_encoder(args=args)
+    
     # Load base component weights
     unet_ckpt_path = (
         f"{args.ckpt_dir}/unet.safetensors"
@@ -286,6 +287,8 @@ def load_fontdiffuser_pipeline(
         k.startswith("original_encoder.") or k.startswith("fusion_conv.")
         for k in content_encoder_state.keys()
     )
+    
+    # Build skeleton transform if enabled
     skeleton_transform = None
     if is_wrapped_checkpoint:
         # Use wrapped encoder if checkpoint was saved as wrapped
@@ -319,6 +322,19 @@ def load_fontdiffuser_pipeline(
         logger.info("✓ Loaded plain content encoder")
 
     logger.info("✓ Loaded base model components (unet, style_encoder, content_encoder)")
+
+    # Build frequency decomposition if enabled
+    frequency_decomp = None
+    if getattr(args, "use_frequency_decomp", False):
+        from src.builders.build import build_frequency_decomposition
+        
+        frequency_decomp = build_frequency_decomposition(args=args)
+        logger.info(
+            f"✓ Frequency decomposition enabled "
+            f"(low_cutoff={getattr(args, 'frequency_low_cutoff', 0.10)}, "
+            f"mid_cutoff={getattr(args, 'frequency_mid_cutoff', 0.40)}, "
+            f"filter={getattr(args, 'frequency_filter_type', 'gaussian')})"
+        )
 
     if use_fst:
         from src.model import FontDiffuserModelDPMWithFST
@@ -359,7 +375,7 @@ def load_fontdiffuser_pipeline(
         else:
             logger.warning("No FST checkpoint path provided - using random weights")
         
-        # Create FST-enhanced model
+        # Create FST-enhanced model with frequency decomposition
         model: FontDiffuserModelDPMWithFST = FontDiffuserModelDPMWithFST(
             unet=unet,
             style_encoder=style_encoder,
@@ -368,11 +384,20 @@ def load_fontdiffuser_pipeline(
             fst_module=fst_module,
             fst_projection=fst_projection,
             original_style_projection=original_style_projection,
-            skeleton_transform=skeleton_transform
+            skeleton_transform=skeleton_transform,
+            frequency_decomp=frequency_decomp,
         )
         logger.info("✓ Created FontDiffuserModelDPMWithFST")
     else:
         # Standard model (non-FST)
+        # Note: Standard model doesn't support frequency decomposition or skeleton transform
+        # These features require FST model architecture
+        if frequency_decomp is not None or skeleton_transform is not None:
+            logger.warning(
+                "⚠️  Frequency decomposition and skeleton transform require --use_fst flag. "
+                "Creating standard model without these features."
+            )
+        
         model: FontDiffuserModelDPM = FontDiffuserModelDPM(
             unet=unet, 
             style_encoder=style_encoder, 
@@ -426,6 +451,7 @@ def load_fontdiffuser_pipeline(
     logger.info("✓ Created DPM-Solver pipeline")
 
     return pipe
+
 
 def sampling_batch(
     args: Namespace,
