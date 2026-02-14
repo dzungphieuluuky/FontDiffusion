@@ -701,6 +701,51 @@ def get_parser():
             "'add' (simple addition), "
             "'weighted' (learnable weighted sum)",
     )
+    # ==================== Fourier-Based Frequency Decomposition ====================
+    frequency_group = parser.add_argument_group("Frequency Decomposition")
+    # Frequency Decomposition Arguments
+    frequency_group.add_argument(
+        "--use_frequency_decomp",
+        action="store_true",
+        help="Use frequency decomposition for content-style separation",
+    )
+
+    frequency_group.add_argument(
+        "--frequency_low_cutoff",
+        type=float,
+        default=0.10,
+        help="Boundary between low and mid frequencies (fraction of max freq)",
+    )
+
+    frequency_group.add_argument(
+        "--frequency_mid_cutoff",
+        type=float,
+        default=0.40,
+        help="Boundary between mid and high frequencies (fraction of max freq)",
+    )
+
+    frequency_group.add_argument(
+        "--frequency_filter_type",
+        type=str,
+        default="gaussian",
+        choices=["ideal", "butterworth", "gaussian"],
+        help="Type of frequency filter",
+    )
+
+    frequency_group.add_argument(
+        "--frequency_use_mid_band",
+        action="store_true",
+        default=True,
+        help="Whether to use mid-frequency band",
+    )
+
+    frequency_group.add_argument(
+        "--frequency_mid_target",
+        type=str,
+        default="both",
+        choices=["content", "style", "both"],
+        help="Where to send mid-frequency band",
+    )
 
     # ==================== Adversarial Discriminator Arguments ====================
     adversarial = parser.add_argument_group("Adversarial Discriminator")
