@@ -13,7 +13,7 @@ import os
 from torchvision import transforms
 
 from src.modules.skeleton_distance_transform import SkeletonDistanceTransform  # ADD THIS IMPORT
-
+from src.modules.frequency_decomposition import FrequencyDecomposition  # ADD THIS IMPORT
 logger = logging.getLogger(__name__)
 
 
@@ -45,6 +45,9 @@ class FontDataset(Dataset):
         identity_pair_mode: str = "random",
         use_skeleton_transform: bool = False,  # ADD THIS
         skeleton_config: Optional[dict] = None,  # ADD THIS
+        use_frequency_decomp: bool = False,
+        frequency_config: Optional[dict] = None,
+
     ):
         """
         Initialize FontDataset with optional skeleton transform.
@@ -78,11 +81,37 @@ class FontDataset(Dataset):
         self.get_path()
         self.transforms = transforms
         self.nonorm_transforms = get_nonorm_transform(args.resolution)
+
+        # Frequency decomposition setup
+        self.use_frequency_decomp = use_frequency_decomp
+        
+        if self.use_frequency_decomp:
+            # Default configuration
+            default_config = {
+                "image_size": 96,
+                "low_cutoff": 0.10,
+                "mid_cutoff": 0.40,
+                "filter_type": "gaussian",
+                "normalize_bands": True,
+            }
+            
+            # Update with user config
+            if frequency_config:
+                default_config.update(frequency_config)
+            
+            # Create decomposition module
+            self.freq_decomp = FrequencyDecomposition(**default_config)
+            logger.info(f"Frequency decomposition enabled: {default_config}")
+        else:
+            self.freq_decomp = None
+
+
         logger.info(
             f"Dataset initialized:\n "
             f"Phase: {phase}\n"
             f"Use_FST: {use_fst}\n"
             f"SCR: {scr}\n"
+            f"Frequency Decomposition: {self.use_frequency_decomp}\n"
             f"Total samples: {len(self.target_images)}"
         )
 
@@ -513,6 +542,29 @@ class FontDataset(Dataset):
 
             if identity_pairs:
                 sample["identity_pairs"] = identity_pairs
+
+        if self.use_frequency_decomp:
+            # Decompose into frequency bands
+            # Input: (C, H, W) → Add batch dim → (1, C, H, W)
+            bands = self.freq_decomp(content_image.unsqueeze(0))
+            
+            # Extract bands and remove batch dim
+            content_low_freq = bands["low_freq"].squeeze(0)
+            content_mid_freq = bands["mid_freq"].squeeze(0)
+            content_high_freq = bands["high_freq"].squeeze(0)
+            
+            # Store frequency bands
+            sample["content_image"] = content_low_freq  # Use low freq for content
+            sample["content_image_mid"] = content_mid_freq
+            sample["content_image_original"] = content_image
+            
+            # Also decompose style images if available
+            if style_image is not None:
+                style_bands = self.freq_decomp(style_image.unsqueeze(0))
+                sample["style_image_high"] = style_bands["high_freq"].squeeze(0)
+                sample["style_image_mid"] = style_bands["mid_freq"].squeeze(0)
+        else:
+            sample["content_image"] = content_image
 
         return sample
 

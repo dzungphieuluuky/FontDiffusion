@@ -46,22 +46,32 @@ class CollateFN(object):
         """
         result = {}
         
-        # HANDLE CONTENT IMAGES WITH VARIABLE CHANNELS
-        content_images = [item["content_image"] for item in batch]
+        # Content images (low frequency band if using freq decomp)
+        result["content_image"] = torch.stack([
+            item["content_image"] for item in batch
+        ])
         
-        # Check number of channels (1 for normal, 2 for skeleton+distance)
-        num_channels = content_images[0].shape[0]
+        # Mid-frequency band (optional)
+        if "content_image_mid" in batch[0]:
+            result["content_image_mid"] = torch.stack([
+                item["content_image_mid"] for item in batch
+            ])
         
-        # Stack content images
-        result["content_image"] = torch.stack(content_images)  # (B, C, H, W)
-        
-        # Store channel info for model (useful for debugging)
-        result["content_num_channels"] = num_channels
-        
-        # If skeleton transform was used, also batch the original
+        # Original image (for reference)
         if "content_image_original" in batch[0]:
             result["content_image_original"] = torch.stack([
                 item["content_image_original"] for item in batch
+            ])
+        
+        # Style frequency bands
+        if "style_image_high" in batch[0]:
+            result["style_image_high"] = torch.stack([
+                item["style_image_high"] for item in batch
+            ])
+        
+        if "style_image_mid" in batch[0]:
+            result["style_image_mid"] = torch.stack([
+                item["style_image_mid"] for item in batch
             ])
         
         # Standard tensors (no changes needed)
