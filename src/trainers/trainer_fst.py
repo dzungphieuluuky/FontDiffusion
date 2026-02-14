@@ -861,8 +861,138 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
 
         return total_loss, loss_dict
 
+    def train(self):
+        """Main training loop."""
+        num_update_steps_per_epoch = math.ceil(
+            len(self.train_dataloader) / self.config.gradient_accumulation_steps
+        )
+        num_train_epochs = math.ceil(
+            self.config.max_train_steps / num_update_steps_per_epoch
+        )
+
+        # Resume from checkpoint if specified
+        if (
+            hasattr(self.args, "resume_from_checkpoint")
+            and self.args.resume_from_checkpoint
+        ):
+            if not self.load_checkpoint(self.args.resume_from_checkpoint):
+                logger.warning("Starting training from scratch")
+
+        # Setup progress bar
+        progress_bar = HFTqdm(
+            range(self.config.max_train_steps),
+            disable=not self.accelerator.is_local_main_process,
+            desc="Training",
+        )
+
+        # Initialize tracking variables
+        train_loss_accum = 0.0
+        loss_accum_count = 0
+
+        # Training loop
+        for epoch in range(self.current_epoch, num_train_epochs):
+            self.current_epoch = epoch
+
+            for step, samples in enumerate(self.train_dataloader):
+                # Skip steps if resuming
+                if self.global_step >= self.config.max_train_steps:
+                    break
+
+                with self.accelerator.accumulate(self.model):
+                    # Forward pass and loss computation
+                    loss, loss_dict = self.train_step(samples)
+
+                    # Backward pass
+                    self.accelerator.backward(loss)
+
+                    # Gradient clipping
+                    if self.accelerator.sync_gradients:
+                        grad_norm = torch.nn.utils.clip_grad_norm_(
+                            self.model.parameters(), self.config.max_grad_norm
+                        )
+
+                    # Optimization step
+                    self.optimizer.step()
+                    self.lr_scheduler.step()
+                    self.optimizer.zero_grad(set_to_none=True)
+
+                    # Update tracking variables
+                    train_loss_accum += loss.detach().item()
+                    loss_accum_count += 1
+
+                    # Sync and log
+                    if self.accelerator.sync_gradients:
+                        # Update progress bar
+                        progress_bar.update(1)
+                        self.global_step += 1
+
+                        # Compute average loss
+                        avg_train_loss = train_loss_accum / loss_accum_count
+
+                        # Prepare log dictionary
+                        log_dict = {
+                            "train_loss": avg_train_loss,
+                            "train/learning_rate": self.lr_scheduler.get_last_lr()[0],
+                            "train/epoch": epoch + step / len(self.train_dataloader),
+                            "train/global_step": self.global_step,
+                            "train/grad_norm": (
+                                grad_norm.item()
+                                if self.accelerator.sync_gradients
+                                else 0.0
+                            ),
+                        }
+
+                        # Add individual losses
+                        for loss_name, loss_val in loss_dict.items():
+                            log_dict[f"loss/{loss_name}"] = loss_val
+
+                        # Log to tracker
+                        self.accelerator.log(log_dict, step=self.global_step)
+
+                        # Reset accumulators
+                        train_loss_accum = 0.0
+                        loss_accum_count = 0
+
+                        # Log to console
+                        if self.global_step % self.args.log_interval == 0:
+                            logger.info(
+                                f"Step {self.global_step}: "
+                                f"loss={avg_train_loss:.4f}, "
+                                f"lr={self.lr_scheduler.get_last_lr()[0]:.6f}, "
+                                f"grad_norm={grad_norm.item():.4f}"
+                            )
+
+                        # Save checkpoint
+                        if (
+                            self.global_step % self.args.ckpt_interval == 0
+                            and self.accelerator.is_main_process
+                        ):
+                            self.save_checkpoint()
+
+                # Update progress bar description
+                progress_bar.set_postfix(
+                    loss=loss.detach().item(),
+                    lr=self.lr_scheduler.get_last_lr()[0],
+                    step=self.global_step,
+                )
+
+                if self.global_step >= self.config.max_train_steps:
+                    break
+
+            if self.global_step >= self.config.max_train_steps:
+                break
+
+        progress_bar.close()
+
+        # Save final checkpoint
+        if self.accelerator.is_main_process:
+            self.save_checkpoint(is_final=True)
+
+        self.accelerator.end_training()
+
+
     def save_checkpoint(self, is_final: bool = False):
-        """Save FST training checkpoint."""
+        """Save FST training checkpoint with complete state."""
         if not self.accelerator.is_main_process:
             return
 
@@ -912,6 +1042,17 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 save_dir / "original_style_projection.safetensors",
             )
 
+            # Save identity loss module if it exists
+            if self.identity_loss_module is not None:
+                unwrapped_identity = self.accelerator.unwrap_model(
+                    self.identity_loss_module
+                )
+                save_model_checkpoint(
+                    unwrapped_identity.state_dict(),
+                    save_dir / "identity_loss_module.safetensors",
+                )
+                logger.info("✓ Saved identity loss module")
+
             logger.info("✓ Saved all FST components")
         else:
             # Save standard model
@@ -932,26 +1073,54 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         if self.config.phase_2 and self.scr is not None:
             save_model_checkpoint(self.scr.state_dict(), save_dir / "scr.safetensors")
 
-        # Save optimizer and scheduler states
-        torch.save(
-            {
-                "global_step": self.global_step,
-                "epoch": self.current_epoch,
-                "optimizer_state_dict": self.optimizer.state_dict(),
-                "lr_scheduler_state_dict": self.lr_scheduler.state_dict(),
-                "config": asdict(self.config),
-                "fst_config": {
-                    "use_fst": self.use_fst,
-                    "freeze_original_encoders": self.freeze_original_encoders,
-                    "style_source_same_prob": self.style_source_same_prob,
-                    "fst_feature_channels": self.fst_feature_channels,
-                    "fst_num_queries": self.fst_num_queries,
-                    "fst_query_dim": self.fst_query_dim,
-                    "fst_num_scales": self.fst_num_scales,
-                },
+        # Build complete training state with all configurations
+        training_state = {
+            "global_step": self.global_step,
+            "epoch": self.current_epoch,
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "lr_scheduler_state_dict": self.lr_scheduler.state_dict(),
+            "config": asdict(self.config),
+            "fst_config": {
+                "use_fst": self.use_fst,
+                "style_source_same_prob": self.style_source_same_prob,
+                "fst_feature_channels": self.fst_feature_channels,
+                "fst_num_queries": self.fst_num_queries,
+                "fst_query_dim": self.fst_query_dim,
+                "fst_num_scales": self.fst_num_scales,
+                "num_consistency_pairs": self.num_consistency_pairs,
+                "consistency_loss_weight": self.consistency_loss_weight,
+                "num_identity_pairs": self.num_identity_pairs,
+                "identity_loss_weight": self.identity_loss_weight,
+                "identity_pair_mode": self.identity_pair_mode,
             },
-            save_dir / "training_state.pt",
-        )
+        }
+
+        # Add skeleton transform config if enabled
+        if self.use_skeleton_content:
+            training_state["skeleton_config"] = {
+                "use_skeleton_content": self.use_skeleton_content,
+                "skeleton_method": self.skeleton_method,
+                "skeleton_distance_method": self.skeleton_distance_method,
+                "skeleton_max_distance": self.skeleton_max_distance,
+                "skeleton_sigma": self.skeleton_sigma,
+                "skeleton_output_mode": self.skeleton_output_mode,
+                "skeleton_fusion_method": self.skeleton_fusion_method,
+            }
+
+        # Add frequency decomposition config if enabled
+        if self.use_frequency_decomp:
+            training_state["frequency_config"] = {
+                "use_frequency_decomp": self.use_frequency_decomp,
+                "frequency_low_cutoff": self.frequency_low_cutoff,
+                "frequency_mid_cutoff": self.frequency_mid_cutoff,
+                "frequency_filter_type": self.frequency_filter_type,
+                "frequency_normalize_bands": self.frequency_normalize_bands,
+                "frequency_use_mid_band": self.frequency_use_mid_band,
+                "frequency_mid_target": self.frequency_mid_target,
+            }
+
+        # Save training state (use .pt for consistency)
+        torch.save(training_state, save_dir / "training_state.pt")
 
         logger.info(f"✓ Saved checkpoint to {save_dir}")
         self.accelerator.log(
@@ -961,6 +1130,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 "checkpoint_type": "fst" if self.use_fst else "base",
             }
         )
+
 
     def load_checkpoint(self, checkpoint_path: str) -> bool:
         """Load FST checkpoint with full state restoration."""
@@ -972,8 +1142,11 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             logger.info(f"Loading checkpoint from {checkpoint_path}...")
             checkpoint_dir = Path(checkpoint_path)
 
-            # Load training state
-            training_state_path = checkpoint_dir / "training_state.pth"
+            # Load training state (try both .pt and .pth for backward compatibility)
+            training_state_path = checkpoint_dir / "training_state.pt"
+            if not training_state_path.exists():
+                training_state_path = checkpoint_dir / "training_state.pth"
+
             if training_state_path.exists():
                 training_state = torch.load(training_state_path, map_location="cpu")
 
@@ -982,23 +1155,58 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 self.current_epoch = training_state.get("epoch", 0)
 
                 # Restore optimizer and scheduler
-                self.optimizer.load_state_dict(training_state["optimizer_state_dict"])
-                self.lr_scheduler.load_state_dict(
-                    training_state["lr_scheduler_state_dict"]
-                )
+                if "optimizer_state_dict" in training_state:
+                    self.optimizer.load_state_dict(training_state["optimizer_state_dict"])
+                    logger.info("✓ Restored optimizer state")
+
+                if "lr_scheduler_state_dict" in training_state:
+                    self.lr_scheduler.load_state_dict(
+                        training_state["lr_scheduler_state_dict"]
+                    )
+                    logger.info("✓ Restored learning rate scheduler state")
 
                 logger.info(
                     f"✓ Restored training state (step={self.global_step}, epoch={self.current_epoch})"
                 )
 
-                # Restore FST config if present (for validation/debugging)
+                # Restore FST config if present
                 fst_cfg = training_state.get("fst_config", {})
                 if fst_cfg:
                     logger.info(f"FST config from checkpoint: {fst_cfg}")
+                    # Validate FST config matches current setup
+                    if fst_cfg.get("use_fst") != self.use_fst:
+                        logger.warning(
+                            f"⚠️ FST mode mismatch: checkpoint={fst_cfg.get('use_fst')}, "
+                            f"current={self.use_fst}"
+                        )
+
+                # Restore skeleton config if present
+                skeleton_cfg = training_state.get("skeleton_config", {})
+                if skeleton_cfg:
+                    logger.info(f"Skeleton config from checkpoint: {skeleton_cfg}")
+                    if skeleton_cfg.get("use_skeleton_content") != self.use_skeleton_content:
+                        logger.warning(
+                            f"⚠️ Skeleton mode mismatch: "
+                            f"checkpoint={skeleton_cfg.get('use_skeleton_content')}, "
+                            f"current={self.use_skeleton_content}"
+                        )
+
+                # Restore frequency config if present
+                frequency_cfg = training_state.get("frequency_config", {})
+                if frequency_cfg:
+                    logger.info(f"Frequency config from checkpoint: {frequency_cfg}")
+                    if frequency_cfg.get("use_frequency_decomp") != self.use_frequency_decomp:
+                        logger.warning(
+                            f"⚠️ Frequency decomposition mode mismatch: "
+                            f"checkpoint={frequency_cfg.get('use_frequency_decomp')}, "
+                            f"current={self.use_frequency_decomp}"
+                        )
             else:
                 logger.warning(
-                    "training_state.pth not found; skipping optimizer/scheduler restore"
+                    "training_state.pt/pth not found; starting from step 0"
                 )
+                self.global_step = 0
+                self.current_epoch = 0
 
             # Load model components
             unwrapped_model = self.accelerator.unwrap_model(self.model)
@@ -1056,14 +1264,21 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                     ),
                 }
 
+            # Load each component
+            loaded_count = 0
             for comp_name, (file_name, module) in components.items():
                 ckpt_path = checkpoint_dir / file_name
                 if ckpt_path.exists():
                     state_dict = load_model_checkpoint(ckpt_path)
                     module.load_state_dict(state_dict)
                     logger.info(f"✓ Loaded {comp_name}")
+                    loaded_count += 1
                 else:
-                    logger.warning(f"Component {comp_name} not found at {ckpt_path}")
+                    logger.warning(f"⚠️ Component {comp_name} not found at {ckpt_path}")
+
+            if loaded_count == 0:
+                logger.error("Failed to load any model components!")
+                return False
 
             # Load SCR if available
             if self.config.phase_2 and self.scr is not None:
@@ -1074,13 +1289,14 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                     logger.info("✓ Loaded SCR module")
 
             logger.info(f"✓ Checkpoint loaded successfully from {checkpoint_dir}")
+            logger.info(f"  Loaded {loaded_count}/{len(components)} components")
             return True
 
         except Exception as e:
             logger.error(f"Failed to load checkpoint: {e}")
             logger.debug(traceback.format_exc())
             return False
-
+    
     def export_to_onnx(self) -> bool:
         """
         Export trained FST model to ONNX format as a single unified model.
@@ -1243,132 +1459,3 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             logger.error(f"Failed to export to ONNX: {e}")
             logger.debug(traceback.format_exc())
             return False
-
-    def train(self):
-        """Main training loop."""
-        num_update_steps_per_epoch = math.ceil(
-            len(self.train_dataloader) / self.config.gradient_accumulation_steps
-        )
-        num_train_epochs = math.ceil(
-            self.config.max_train_steps / num_update_steps_per_epoch
-        )
-
-        # Resume from checkpoint if specified
-        if (
-            hasattr(self.args, "resume_from_checkpoint")
-            and self.args.resume_from_checkpoint
-        ):
-            if not self.load_checkpoint(self.args.resume_from_checkpoint):
-                logger.warning("Starting training from scratch")
-
-        # Setup progress bar
-        progress_bar = HFTqdm(
-            range(self.config.max_train_steps),
-            disable=not self.accelerator.is_local_main_process,
-            desc="Training",
-        )
-
-        # Initialize tracking variables
-        train_loss_accum = 0.0
-        loss_accum_count = 0
-
-        # Training loop
-        for epoch in range(self.current_epoch, num_train_epochs):
-            self.current_epoch = epoch
-
-            for step, samples in enumerate(self.train_dataloader):
-                # Skip steps if resuming
-                if self.global_step >= self.config.max_train_steps:
-                    break
-
-                with self.accelerator.accumulate(self.model):
-                    # Forward pass and loss computation
-                    loss, loss_dict = self.train_step(samples)
-
-                    # Backward pass
-                    self.accelerator.backward(loss)
-
-                    # Gradient clipping
-                    if self.accelerator.sync_gradients:
-                        grad_norm = torch.nn.utils.clip_grad_norm_(
-                            self.model.parameters(), self.config.max_grad_norm
-                        )
-
-                    # Optimization step
-                    self.optimizer.step()
-                    self.lr_scheduler.step()
-                    self.optimizer.zero_grad(set_to_none=True)
-
-                    # Update tracking variables
-                    train_loss_accum += loss.detach().item()
-                    loss_accum_count += 1
-
-                    # Sync and log
-                    if self.accelerator.sync_gradients:
-                        # Update progress bar
-                        progress_bar.update(1)
-                        self.global_step += 1
-
-                        # Compute average loss
-                        avg_train_loss = train_loss_accum / loss_accum_count
-
-                        # Prepare log dictionary
-                        log_dict = {
-                            "train_loss": avg_train_loss,
-                            "train/learning_rate": self.lr_scheduler.get_last_lr()[0],
-                            "train/epoch": epoch + step / len(self.train_dataloader),
-                            "train/global_step": self.global_step,
-                            "train/grad_norm": (
-                                grad_norm.item()
-                                if self.accelerator.sync_gradients
-                                else 0.0
-                            ),
-                        }
-
-                        # Add individual losses
-                        for loss_name, loss_val in loss_dict.items():
-                            log_dict[f"loss/{loss_name}"] = loss_val
-
-                        # Log to tracker
-                        self.accelerator.log(log_dict, step=self.global_step)
-
-                        # Reset accumulators
-                        train_loss_accum = 0.0
-                        loss_accum_count = 0
-
-                        # Log to console
-                        if self.global_step % self.args.log_interval == 0:
-                            logger.info(
-                                f"Step {self.global_step}: "
-                                f"loss={avg_train_loss:.4f}, "
-                                f"lr={self.lr_scheduler.get_last_lr()[0]:.6f}, "
-                                f"grad_norm={grad_norm.item():.4f}"
-                            )
-
-                        # Save checkpoint
-                        if (
-                            self.global_step % self.args.ckpt_interval == 0
-                            and self.accelerator.is_main_process
-                        ):
-                            self.save_checkpoint()
-
-                # Update progress bar description
-                progress_bar.set_postfix(
-                    loss=loss.detach().item(),
-                    lr=self.lr_scheduler.get_last_lr()[0],
-                    step=self.global_step,
-                )
-
-                if self.global_step >= self.config.max_train_steps:
-                    break
-
-            if self.global_step >= self.config.max_train_steps:
-                break
-
-        progress_bar.close()
-
-        # Save final checkpoint
-        if self.accelerator.is_main_process:
-            self.save_checkpoint(is_final=True)
-
-        self.accelerator.end_training()
