@@ -12,6 +12,12 @@ from src.modules.skeleton_distance_transform import (
     DualChannelContentEncoder,
 )
 from src.modules.adversarial import StyleDiscriminator, AdversarialContentStyleLoss, StyleLabelExtractor
+from src.modules.frequency_decomposition import (
+    FrequencyDecomposition,
+    MultiScaleFrequencyEncoder
+)
+
+
 import logging
 from src.tools.utilities import setup_logger
 
@@ -378,3 +384,89 @@ def load_components(components: dict, args: argparse.Namespace) -> None:
             logger.info(f"✓ Loaded weights for '{name}' from {ckpt_path}")
         else:
             logger.warning(f"⚠ Checkpoint for '{name}' not found in {args.ckpt_dir}")
+
+def build_frequency_decomposition(args: argparse.Namespace) -> FrequencyDecomposition:
+    """Build frequency decomposition module.
+    
+    Args:
+        args (argparse.Namespace): Configuration arguments with:
+            - frequency_image_size: Input image size (default: 96)
+            - frequency_low_cutoff: Low/mid boundary (default: 0.10)
+            - frequency_mid_cutoff: Mid/high boundary (default: 0.40)
+            - frequency_filter_type: Filter type (default: "gaussian")
+            - frequency_normalize_bands: Whether to normalize bands (default: True)
+            - frequency_return_fft: Return FFT spectrums (default: False)
+    
+    Returns:
+        FrequencyDecomposition: Frequency decomposition module instance.
+    """
+    print("Building Frequency Decomposition module...")
+    
+    image_size = getattr(args, "frequency_image_size", 96)
+    low_cutoff = getattr(args, "frequency_low_cutoff", 0.10)
+    mid_cutoff = getattr(args, "frequency_mid_cutoff", 0.40)
+    filter_type = getattr(args, "frequency_filter_type", "gaussian")
+    normalize_bands = getattr(args, "frequency_normalize_bands", True)
+    return_fft = getattr(args, "frequency_return_fft", False)
+    
+    freq_decomp = FrequencyDecomposition(
+        image_size=image_size,
+        low_cutoff=low_cutoff,
+        mid_cutoff=mid_cutoff,
+        filter_type=filter_type,
+        normalize_bands=normalize_bands,
+        return_fft=return_fft,
+    )
+    
+    print(
+        f"✓ Frequency Decomposition built successfully "
+        f"(low_cutoff={low_cutoff}, mid_cutoff={mid_cutoff}, filter={filter_type})."
+    )
+    return freq_decomp
+
+
+def build_frequency_encoder_wrapper(
+    args: argparse.Namespace,
+    content_encoder: ContentEncoder,
+    style_encoder: StyleEncoder,
+) -> MultiScaleFrequencyEncoder:
+    """Build multi-scale frequency encoder wrapper.
+    
+    Wraps content and style encoders to process frequency-decomposed inputs.
+    
+    Args:
+        args (argparse.Namespace): Configuration arguments with:
+            - frequency_image_size: Input image size (default: 96)
+            - frequency_low_cutoff: Low/mid boundary (default: 0.10)
+            - frequency_mid_cutoff: Mid/high boundary (default: 0.40)
+            - frequency_use_mid_band: Use mid-frequency band (default: True)
+            - frequency_mid_target: Where to send mid-band (default: "both")
+        content_encoder: Content encoder to wrap
+        style_encoder: Style encoder to wrap
+    
+    Returns:
+        MultiScaleFrequencyEncoder: Wrapped encoder instance.
+    """
+    print("Building Multi-Scale Frequency Encoder wrapper...")
+    
+    image_size = getattr(args, "frequency_image_size", 96)
+    low_cutoff = getattr(args, "frequency_low_cutoff", 0.10)
+    mid_cutoff = getattr(args, "frequency_mid_cutoff", 0.40)
+    use_mid_band = getattr(args, "frequency_use_mid_band", True)
+    mid_band_target = getattr(args, "frequency_mid_target", "both")
+    
+    freq_encoder = MultiScaleFrequencyEncoder(
+        content_encoder=content_encoder,
+        style_encoder=style_encoder,
+        image_size=image_size,
+        low_cutoff=low_cutoff,
+        mid_cutoff=mid_cutoff,
+        use_mid_band=use_mid_band,
+        mid_band_target=mid_band_target,
+    )
+    
+    print(
+        f"✓ Frequency Encoder wrapper built successfully "
+        f"(use_mid_band={use_mid_band}, mid_target={mid_band_target})."
+    )
+    return freq_encoder
