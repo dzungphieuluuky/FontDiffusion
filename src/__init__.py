@@ -20,5 +20,6 @@ from .builders.build import (
     get_unet_cross_attention_dim,
     build_identity_loss_module,
     build_dual_channel_content_encoder,
-    build_skeleton_transform
+    build_skeleton_transform,
+    build_frequency_decomposition
 )
