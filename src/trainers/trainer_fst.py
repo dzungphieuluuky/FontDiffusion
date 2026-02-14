@@ -26,6 +26,7 @@ from onnx.external_data_helper import convert_model_to_external_data
 from src.dataset.font_dataset_fst import FontDataset as FontDatasetFST
 from src.dataset.collate_fn_fst import CollateFN as CollateFNFST
 from src.modules import UNet, ContentEncoder, StyleEncoder, SCR
+from src.modules.frequency_decomposition import FrequencyDecomposition
 from src import (
     ContentPerceptualLoss,
     FontDiffuserModel,
@@ -41,7 +42,8 @@ from src import (
     get_unet_cross_attention_dim,
     build_identity_loss_module,
     build_skeleton_transform,
-    build_dual_channel_content_encoder
+    build_dual_channel_content_encoder,
+    build_frequency_decomposition,
 )
 from src.model import FontDiffuserWithFST
 from src.tools.utilities import (
@@ -107,6 +109,15 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         self.skeleton_output_mode: str = getattr(args, "skeleton_output_mode", "dual_channel")
         self.skeleton_fusion_method: str = getattr(args, "skeleton_fusion_method", "concat")
 
+        # Frequency decomposition parameters
+        self.use_frequency_decomp: bool = getattr(args, "use_frequency_decomp", False)
+        self.frequency_low_cutoff: float = getattr(args, "frequency_low_cutoff", 0.10)
+        self.frequency_mid_cutoff: float = getattr(args, "frequency_mid_cutoff", 0.40)
+        self.frequency_filter_type: str = getattr(args, "frequency_filter_type", "gaussian")
+        self.frequency_normalize_bands: bool = getattr(args, "frequency_normalize_bands", True)
+        self.frequency_use_mid_band: bool = getattr(args, "frequency_use_mid_band", True)
+        self.frequency_mid_target: str = getattr(args, "frequency_mid_target", "both")
+
         # Call parent constructor
         super().__init__(args)
 
@@ -157,7 +168,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         return channels_str
 
     def _setup_models(self):
-        """Initialize FST model components with skeleton support."""
+        """Initialize FST model components with skeleton and frequency decomposition support."""
         logger.info("Building model components...")
 
         # Build core components
@@ -176,7 +187,6 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             )
         else:
             logger.warning("⚠️ No phase_1_ckpt_dir specified - training from scratch!")
-            logger.warning("⚠️ This will likely produce poor results. Use pretrained weights!")
 
         # Create model based on FST flag
         if self.use_fst:
@@ -196,25 +206,33 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             original_style_projection = build_original_style_projection(
                 style_dim=1024, cross_attn_dim=cross_attn_dim
             )
+            
+            # Build transforms
             skeleton_transform = None
             if self.use_skeleton_content:
                 skeleton_transform = build_skeleton_transform(args=self.args)
                 dual_channel_content_encoder = build_dual_channel_content_encoder(args=self.args)
+                content_encoder = dual_channel_content_encoder
+            
+            frequency_decomp = None
+            if self.use_frequency_decomp:
+                frequency_decomp = build_frequency_decomposition(args=self.args)
             
             self.model = FontDiffuserWithFST(
                 unet=unet,
                 style_encoder=style_encoder,
-                content_encoder=dual_channel_content_encoder if self.use_skeleton_content else content_encoder,
+                content_encoder=content_encoder,
                 mss_encoder=mss_encoder,
                 fst_module=fst_module,
                 fst_projection=fst_projection,
                 original_style_projection=original_style_projection,
-                skeleton_transform=skeleton_transform
+                skeleton_transform=skeleton_transform,
+                frequency_decomp=frequency_decomp,
             )
 
             logger.info("✓ Created FontDiffuserWithFST")
             
-            # Log skeleton configuration
+            # Log configurations
             if self.use_skeleton_content:
                 logger.info("=" * 80)
                 logger.info("Skeleton-Distance Transform Configuration")
@@ -227,6 +245,20 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 logger.info(f"  Fusion Method: {self.skeleton_fusion_method}")
                 logger.info("=" * 80)
             
+            if self.use_frequency_decomp:
+                logger.info("=" * 80)
+                logger.info("Frequency Decomposition Configuration")
+                logger.info("=" * 80)
+                logger.info(f"  Image Size: 96")
+                logger.info(f"  Low Cutoff: {self.frequency_low_cutoff} (0-{self.frequency_low_cutoff*100:.0f}%)")
+                logger.info(f"  Mid Cutoff: {self.frequency_mid_cutoff} ({self.frequency_low_cutoff*100:.0f}-{self.frequency_mid_cutoff*100:.0f}%)")
+                logger.info(f"  High Band: {self.frequency_mid_cutoff*100:.0f}-100%")
+                logger.info(f"  Filter Type: {self.frequency_filter_type}")
+                logger.info(f"  Normalize Bands: {self.frequency_normalize_bands}")
+                logger.info(f"  Use Mid Band: {self.frequency_use_mid_band}")
+                logger.info(f"  Mid Band Target: {self.frequency_mid_target}")
+                logger.info("=" * 80)
+            
             self.model.log_model_info()
 
             # Build identity loss module if needed
@@ -235,14 +267,13 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 logger.info(f"✓ Created IdentityMappingLoss module with {self.num_identity_pairs} pairs")
             else:
                 self.identity_loss_module = None
-                logger.info("ℹ️ Identity loss disabled (num_identity_pairs=0)")
 
             # Apply freezing
             if self.freeze_modules:
                 self._apply_module_freezing()
                 
         else:
-            # Standard model without FST (no skeleton support needed)
+            # Standard model without FST
             from src.model import FontDiffuserModel
 
             self.model = FontDiffuserModel(
@@ -347,7 +378,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             logger.info("✓ Skeleton transform will be applied during data loading")
 
     def _setup_logging(self):
-        """Setup logging and tracking with FST and skeleton information."""
+        """Setup logging and tracking with FST, skeleton, and frequency information."""
         super()._setup_logging()
 
         # Log FST-specific configuration
@@ -367,7 +398,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 "identity_pair_mode": self.identity_pair_mode,
             }
 
-            # ADD SKELETON TRANSFORM CONFIG
+            # Add skeleton transform config
             if self.use_skeleton_content:
                 skeleton_config = {
                     "use_skeleton_content": self.use_skeleton_content,
@@ -378,9 +409,22 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                     "skeleton_output_mode": self.skeleton_output_mode,
                     "skeleton_fusion_method": self.skeleton_fusion_method,
                 }
-                
                 fst_config.update(skeleton_config)
                 logger.info(f"Skeleton Transform Config: {skeleton_config}")
+
+            # Add frequency decomposition config
+            if self.use_frequency_decomp:
+                frequency_config = {
+                    "use_frequency_decomp": self.use_frequency_decomp,
+                    "frequency_low_cutoff": self.frequency_low_cutoff,
+                    "frequency_mid_cutoff": self.frequency_mid_cutoff,
+                    "frequency_filter_type": self.frequency_filter_type,
+                    "frequency_normalize_bands": self.frequency_normalize_bands,
+                    "frequency_use_mid_band": self.frequency_use_mid_band,
+                    "frequency_mid_target": self.frequency_mid_target,
+                }
+                fst_config.update(frequency_config)
+                logger.info(f"Frequency Decomposition Config: {frequency_config}")
 
             if self.use_fst:
                 unwrapped = self.accelerator.unwrap_model(self.model)
