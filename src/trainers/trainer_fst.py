@@ -921,7 +921,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
 
                         # Prepare log dictionary
                         log_dict = {
-                            "train_loss": avg_train_loss,
+                            "loss/avg_train_loss": avg_train_loss,
                             "train/learning_rate": self.lr_scheduler.get_last_lr()[0],
                             "train/epoch": epoch + step / len(self.train_dataloader),
                             "train/global_step": self.global_step,
