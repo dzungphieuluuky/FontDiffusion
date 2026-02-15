@@ -258,22 +258,22 @@ class FontDiffuserWithFST(ModelMixin, ConfigMixin):
         
         # Log skeleton configuration
         if self.use_skeleton_content:
-            logger.info("✓ Skeleton-Distance Transform: ENABLED")
+            logger.info("✓ Skeleton-Distance Transform: ✅")
             logger.info(f"  Fusion method: {self.content_encoder.fusion_method}")
             if hasattr(self.content_encoder, "fusion_conv"):
                 fusion_params = sum(p.numel() for p in self.content_encoder.fusion_conv.parameters())
                 logger.info(f"  Fusion parameters: {fusion_params:,}")
         else:
-            logger.info("ℹ️ Skeleton-Distance Transform: DISABLED")
+            logger.info("Skeleton-Distance Transform: ❌")
         
         # Log frequency decomposition configuration
         if self.use_frequency_decomp:
-            logger.info("✓ Frequency Decomposition: ENABLED")
+            logger.info("✓ Frequency Decomposition: ✅")
             logger.info(f"  Low cutoff: {self.frequency_decomp.low_cutoff}")
             logger.info(f"  Mid cutoff: {self.frequency_decomp.mid_cutoff}")
             logger.info(f"  Filter type: {self.frequency_decomp.filter_builder.filter_type}")
         else:
-            logger.info("ℹ️ Frequency Decomposition: DISABLED")
+            logger.info("Frequency Decomposition: ❌")
         
         # Log component parameters
         components = {
@@ -730,7 +730,7 @@ class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
 
         # Log skeleton configuration
         if self.use_skeleton_content:
-            logger.info("✓ Skeleton-Distance Transform: ENABLED")
+            logger.info("✓ Skeleton-Distance Transform: ✅")
             logger.info(f"  Fusion method: {self.content_encoder.fusion_method}")
             if hasattr(self.content_encoder, "fusion_conv"):
                 fusion_params = sum(
@@ -738,16 +738,16 @@ class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
                 )
                 logger.info(f"  Fusion parameters: {fusion_params:,}")
         else:
-            logger.info("ℹ️ Skeleton-Distance Transform: DISABLED")
+            logger.info("Skeleton-Distance Transform: ❌")
         
         # Log frequency decomposition configuration
         if self.use_frequency_decomp:
-            logger.info("✓ Frequency Decomposition: ENABLED")
+            logger.info("✓ Frequency Decomposition: ✅")
             logger.info(f"  Low cutoff: {self.frequency_decomp.low_cutoff}")
             logger.info(f"  Mid cutoff: {self.frequency_decomp.mid_cutoff}")
             logger.info(f"  Filter type: {self.frequency_decomp.filter_builder.filter_type}")
         else:
-            logger.info("ℹ️ Frequency Decomposition: DISABLED")
+            logger.info("Frequency Decomposition: ❌")
 
         # Get actual content encoder for parameter counting
         content_encoder_for_counting = (

@@ -27,7 +27,6 @@ import torch.fft
 import numpy as np
 from typing import Tuple, List, Optional, Dict, Literal
 import matplotlib.pyplot as plt
-from scipy.ndimage import gaussian_filter
 
 
 class FrequencyBandFilter:
