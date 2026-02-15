@@ -811,10 +811,10 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                     total_loss += self.consistency_loss_weight * consistency_loss
                     loss_dict["consistency_loss"] = consistency_loss.item()
 
-        # Simplified identity loss logging (only if module exists)
+        # ==================== FIXED IDENTITY LOSS ====================
+        # Use model's compute_identity_loss method which implements the correct logic
         if (
             self.use_fst
-            and self.identity_loss_module is not None
             and self.num_identity_pairs > 0
             and samples.get("num_identity_pairs_total", 0) > 0
         ):
@@ -828,39 +828,29 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 else self.model
             )
 
-            # Extract FST features from identity pairs
-            with torch.no_grad():
-                source_fst_features = model.mss_encoder(identity_sources)
-                target_fst_features = model.mss_encoder(identity_targets)
-
-            # Apply FST to get transformation features
-            transformation_source = model.fst_module(
-                source_fst_features, source_fst_features
-            )
-            transformation_target = model.fst_module(
-                target_fst_features, target_fst_features
-            )
-
-            # Extract query portion
-            query_source = transformation_source[:, : self.fst_num_queries, :]
-            query_target = transformation_target[:, : self.fst_num_queries, :]
-
-            # Compute identity loss
-            identity_loss, identity_metrics = self.identity_loss_module(
-                query_source, query_target
+            # Compute identity loss using model's compute_identity_loss method
+            # This method correctly handles the identity transformation constraint:
+            # 1. Extracts features from both source and target (same style)
+            # 2. Applies FST with identical inputs: fst_module(F, F)
+            # 3. Computes correlation matrix and enforces it to be identity
+            # 4. Adds orthogonality regularization
+            identity_loss, identity_metrics = model.compute_identity_loss(
+                identity_pair_sources=identity_sources,
+                identity_pair_targets=identity_targets,
+                num_queries=self.fst_num_queries,
             )
 
             # Add to total loss
             total_loss = total_loss + self.identity_loss_weight * identity_loss
 
-            # Only log essential metrics
+            # Log essential metrics
             loss_dict["identity_loss"] = identity_loss.item()
+            loss_dict["identity_loss_main"] = identity_metrics.get("identity_loss", 0.0)
+            loss_dict["identity_ortho_loss"] = identity_metrics.get("ortho_loss", 0.0)
             loss_dict["identity_diag_mean"] = identity_metrics.get("diagonal_mean", 0.0)
             loss_dict["identity_diag_std"] = identity_metrics.get("diagonal_std", 0.0)
-            loss_dict["identity_reg_loss"] = identity_metrics.get("reg_loss", 0.0)
 
         return total_loss, loss_dict
-
     def train(self):
         """Main training loop."""
         num_update_steps_per_epoch = math.ceil(
