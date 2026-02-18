@@ -983,6 +983,14 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
 
     def save_checkpoint(self, is_final: bool = False):
         """Save FST training checkpoint with complete state."""
+        
+        # Synchronize all processes before checkpoint saving
+        self.accelerator.wait_for_everyone()
+        
+        # Unwrap model on all processes (required for DDP)
+        unwrapped_model = self.accelerator.unwrap_model(self.model)
+        
+        # Only main process saves to disk
         if not self.accelerator.is_main_process:
             return
 
@@ -995,9 +1003,6 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             )
 
         save_dir.mkdir(parents=True, exist_ok=True)
-
-        # Unwrap model for saving
-        unwrapped_model = self.accelerator.unwrap_model(self.model)
 
         if self.use_fst:
             # Save all FST model components individually
@@ -1034,34 +1039,25 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
 
             # Save identity loss module if it exists
             if self.identity_loss_module is not None:
-                unwrapped_identity = self.accelerator.unwrap_model(
-                    self.identity_loss_module
-                )
                 save_model_checkpoint(
-                    unwrapped_identity.state_dict(),
+                    self.identity_loss_module.state_dict(),
                     save_dir / "identity_loss_module.safetensors",
                 )
-                logger.info("✓ Saved identity loss module")
 
             logger.info("✓ Saved all FST components")
         else:
             # Save standard model
             save_model_checkpoint(
-                unwrapped_model.config.unet.state_dict(),
-                save_dir / "unet.safetensors",
-            )
-            save_model_checkpoint(
-                unwrapped_model.config.style_encoder.state_dict(),
-                save_dir / "style_encoder.safetensors",
-            )
-            save_model_checkpoint(
-                unwrapped_model.config.content_encoder.state_dict(),
-                save_dir / "content_encoder.safetensors",
+                unwrapped_model.state_dict(),
+                save_dir / "model.safetensors",
             )
 
         # Save SCR for phase 2
         if self.config.phase_2 and self.scr is not None:
-            save_model_checkpoint(self.scr.state_dict(), save_dir / "scr.safetensors")
+            save_model_checkpoint(
+                self.scr.state_dict(),
+                save_dir / "scr.safetensors",
+            )
 
         # Build complete training state with all configurations
         training_state = {
@@ -1120,7 +1116,6 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                 "checkpoint_type": "fst" if self.use_fst else "base",
             }
         )
-
 
     def load_checkpoint(self, checkpoint_path: str) -> bool:
         """Load FST checkpoint with full state restoration."""
