@@ -242,6 +242,7 @@ class FontDiffuserWithFST(ModelMixin, ConfigMixin):
         self.fst_module: FontStyleTransformationModule = fst_module
         self.fst_projection: nn.Linear = fst_projection
         self.original_style_projection: nn.Linear = original_style_projection
+        self.fst_num_queries: int = fst_module.num_queries
         
         # Optional transforms
         self.skeleton_transform: SkeletonDistanceTransform = skeleton_transform
