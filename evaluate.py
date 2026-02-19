@@ -9,14 +9,16 @@ Metrics:
 Expected folder layout
 ----------------------
 FontDiffusion/
-├── ContentImage/
-│   └── <char>.png / <char>.jpg
+├── FST-FFT-test/
+│   ├── ContentImage/
+│   │   └── <char>.png / <char>.jpg
+│   └── TargetImage/
+│       └── <style_name>/
+│           └── <style_name>+<char>.png
 ├── style_images/
 │   └── cleaned_handwritten_enhanced/
-│       └── *.png / *.jpg
-├── results/                         <- --results_dir
-│   └── *.png / *.jpg
-└── results_checkpoint.json          <- preferred manifest (--checkpoint)
+│       └── <style_name>.png / <style_name>.jpg   <- matched by style_name
+└── results_checkpoint.json                        <- preferred manifest (--checkpoint)
 
 Manifest schema (results_checkpoint.json)
 ------------------------------------------
@@ -24,36 +26,34 @@ Manifest schema (results_checkpoint.json)
   "results": [
     {
       "content_char":  "A",
-      "content_path":  "ContentImage/A.png",
-      "style_path":    "style_images/cleaned_handwritten_enhanced/font_A.png",
-      "result_path":   "results/abc123.png"
+      "content_path":  "FST-FFT-test/ContentImage/A.png",
+      "style_path":    "style_images/cleaned_handwritten_enhanced/backan.png",
+      "result_path":   "FST-FFT-test/TargetImage/backan/backan+A.png"
     },
     ...
   ]
 }
 
-If no manifest is provided, the script matches result files to content images
-by the first character(s) of the result filename stem (e.g., "A_abc123.png" -> "A.png").
-
 Usage
 -----
 # With manifest (preferred):
-python evaluation/evaluate_generation.py \
-    --checkpoint results_checkpoint.json \
-    --content_dir ContentImage/ \
-    --style_dir style_images/cleaned_handwritten_enhanced/ \
-    --results_dir results/ \
+python evaluate.py \\
+    --checkpoint results_checkpoint.json \\
+    --content_dir FST-FFT-test/ContentImage \\
+    --style_dir style_images/cleaned_handwritten_enhanced \\
+    --results_dir FST-FFT-test/TargetImage \\
     --output_csv evaluation/metrics.csv
 
 # Without manifest (filename-stem matching):
-python evaluation/evaluate_generation.py \
-    --content_dir ContentImage/ \
-    --style_dir style_images/cleaned_handwritten_enhanced/ \
-    --results_dir results/ \
+python evaluate.py \\
+    --content_dir FST-FFT-test/ContentImage \\
+    --style_dir style_images/cleaned_handwritten_enhanced \\
+    --results_dir FST-FFT-test/TargetImage \\
     --output_csv evaluation/metrics.csv
 """
 
 import argparse
+import csv
 import json
 import logging
 import sys
@@ -66,7 +66,6 @@ import torch.nn.functional as F
 import torchvision.transforms as T
 import torchvision.transforms.functional as TF
 from PIL import Image
-from torch.utils.data import DataLoader, Dataset
 from torchvision.models import inception_v3, Inception_V3_Weights
 
 logging.basicConfig(
@@ -83,7 +82,6 @@ logger = logging.getLogger("evaluate_generation")
 IMAGE_EXTENSIONS: frozenset[str] = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 INCEPTION_SIZE: int = 299
 DEFAULT_EVAL_SIZE: int = 96  # matches FontDiffuser dm_size
-LPIPS_FEATURE_SIZE: int = 64
 
 
 # ---------------------------------------------------------------------------
@@ -92,38 +90,69 @@ LPIPS_FEATURE_SIZE: int = 64
 
 
 def load_image_rgb(path: Path, size: int) -> torch.Tensor:
-    """Load an image as a normalised (0..1) RGB float tensor (C, H, W)."""
+    """Load an image as a normalised (0..1) RGB float tensor (C, H, W).
+
+    Args:
+        path: Path to the image file.
+        size: Target spatial size (H = W).
+
+    Returns:
+        (3, size, size) float tensor in [0, 1].
+    """
     img = Image.open(path).convert("RGB")
     img = img.resize((size, size), Image.LANCZOS)
-    return TF.to_tensor(img)  # (3, H, W) in [0, 1]
+    return TF.to_tensor(img)
 
 
 def find_images(directory: Path) -> dict[str, Path]:
-    """Return {stem: path} for all image files in *directory* (non-recursive)."""
+    """Return {stem: path} for all image files directly inside *directory*.
+
+    Args:
+        directory: Directory to scan (non-recursive).
+
+    Returns:
+        Mapping of filename stem to absolute path.
+    """
     return {
         p.stem: p
         for p in sorted(directory.iterdir())
-        if p.suffix.lower() in IMAGE_EXTENSIONS
+        if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
     }
 
 
 # ---------------------------------------------------------------------------
-# SSIM (pure PyTorch, no external lib)
+# SSIM (pure PyTorch)
 # ---------------------------------------------------------------------------
 
 
 def _gaussian_kernel(size: int = 11, sigma: float = 1.5) -> torch.Tensor:
-    """Create a 1-D Gaussian kernel."""
+    """Create a 1-D Gaussian kernel.
+
+    Args:
+        size: Kernel length.
+        sigma: Standard deviation.
+
+    Returns:
+        (size,) normalised float tensor.
+    """
     coords = torch.arange(size, dtype=torch.float32) - size // 2
     kernel = torch.exp(-(coords**2) / (2 * sigma**2))
     return kernel / kernel.sum()
 
 
 def _create_2d_gaussian_kernel(size: int = 11, sigma: float = 1.5) -> torch.Tensor:
-    """Create a 2-D separable Gaussian kernel (1, 1, size, size)."""
+    """Create a 2-D separable Gaussian kernel shaped (1, 1, size, size).
+
+    Args:
+        size: Kernel spatial size.
+        sigma: Standard deviation.
+
+    Returns:
+        (1, 1, size, size) float tensor.
+    """
     k1d = _gaussian_kernel(size, sigma)
-    k2d = k1d.unsqueeze(1) @ k1d.unsqueeze(0)  # (size, size)
-    return k2d.unsqueeze(0).unsqueeze(0)  # (1, 1, size, size)
+    k2d = k1d.unsqueeze(1) @ k1d.unsqueeze(0)
+    return k2d.unsqueeze(0).unsqueeze(0)
 
 
 def compute_ssim_batch(
@@ -137,31 +166,33 @@ def compute_ssim_batch(
 ) -> torch.Tensor:
     """Compute mean SSIM for a batch of image pairs.
 
+    SSIM is computed per channel with a Gaussian window, then averaged across
+    batch and channels.
+
     Args:
         img1: (B, C, H, W) float tensor in [0, data_range].
         img2: (B, C, H, W) float tensor in [0, data_range].
         kernel_size: Size of the Gaussian window.
         sigma: Gaussian standard deviation.
-        data_range: Value range of the input images.
+        data_range: Value range of the inputs.
         k1: SSIM stability constant 1.
         k2: SSIM stability constant 2.
 
     Returns:
-        Scalar tensor — mean SSIM across batch and channels.
+        Scalar tensor — mean SSIM (higher is better structural match).
     """
     C1 = (k1 * data_range) ** 2
     C2 = (k2 * data_range) ** 2
 
     device = img1.device
     kernel = _create_2d_gaussian_kernel(kernel_size, sigma).to(device)
-
-    B, C, H, W = img1.shape
     padding = kernel_size // 2
 
-    # Process each channel separately to keep memory low
+    _, C, _, _ = img1.shape
     ssim_vals: list[torch.Tensor] = []
+
     for c in range(C):
-        ch1 = img1[:, c : c + 1]  # (B, 1, H, W)
+        ch1 = img1[:, c : c + 1]
         ch2 = img2[:, c : c + 1]
 
         mu1 = F.conv2d(ch1, kernel, padding=padding)
@@ -185,18 +216,18 @@ def compute_ssim_batch(
 
 
 # ---------------------------------------------------------------------------
-# LPIPS — VGG-based perceptual loss (pure torchvision, no lpips package)
+# LPIPS — VGG16-based perceptual similarity (pure torchvision)
 # ---------------------------------------------------------------------------
 
 
 class VGGPerceptualFeatures(nn.Module):
-    """Extract multi-scale VGG16 features for perceptual similarity.
+    """Extract multi-scale VGG16 features for LPIPS computation.
 
-    Uses relu1_2, relu2_2, relu3_3, relu4_3 — identical layer selection
-    to the original LPIPS paper (Zhang et al., 2018).
+    Uses relu1_2, relu2_2, relu3_3, relu4_3 — matching the layer selection
+    in Zhang et al. (2018) without requiring the external ``lpips`` package.
     """
 
-    _VGG_LAYERS: list[int] = [4, 9, 16, 23]  # relu indices in vgg16.features
+    _VGG_LAYERS: list[int] = [4, 9, 16, 23]
 
     def __init__(self) -> None:
         super().__init__()
@@ -208,14 +239,14 @@ class VGGPerceptualFeatures(nn.Module):
         self.slices = nn.ModuleList()
         prev = 0
         for end in self._VGG_LAYERS:
-            self.slices.append(nn.Sequential(*list(features.children())[prev : end + 1]))
+            self.slices.append(
+                nn.Sequential(*list(features.children())[prev : end + 1])
+            )
             prev = end + 1
 
-        # Freeze backbone — we only use features, no training
         for p in self.parameters():
             p.requires_grad_(False)
 
-        # ImageNet normalisation
         self.register_buffer(
             "mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
         )
@@ -224,7 +255,7 @@ class VGGPerceptualFeatures(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> list[torch.Tensor]:
-        """Return list of feature maps at each VGG scale.
+        """Return VGG feature maps at each selected layer.
 
         Args:
             x: (B, 3, H, W) float tensor in [0, 1].
@@ -248,28 +279,26 @@ def compute_lpips_batch(
 ) -> torch.Tensor:
     """Compute mean LPIPS distance for a batch of image pairs.
 
-    Each scale's feature maps are L2-normalised per channel before
-    computing squared L2 distance, then spatially averaged — matching
-    the LPIPS formulation without requiring the external ``lpips`` package.
+    Features are L2-normalised per channel before computing squared L2
+    distance, then spatially and scale averaged — matching the LPIPS
+    formulation without the external ``lpips`` package.
 
     Args:
         img1: (B, 3, H, W) float tensor in [0, 1].
         img2: (B, 3, H, W) float tensor in [0, 1].
-        vgg:  Pre-built :class:`VGGPerceptualFeatures` module.
+        vgg: Pre-built :class:`VGGPerceptualFeatures` module.
 
     Returns:
-        Scalar tensor — mean LPIPS across batch and scales.
+        Scalar tensor — mean LPIPS (lower is better perceptual match).
     """
     feats1 = vgg(img1)
     feats2 = vgg(img2)
 
     scale_distances: list[torch.Tensor] = []
     for f1, f2 in zip(feats1, feats2):
-        # L2 normalise along channel dim
         f1_norm = F.normalize(f1, p=2, dim=1)
         f2_norm = F.normalize(f2, p=2, dim=1)
-        diff = (f1_norm - f2_norm) ** 2  # (B, C, H, W)
-        scale_distances.append(diff.mean())
+        scale_distances.append(((f1_norm - f2_norm) ** 2).mean())
 
     return torch.stack(scale_distances).mean()
 
@@ -285,7 +314,7 @@ class InceptionFeatureExtractor(nn.Module):
     def __init__(self) -> None:
         super().__init__()
         model = inception_v3(weights=Inception_V3_Weights.IMAGENET1K_V1)
-        model.fc = nn.Identity()  # replace final classifier
+        model.fc = nn.Identity()
         model.aux_logits = False
         self.model = model.eval()
 
@@ -293,7 +322,7 @@ class InceptionFeatureExtractor(nn.Module):
             p.requires_grad_(False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Extract 2048-d features.
+        """Extract 2048-d features from (B, 3, 299, 299) input in [0, 1].
 
         Args:
             x: (B, 3, 299, 299) float tensor in [0, 1].
@@ -301,46 +330,14 @@ class InceptionFeatureExtractor(nn.Module):
         Returns:
             (B, 2048) feature tensor.
         """
-        # Inception expects [-1, 1]
-        x = x * 2.0 - 1.0
-        return self.model(x)
-
-
-def _compute_fid_from_stats(
-    mu1: np.ndarray,
-    sigma1: np.ndarray,
-    mu2: np.ndarray,
-    sigma2: np.ndarray,
-    eps: float = 1e-6,
-) -> float:
-    """Compute FID from pre-computed mean/covariance statistics.
-
-    Uses the closed-form formula:
-        FID = ||mu1 - mu2||^2 + Tr(sigma1 + sigma2 - 2 * sqrt(sigma1 @ sigma2))
-
-    Args:
-        mu1: Mean of real features (2048,).
-        sigma1: Covariance of real features (2048, 2048).
-        mu2: Mean of generated features (2048,).
-        sigma2: Covariance of generated features (2048, 2048).
-        eps: Regularisation term for numerical stability.
-
-    Returns:
-        FID scalar.
-    """
-    diff = mu1 - mu2
-    diff_sq = diff @ diff
-
-    # Matrix square root via eigendecomposition (more stable than scipy sqrtm
-    # for large matrices and avoids an external dependency)
-    covmean = _matrix_sqrt(sigma1 @ sigma2, eps=eps)
-    
-    trace_term = np.trace(sigma1) + np.trace(sigma2) - 2.0 * np.trace(covmean)
-    return float(diff_sq + trace_term)
+        return self.model(x * 2.0 - 1.0)
 
 
 def _matrix_sqrt(mat: np.ndarray, eps: float = 1e-6) -> np.ndarray:
-    """Compute matrix square root via eigendecomposition.
+    """Compute the matrix square root via eigendecomposition.
+
+    More numerically stable than ``scipy.linalg.sqrtm`` for large matrices
+    and avoids an external dependency.
 
     Args:
         mat: Symmetric positive semi-definite (N, N) matrix.
@@ -352,6 +349,31 @@ def _matrix_sqrt(mat: np.ndarray, eps: float = 1e-6) -> np.ndarray:
     eigvals, eigvecs = np.linalg.eigh(mat)
     eigvals = np.clip(eigvals, a_min=eps, a_max=None)
     return eigvecs @ np.diag(np.sqrt(eigvals)) @ eigvecs.T
+
+
+def _compute_fid_from_stats(
+    mu1: np.ndarray,
+    sigma1: np.ndarray,
+    mu2: np.ndarray,
+    sigma2: np.ndarray,
+) -> float:
+    """Compute FID from pre-computed mean/covariance statistics.
+
+    FID = ||mu1 - mu2||^2 + Tr(sigma1 + sigma2 - 2 * sqrt(sigma1 @ sigma2))
+
+    Args:
+        mu1: Mean of real features (2048,).
+        sigma1: Covariance of real features (2048, 2048).
+        mu2: Mean of generated features (2048,).
+        sigma2: Covariance of generated features (2048, 2048).
+
+    Returns:
+        FID scalar (lower is better).
+    """
+    diff_sq = float((mu1 - mu2) @ (mu1 - mu2))
+    covmean = _matrix_sqrt(sigma1 @ sigma2)
+    trace_term = np.trace(sigma1) + np.trace(sigma2) - 2.0 * np.trace(covmean)
+    return diff_sq + float(trace_term)
 
 
 @torch.no_grad()
@@ -367,7 +389,7 @@ def collect_inception_features(
         paths: List of image file paths.
         inception: Pre-built :class:`InceptionFeatureExtractor`.
         device: Target device.
-        batch_size: Number of images per Inception forward pass.
+        batch_size: Number of images per forward pass.
 
     Returns:
         (N, 2048) float32 numpy array.
@@ -380,10 +402,9 @@ def collect_inception_features(
         imgs = torch.stack(
             [resize(load_image_rgb(p, INCEPTION_SIZE)) for p in batch_paths]
         ).to(device)
-        feats = inception(imgs).cpu().numpy()  # (B, 2048)
-        all_feats.append(feats)
+        all_feats.append(inception(imgs).cpu().numpy())
 
-    return np.concatenate(all_feats, axis=0)  # (N, 2048)
+    return np.concatenate(all_feats, axis=0)
 
 
 def compute_fid(
@@ -396,7 +417,7 @@ def compute_fid(
     """Compute FID between two sets of images.
 
     Args:
-        real_paths: Paths to reference (style) images.
+        real_paths: Paths to reference images (style or content).
         generated_paths: Paths to generated images.
         inception: Pre-built :class:`InceptionFeatureExtractor`.
         device: Target device.
@@ -420,32 +441,31 @@ def compute_fid(
 
 
 # ---------------------------------------------------------------------------
-# Manifest loading and pair matching
+# Manifest loading
 # ---------------------------------------------------------------------------
 
 
-def load_pairs_from_manifest(
-    checkpoint_path: Path,
-) -> list[dict[str, Path]]:
+def load_pairs_from_manifest(checkpoint_path: Path) -> list[dict[str, Path]]:
     """Load evaluation triplets from ``results_checkpoint.json``.
 
     Args:
         checkpoint_path: Path to the manifest JSON file.
 
     Returns:
-        List of dicts with keys ``content_path``, ``style_path``, ``result_path``.
+        List of dicts with keys ``content_path``, ``style_path``,
+        ``result_path``.  Entries with missing files are skipped with a
+        warning.
     """
     with checkpoint_path.open() as fh:
         data = json.load(fh)
 
     records: list[dict[str, Path]] = []
     for entry in data.get("results", []):
-        record = {
+        record: dict[str, Path] = {
             "content_path": Path(entry["content_path"]),
             "style_path": Path(entry["style_path"]),
             "result_path": Path(entry["result_path"]),
         }
-        # Validate all paths exist before adding
         missing = [k for k, v in record.items() if not v.exists()]
         if missing:
             logger.warning(
@@ -459,63 +479,126 @@ def load_pairs_from_manifest(
     return records
 
 
+# ---------------------------------------------------------------------------
+# Stem-based pair matching (no manifest)
+# ---------------------------------------------------------------------------
+
+
 def match_pairs_by_stem(
     content_dir: Path,
+    style_dir: Path,
     results_dir: Path,
 ) -> list[dict[str, Path]]:
-    """Match result images to content images by filename stem convention.
+    """Match result images to content and style images by filename convention.
 
-    Convention: result file ``<style_name>+<char>.png`` maps to content
-    ``<char>.png``, where ``+`` separates the style identifier from the
-    content character.
+    Convention
+    ----------
+    - Result:  ``<results_dir>/<style_name>/<style_name>+<char>.png``
+    - Content: ``<content_dir>/<char>.png``
+    - Style:   ``<style_dir>/<style_name>.png``
+
+    For example, ``TargetImage/backan/backan+罐.png`` maps to:
+    - content → ``ContentImage/罐.png``
+    - style   → ``style_images/cleaned_handwritten_enhanced/backan.png``
 
     Args:
-        content_dir: Directory of content reference images.
-        results_dir: Directory of generated result images.
+        content_dir: Directory containing flat content reference images.
+        style_dir: Directory containing per-style reference images, one file
+            per style named ``<style_name>.<ext>``.
+        results_dir: Root directory whose immediate subdirectories are
+            per-style result folders.
 
     Returns:
-        List of dicts with keys ``content_path`` and ``result_path``.
-        ``style_path`` is absent — caller must handle this case.
+        List of dicts with keys ``content_path``, ``style_path``,
+        ``result_path``, and ``style_name``.  Entries where either the
+        content or style reference is missing are skipped with a warning.
     """
     content_map = find_images(content_dir)
-    results_map = find_images(results_dir)
+    style_map = find_images(style_dir)
+
+    style_dirs = [d for d in sorted(results_dir.iterdir()) if d.is_dir()]
+    if not style_dirs:
+        logger.warning(
+            "No style subdirectories found under %s. "
+            "Expected layout: <results_dir>/<style_name>/<style_name>+<char>.png",
+            results_dir,
+        )
 
     pairs: list[dict[str, Path]] = []
-    for result_stem, result_path in results_map.items():
-        if "+" not in result_stem:
-            logger.debug(
-                "Skipping result '%s' — does not match '<style>+<char>' convention.",
-                result_stem,
-            )
+    total_results = 0
+    missing_styles: set[str] = set()
+
+    for style_subdir in style_dirs:
+        style_name = style_subdir.name
+
+        # Resolve the style reference image once per style folder
+        style_path = style_map.get(style_name)
+        if style_path is None:
+            if style_name not in missing_styles:
+                logger.warning(
+                    "No style reference image found for style '%s' in %s — "
+                    "all results for this style will be skipped.",
+                    style_name,
+                    style_dir,
+                )
+                missing_styles.add(style_name)
             continue
 
-        # e.g. "handwritten+A" -> content key "A"
-        content_key = result_stem.split("+", maxsplit=1)[1]
+        result_images = {
+            p.stem: p
+            for p in sorted(style_subdir.iterdir())
+            if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
+        }
+        total_results += len(result_images)
 
-        if content_key in content_map:
+        for result_stem, result_path in result_images.items():
+            if "+" not in result_stem:
+                logger.debug(
+                    "Skipping '%s' — does not match '<style>+<char>' convention.",
+                    result_stem,
+                )
+                continue
+
+            stem_style, content_key = result_stem.split("+", maxsplit=1)
+
+            if stem_style != style_name:
+                logger.debug(
+                    "Style prefix mismatch: file '%s' is in folder '%s'.",
+                    result_stem,
+                    style_name,
+                )
+
+            content_path = content_map.get(content_key)
+            if content_path is None:
+                logger.debug(
+                    "No content match for result '%s' (tried key '%s').",
+                    result_stem,
+                    content_key,
+                )
+                continue
+
             pairs.append(
                 {
-                    "content_path": content_map[content_key],
+                    "content_path": content_path,
+                    "style_path": style_path,
                     "result_path": result_path,
+                    "style_name": style_name,
                 }
-            )
-        else:
-            logger.debug(
-                "No content match for result '%s' (tried key '%s').",
-                result_stem,
-                content_key,
             )
 
     logger.info(
-        "Stem-matched %d / %d result images to content images.",
+        "Stem-matched %d / %d result images across %d style(s). "
+        "%d style(s) skipped due to missing reference.",
         len(pairs),
-        len(results_map),
+        total_results,
+        len(style_dirs),
+        len(missing_styles),
     )
     return pairs
 
 
 # ---------------------------------------------------------------------------
-# Per-pair evaluation
+# Per-pair SSIM + LPIPS evaluation
 # ---------------------------------------------------------------------------
 
 
@@ -528,47 +611,40 @@ def evaluate_pairs(
 ) -> list[dict]:
     """Compute per-pair SSIM and LPIPS scores.
 
-    SSIM is computed between result and *content* image (structural fidelity).
-    LPIPS is computed between result and *style* image (perceptual similarity),
-    falling back to content if style is unavailable.
+    - SSIM  is measured between ``result`` and ``content`` (structural fidelity).
+    - LPIPS is measured between ``result`` and ``style``   (perceptual similarity).
 
     Args:
-        pairs: List of path dicts (keys: ``content_path``, ``result_path``,
-               optional ``style_path``).
+        pairs: List of path dicts with keys ``content_path``, ``style_path``,
+               ``result_path``.
         vgg: Pre-built :class:`VGGPerceptualFeatures` module.
         device: Target device.
         eval_size: Spatial size to resize images to before comparison.
 
     Returns:
-        List of per-pair result dicts with keys ``ssim``, ``lpips``,
-        ``content_path``, ``result_path``.
+        List of per-pair result dicts with keys ``content_path``,
+        ``style_path``, ``result_path``, ``style_name``, ``ssim``, ``lpips``.
     """
     records: list[dict] = []
 
     for pair in pairs:
         content_img = load_image_rgb(pair["content_path"], eval_size).to(device)
+        style_img = load_image_rgb(pair["style_path"], eval_size).to(device)
         result_img = load_image_rgb(pair["result_path"], eval_size).to(device)
 
-        # Add batch dim: (1, 3, H, W)
-        content_b = content_img.unsqueeze(0)
+        content_b = content_img.unsqueeze(0)  # (1, 3, H, W)
+        style_b = style_img.unsqueeze(0)
         result_b = result_img.unsqueeze(0)
 
         ssim_val = compute_ssim_batch(result_b, content_b).item()
-
-        # LPIPS: against style if available, else against content
-        if "style_path" in pair:
-            style_img = load_image_rgb(pair["style_path"], eval_size).to(device)
-            lpips_ref = style_img.unsqueeze(0)
-        else:
-            lpips_ref = content_b
-
-        lpips_val = compute_lpips_batch(result_b, lpips_ref, vgg).item()
+        lpips_val = compute_lpips_batch(result_b, style_b, vgg).item()
 
         records.append(
             {
+                "style_name": pair.get("style_name", ""),
                 "content_path": str(pair["content_path"]),
+                "style_path": str(pair["style_path"]),
                 "result_path": str(pair["result_path"]),
-                "style_path": str(pair.get("style_path", "")),
                 "ssim": ssim_val,
                 "lpips": lpips_val,
             }
@@ -587,15 +663,20 @@ def write_csv(rows: list[dict], output_path: Path) -> None:
 
     Args:
         rows: List of per-pair metric dicts.
-        output_path: Destination CSV path.
+        output_path: Destination CSV path (parent directories are created).
     """
-    import csv
-
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = ["content_path", "style_path", "result_path", "ssim", "lpips"]
-
-    with output_path.open("w", newline="") as fh:
-        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+    fieldnames = [
+        "style_name",
+        "content_path",
+        "style_path",
+        "result_path",
+        "ssim",
+        "lpips",
+        "fid",
+    ]
+    with output_path.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
 
@@ -603,7 +684,7 @@ def write_csv(rows: list[dict], output_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Argument parsing (extends codebase shared parser)
+# Argument parsing
 # ---------------------------------------------------------------------------
 
 
@@ -616,20 +697,26 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--content_dir",
         type=Path,
-        default=Path("ContentImage"),
-        help="Directory containing content reference images.",
+        default=Path("FST-FFT-test/ContentImage"),
+        help="Directory containing flat content reference images.",
     )
     parser.add_argument(
         "--style_dir",
         type=Path,
         default=Path("style_images/cleaned_handwritten_enhanced"),
-        help="Directory containing style reference images.",
+        help=(
+            "Directory containing style reference images, one file per style "
+            "named <style_name>.<ext> (e.g. backan.png)."
+        ),
     )
     parser.add_argument(
         "--results_dir",
         type=Path,
-        default=Path("TargetImage"),
-        help="Directory containing generated images to evaluate.",
+        default=Path("FST-FFT-test/TargetImage"),
+        help=(
+            "Root directory of generated images. "
+            "Expected layout: <results_dir>/<style_name>/<style_name>+<char>.png"
+        ),
     )
     parser.add_argument(
         "--checkpoint",
@@ -680,7 +767,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_arg_parser()
     args = parser.parse_args()
-
     device = torch.device(args.device)
     logger.info("Using device: %s", device)
 
@@ -709,21 +795,18 @@ def main() -> None:
             "No manifest provided — matching pairs by filename stem in %s",
             args.results_dir,
         )
-        pairs = match_pairs_by_stem(args.content_dir, args.results_dir)
+        pairs = match_pairs_by_stem(args.content_dir, args.style_dir, args.results_dir)
 
     if not pairs:
         logger.error("No evaluation pairs found. Aborting.")
         sys.exit(1)
 
     # ------------------------------------------------------------------
-    # Load perceptual models (lazy, on-demand)
+    # Per-pair SSIM + LPIPS
     # ------------------------------------------------------------------
     logger.info("Loading VGG16 for LPIPS …")
     vgg = VGGPerceptualFeatures().to(device).eval()
 
-    # ------------------------------------------------------------------
-    # Per-pair SSIM + LPIPS
-    # ------------------------------------------------------------------
     logger.info("Computing per-pair SSIM and LPIPS for %d pairs …", len(pairs))
     per_pair_records = evaluate_pairs(pairs, vgg, device, args.eval_size)
 
@@ -731,14 +814,14 @@ def main() -> None:
     lpips_scores = [r["lpips"] for r in per_pair_records]
 
     logger.info(
-        "SSIM  — mean: %.4f  std: %.4f  min: %.4f  max: %.4f",
+        "SSIM  (result vs content) — mean: %.4f  std: %.4f  min: %.4f  max: %.4f",
         np.mean(ssim_scores),
         np.std(ssim_scores),
         np.min(ssim_scores),
         np.max(ssim_scores),
     )
     logger.info(
-        "LPIPS — mean: %.4f  std: %.4f  min: %.4f  max: %.4f",
+        "LPIPS (result vs style)   — mean: %.4f  std: %.4f  min: %.4f  max: %.4f",
         np.mean(lpips_scores),
         np.std(lpips_scores),
         np.min(lpips_scores),
@@ -746,15 +829,14 @@ def main() -> None:
     )
 
     # ------------------------------------------------------------------
-    # FID (distributional metric — needs enough samples to be meaningful)
+    # FID (result distribution vs style distribution)
     # ------------------------------------------------------------------
     fid_score: float | None = None
     if not args.skip_fid:
         if len(pairs) < 50:
             logger.warning(
                 "Only %d samples available for FID. "
-                "FID is unreliable below ~2 000 samples; "
-                "treat the result as indicative only.",
+                "FID is unreliable below ~2 000 samples — treat result as indicative only.",
                 len(pairs),
             )
 
@@ -762,23 +844,13 @@ def main() -> None:
         inception = InceptionFeatureExtractor().to(device).eval()
 
         result_paths = [Path(r["result_path"]) for r in per_pair_records]
-        style_paths = [
-            Path(r["style_path"]) for r in per_pair_records if r["style_path"]
-        ]
+        style_paths = [Path(r["style_path"]) for r in per_pair_records]
 
-        if style_paths:
-            fid_score = compute_fid(
-                style_paths, result_paths, inception, device, args.inception_batch_size
-            )
-            logger.info("FID (generated vs style): %.4f", fid_score)
-        else:
-            content_paths = [Path(r["content_path"]) for r in per_pair_records]
-            fid_score = compute_fid(
-                content_paths, result_paths, inception, device, args.inception_batch_size
-            )
-            logger.info("FID (generated vs content): %.4f", fid_score)
+        fid_score = compute_fid(
+            style_paths, result_paths, inception, device, args.inception_batch_size
+        )
+        logger.info("FID (generated vs style): %.4f", fid_score)
 
-        # Append FID to each row so it appears in the CSV
         for row in per_pair_records:
             row["fid"] = fid_score
 
@@ -789,15 +861,21 @@ def main() -> None:
     logger.info("EVALUATION SUMMARY")
     logger.info("=" * 60)
     logger.info("Pairs evaluated : %d", len(per_pair_records))
-    logger.info("Mean SSIM       : %.4f  (↑ higher = better structural match)", np.mean(ssim_scores))
-    logger.info("Mean LPIPS      : %.4f  (↓ lower  = better perceptual match)", np.mean(lpips_scores))
+    logger.info(
+        "Mean SSIM       : %.4f  (↑ higher = better structural match vs content)",
+        np.mean(ssim_scores),
+    )
+    logger.info(
+        "Mean LPIPS      : %.4f  (↓ lower  = better perceptual match vs style)",
+        np.mean(lpips_scores),
+    )
     if fid_score is not None:
-        logger.info("FID             : %.4f  (↓ lower  = more realistic distribution)", fid_score)
+        logger.info(
+            "FID             : %.4f  (↓ lower  = more realistic style distribution)",
+            fid_score,
+        )
     logger.info("=" * 60)
 
-    # ------------------------------------------------------------------
-    # Write CSV
-    # ------------------------------------------------------------------
     write_csv(per_pair_records, args.output_csv)
 
 
