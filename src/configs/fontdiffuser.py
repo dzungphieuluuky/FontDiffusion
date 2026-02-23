@@ -746,84 +746,44 @@ def get_parser():
         choices=["content", "style", "both"],
         help="Where to send mid-frequency band",
     )
-
-    # ==================== Adversarial Discriminator Arguments ====================
-    adversarial = parser.add_argument_group("Adversarial Discriminator")
-    adversarial.add_argument(
-        "--use_adversarial_disc",
+    # ==================== Direct Reward Optimization (DRO) ====================
+    dro_group = parser.add_argument_group("DRO — Direct Reward Optimization")
+    dro_group.add_argument(
+        "--use_dro",
         action="store_true",
-        help="Enable adversarial discriminator for style-invariant content encoding",
+        help="Enable Direct Reward Optimization on top of FST diffusion loss.",
     )
-
-    adversarial.add_argument(
-        "--num_styles",
-        type=int,
-        default=10,
-        help="Number of style families (will be auto-detected from dataset if not set)",
-    )
-
-    adversarial.add_argument(
-        "--adversarial_weight",
-        type=float,
-        default=0.5,
-        help="Weight for adversarial loss in total loss computation",
-    )
-
-    adversarial.add_argument(
-        "--adversarial_entropy_weight",
+    dro_group.add_argument(
+        "--dro_weight",
         type=float,
         default=0.1,
-        help="Weight for discriminator entropy regularization",
+        help="Weight applied to the DRO reward loss term (default: 0.1).",
     )
-
-    adversarial.add_argument(
-        "--adversarial_input_channels",
-        type=int,
-        default=256,
-        help="Number of input channels for style discriminator (content encoder output channels)",
-    )
-
-    adversarial.add_argument(
-        "--adversarial_hidden_dims",
-        type=str,
-        default="512,256,128",
-        help="Comma-separated hidden layer dimensions for discriminator MLP",
-    )
-
-    adversarial.add_argument(
-        "--adversarial_dropout",
-        type=float,
-        default=0.3,
-        help="Dropout probability in discriminator",
-    )
-
-    adversarial.add_argument(
-        "--adversarial_spectral_norm",
-        action="store_true",
-        default=True,
-        help="Use spectral normalization in discriminator for training stability",
-    )
-
-    adversarial.add_argument(
-        "--adversarial_lambda",
+    dro_group.add_argument(
+        "--dro_ssim_weight",
         type=float,
         default=1.0,
-        help="Gradient reversal strength (higher = stronger adversarial signal)",
+        help="Weight for SSIM content-fidelity reward inside DRO (default: 1.0).",
     )
-
-    adversarial.add_argument(
-        "--disc_update_interval",
-        type=int,
-        default=1,
-        help="Update discriminator every N training steps",
-    )
-
-    adversarial.add_argument(
-        "--disc_learning_rate_factor",
+    dro_group.add_argument(
+        "--dro_lpips_weight",
         type=float,
-        default=0.5,
-        help="Learning rate factor for discriminator (relative to main LR)",
+        default=1.0,
+        help="Weight for LPIPS style-similarity penalty inside DRO (default: 1.0).",
     )
+    dro_group.add_argument(
+        "--dro_reward_scale",
+        type=float,
+        default=1.0,
+        help="Global scale applied to the composite reward (default: 1.0).",
+    )
+    dro_group.add_argument(
+        "--dro_warmup_steps",
+        type=int,
+        default=0,
+        help="Number of steps before DRO reward is activated (default: 0).",
+    )
+
     # ==================== Optimization Flags ====================
     optimization_group = parser.add_argument_group("Performance Optimization")
     optimization_group.add_argument(
@@ -877,7 +837,7 @@ def get_parser():
     eval_group.add_argument(
         "--evaluate",
         action="store_true",
-        default=True,
+        default=False,
         help="Evaluate generated images",
     )
     eval_group.add_argument(
@@ -892,7 +852,7 @@ def get_parser():
     logging_group.add_argument(
         "--use_wandb",
         action="store_true",
-        default=True,
+        default=False,
         help="Log to Weights & Biases",
     )
     logging_group.add_argument(
