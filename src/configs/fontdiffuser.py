@@ -783,6 +783,38 @@ def get_parser():
         default=0,
         help="Number of steps before DRO reward is activated (default: 0).",
     )
+    dro_group.add_argument(
+        "--dro_warmup_steps",
+        type=int,
+        default=0,
+        help="Number of steps before DRO reward is activated (default: 0).",
+    )
+    # --- missing args below ---
+    dro_group.add_argument(
+        "--dro_max_timestep_frac",
+        type=float,
+        default=0.3,
+        help="Only evaluate DRO reward at timesteps below this fraction of "
+             "num_train_timesteps. Lower = more reliable pred_x0 (default: 0.3).",
+    )
+    dro_group.add_argument(
+        "--dro_sharp_weight",
+        type=float,
+        default=0.0,
+        help="Weight for sharpness reward inside DRO (default: 0.0, disabled).",
+    )
+    dro_group.add_argument(
+        "--dro_div_weight",
+        type=float,
+        default=0.0,
+        help="Weight for diversity penalty inside DRO (default: 0.0, disabled).",
+    )
+    dro_group.add_argument(
+        "--dro_normalise_reward",
+        action="store_true",
+        default=False,
+        help="Normalise composite reward to unit variance before scaling (default: False).",
+    )
 
     # ==================== Optimization Flags ====================
     optimization_group = parser.add_argument_group("Performance Optimization")
@@ -917,6 +949,12 @@ def get_parser():
         action="store_true",
         default=False,
         help="Use InstructPix2Pix",
+    )
+    advanced_group.add_argument(
+        "--resume_from_checkpoint",
+        type=str,
+        default=None,
+        help="Path to checkpoint directory to resume training from.",
     )
 
     return parser
