@@ -783,12 +783,6 @@ def get_parser():
         default=0,
         help="Number of steps before DRO reward is activated (default: 0).",
     )
-    dro_group.add_argument(
-        "--dro_warmup_steps",
-        type=int,
-        default=0,
-        help="Number of steps before DRO reward is activated (default: 0).",
-    )
     # --- missing args below ---
     dro_group.add_argument(
         "--dro_max_timestep_frac",
