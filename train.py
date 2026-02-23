@@ -32,12 +32,6 @@ def parse_args_training():
 
     # Add new arguments for improved functionality
     parser.add_argument(
-        "--resume_from_checkpoint",
-        type=str,
-        default=None,
-        help="Path to checkpoint to resume training from",
-    )
-    parser.add_argument(
         "--num_workers", type=int, default=4, help="Number of workers for data loading"
     )
     parser.add_argument(
