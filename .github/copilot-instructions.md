@@ -118,6 +118,9 @@ FontDiffuser is a modular toolkit for font style transfer and generation using d
 - Always implement saving checkpoints and loading checkpoints thoroughly for any new model components.
 - When providing code, ensure the indentation uses 4 spaces per level and share the same indentation as that code in the current codebase.
 - Ensure the implementation for the DPM class for inference is consistent with the non-DPM model class that use for training.
+- Don't use non-ascii characters in the codebase, including in comments and docstrings, to ensure compatibility across different environments and tools.
+- Always check if there are corresponding arguments in configs/fontdiffuser.py before adding new ones, and reuse existing arguments where possible to avoid redundancy.
+- When modifying existing code, prefer adding new functionality via flags or configuration rather than broad refactors that could affect existing behavior or outputs.
 
 ---
 For further details, consult the README or open an issue for project-specific questions.
