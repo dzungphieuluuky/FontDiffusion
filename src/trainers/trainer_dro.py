@@ -6,23 +6,20 @@ differentiable reward signal computed from evaluate.py-style metrics:
   - SSIM between prediction and content image  (content fidelity)
   - LPIPS between prediction and style image   (style similarity)
 
-The reward loss is added on top of the existing FST diffusion losses, allowing
-the model to generalise beyond the synthetic FontDiffuser baseline dataset.
+The reward is added to the FST diffusion loss in a single combined backward
+pass — there is exactly one accelerator.backward() call per step.
 """
 
 import logging
-import math
+from dataclasses import asdict
 from pathlib import Path
-from typing import Optional
 
 import torch
 import torch.nn.functional as F
-from diffusers import DDIMScheduler
 
 from src.trainers.trainer_fst import FontDiffuserFSTTrainer
 from src.trainers.dro_rewards import DRORewardModule
 from src.tools.utilities import HFTqdm
-from src.tools.utils import x0_from_epsilon
 
 logger = logging.getLogger(__name__)
 
@@ -30,21 +27,24 @@ logger = logging.getLogger(__name__)
 class FontDiffuserDROTrainer(FontDiffuserFSTTrainer):
     """DRO wrapper around FontDiffuserFSTTrainer.
 
-    Adds a reward-weighted loss term to each training step:
+    Overrides train_step to compute FST losses and the DRO reward in a single
+    forward pass, then calls accelerator.backward exactly once on the combined
+    loss.  This avoids the double-backward bug that arises when calling
+    super().train_step (which already runs its own backward) and then adding a
+    second reward loss on top.
 
-        total_loss = fst_loss - dro_weight * reward(pred_x0, content, style)
-
-    The reward is computed by decoding a one-step x0 estimate from the current
-    noise prediction then evaluating SSIM and LPIPS against the content and
-    style references respectively.
-
-    New args recognised (add to configs/fontdiffuser.py):
-        --use_dro           : bool  — enable DRO (default False)
-        --dro_weight        : float — overall DRO loss weight (default 0.1)
-        --dro_ssim_weight   : float — SSIM component weight  (default 1.0)
-        --dro_lpips_weight  : float — LPIPS component weight (default 1.0)
-        --dro_reward_scale  : float — reward scale factor    (default 1.0)
-        --dro_warmup_steps  : int   — steps before DRO is activated (default 0)
+    New args (add via add_dro_args in configs/fontdiffuser.py):
+        --use_dro                : bool  — enable DRO (default: False)
+        --dro_weight             : float — overall reward loss weight (default: 0.1)
+        --dro_ssim_weight        : float — SSIM component weight (default: 1.0)
+        --dro_lpips_weight       : float — LPIPS component weight (default: 1.0)
+        --dro_reward_scale       : float — reward scale factor (default: 1.0)
+        --dro_warmup_steps       : int   — steps before reward is added (default: 0)
+        --dro_max_timestep_frac  : float — only evaluate reward below this fraction
+                                           of num_train_timesteps (default: 0.3)
+        --dro_sharp_weight       : float — sharpness reward weight (default: 0.0)
+        --dro_div_weight         : float — diversity penalty weight (default: 0.0)
+        --dro_normalise_reward   : bool  — normalise reward to unit variance (default: False)
     """
 
     def __init__(self, args) -> None:
@@ -54,28 +54,35 @@ class FontDiffuserDROTrainer(FontDiffuserFSTTrainer):
             args: Parsed argument namespace.  Must contain all args expected by
                   FontDiffuserFSTTrainer plus the DRO-specific args above.
         """
-        # Parse DRO-specific args before calling super
         self.use_dro: bool = getattr(args, "use_dro", False)
         self.dro_weight: float = getattr(args, "dro_weight", 0.1)
         self.dro_ssim_weight: float = getattr(args, "dro_ssim_weight", 1.0)
         self.dro_lpips_weight: float = getattr(args, "dro_lpips_weight", 1.0)
         self.dro_reward_scale: float = getattr(args, "dro_reward_scale", 1.0)
         self.dro_warmup_steps: int = getattr(args, "dro_warmup_steps", 0)
+        self.dro_max_timestep_frac: float = getattr(args, "dro_max_timestep_frac", 0.3)
+        self.dro_sharp_weight: float = getattr(args, "dro_sharp_weight", 0.0)
+        self.dro_div_weight: float = getattr(args, "dro_div_weight", 0.0)
+        self.dro_normalise_reward: bool = getattr(args, "dro_normalise_reward", False)
 
         super().__init__(args)
 
         if self.use_dro:
-            logger.info("=" * 80)
-            logger.info("DRO — Direct Reward Optimization enabled")
-            logger.info(f"  dro_weight      : {self.dro_weight}")
-            logger.info(f"  dro_ssim_weight : {self.dro_ssim_weight}")
-            logger.info(f"  dro_lpips_weight: {self.dro_lpips_weight}")
-            logger.info(f"  dro_reward_scale: {self.dro_reward_scale}")
-            logger.info(f"  dro_warmup_steps: {self.dro_warmup_steps}")
-            logger.info("=" * 80)
+            logger.info("=" * 60)
+            logger.info("DRO - Direct Reward Optimization enabled")
+            logger.info(f"  dro_weight             : {self.dro_weight}")
+            logger.info(f"  dro_ssim_weight        : {self.dro_ssim_weight}")
+            logger.info(f"  dro_lpips_weight       : {self.dro_lpips_weight}")
+            logger.info(f"  dro_reward_scale       : {self.dro_reward_scale}")
+            logger.info(f"  dro_warmup_steps       : {self.dro_warmup_steps}")
+            logger.info(f"  dro_max_timestep_frac  : {self.dro_max_timestep_frac}")
+            logger.info(f"  dro_sharp_weight       : {self.dro_sharp_weight}")
+            logger.info(f"  dro_div_weight         : {self.dro_div_weight}")
+            logger.info(f"  dro_normalise_reward   : {self.dro_normalise_reward}")
+            logger.info("=" * 60)
 
     # ------------------------------------------------------------------
-    # Override _setup_models to also build the reward module
+    # Override _setup_models to build the reward module
     # ------------------------------------------------------------------
 
     def _setup_models(self) -> None:
@@ -87,8 +94,11 @@ class FontDiffuserDROTrainer(FontDiffuserFSTTrainer):
                 ssim_weight=self.dro_ssim_weight,
                 lpips_weight=self.dro_lpips_weight,
                 reward_scale=self.dro_reward_scale,
+                sharp_weight=self.dro_sharp_weight,
+                div_weight=self.dro_div_weight,
+                normalise=self.dro_normalise_reward,
             )
-            logger.info("✓ DRORewardModule created")
+            logger.info("[OK] DRORewardModule created")
         else:
             self.reward_module = None
 
@@ -97,18 +107,18 @@ class FontDiffuserDROTrainer(FontDiffuserFSTTrainer):
     # ------------------------------------------------------------------
 
     def _wrap_components(self) -> None:
-        """Wrap FST components then move reward module to the correct device."""
+        """Wrap FST components then prepare reward module via accelerator."""
         super()._wrap_components()
 
         if self.use_dro and self.reward_module is not None:
-            # Move VGG to the same device as the model (not wrapped with
-            # accelerator — it has no trainable params)
-            device = self.accelerator.device
-            self.reward_module = self.reward_module.to(device)
-            logger.info(f"✓ DRORewardModule moved to {device}")
+            # VGG has no trainable params so accelerator.prepare is a no-op for
+            # the optimizer, but it ensures correct device/dtype placement under
+            # FSDP, DeepSpeed, and AMP without bypassing the runtime.
+            self.reward_module = self.accelerator.prepare(self.reward_module)
+            logger.info("[OK] DRORewardModule prepared via accelerator")
 
     # ------------------------------------------------------------------
-    # Denormalise helper
+    # Static helpers
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -116,46 +126,63 @@ class FontDiffuserDROTrainer(FontDiffuserFSTTrainer):
         """Convert [-1, 1] normalised tensor to [0, 1].
 
         Args:
-            tensor: Any-shape float tensor normalised to [-1, 1].
+            tensor: Float tensor normalised to [-1, 1].
 
         Returns:
             Tensor clamped to [0, 1].
         """
         return ((tensor + 1.0) / 2.0).clamp(0.0, 1.0)
 
+    @staticmethod
+    def _match_spatial(source: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """Bilinearly resize source to match target spatial dimensions if needed.
+
+        Args:
+            source: (B, C, H_s, W_s) float tensor.
+            target: (B, C, H_t, W_t) float tensor used as size reference.
+
+        Returns:
+            source resized to (B, C, H_t, W_t) or unchanged if already matching.
+        """
+        if source.shape[-2:] == target.shape[-2:]:
+            return source
+        return F.interpolate(
+            source,
+            size=target.shape[-2:],
+            mode="bilinear",
+            align_corners=False,
+        )
+
     # ------------------------------------------------------------------
-    # DRO reward computation
+    # DRO reward branch — called inside the single combined forward pass
     # ------------------------------------------------------------------
 
     def _compute_dro_reward_loss(
         self,
         noise_pred: torch.Tensor,
-        noise: torch.Tensor,
         noisy_target_images: torch.Tensor,
         timesteps: torch.Tensor,
         content_images: torch.Tensor,
         style_images: torch.Tensor,
     ) -> tuple[torch.Tensor, dict[str, float]]:
-        """Decode x0 estimate and compute the DRO reward loss.
+        """Reconstruct pred_x0 and compute the DRO reward loss.
 
-        Steps:
-        1. Reconstruct x0 from the noise prediction using the DDPM scheduler.
-        2. Denormalise pred_x0, content, and style to [0, 1].
-        3. Compute composite reward (SSIM + LPIPS).
-        4. Return negative reward as a minimisable loss.
+        Uses the same noise_pred, noisy_target_images, and timesteps that were
+        produced by the FST forward pass so the reward is coherent with the
+        diffusion objective.
 
         Args:
             noise_pred: (B, C, H, W) predicted noise from the model.
-            noise: (B, C, H, W) ground-truth noise added to target.
-            noisy_target_images: (B, C, H, W) noisy target at timestep t.
-            timesteps: (B,) diffusion timesteps.
+            noisy_target_images: (B, C, H, W) x_t used in the same forward pass.
+            timesteps: (B,) timesteps used in the same forward pass.
             content_images: (B, C, H, W) content reference in [-1, 1].
             style_images: (B, C, H, W) style reference in [-1, 1].
 
         Returns:
             Tuple of (reward_loss scalar tensor, metrics dict).
         """
-        # Reconstruct x0 estimate
+        from src.tools.utils import x0_from_epsilon
+
         pred_x0 = x0_from_epsilon(
             scheduler=self.noise_scheduler,
             noise_pred=noise_pred,
@@ -163,20 +190,9 @@ class FontDiffuserDROTrainer(FontDiffuserFSTTrainer):
             timesteps=timesteps,
         )
 
-        # Denormalise to [0, 1]
         pred_x0_01 = self._denorm(pred_x0)
-        content_01 = self._denorm(content_images)
-        style_01 = self._denorm(style_images)
-
-        # Resize to match spatial dims if needed (content may differ in size)
-        if content_01.shape[-2:] != pred_x0_01.shape[-2:]:
-            content_01 = F.interpolate(
-                content_01, size=pred_x0_01.shape[-2:], mode="bilinear", align_corners=False
-            )
-        if style_01.shape[-2:] != pred_x0_01.shape[-2:]:
-            style_01 = F.interpolate(
-                style_01, size=pred_x0_01.shape[-2:], mode="bilinear", align_corners=False
-            )
+        content_01 = self._match_spatial(self._denorm(content_images), pred_x0_01)
+        style_01 = self._match_spatial(self._denorm(style_images), pred_x0_01)
 
         reward, metrics = self.reward_module(
             pred_images=pred_x0_01,
@@ -184,136 +200,205 @@ class FontDiffuserDROTrainer(FontDiffuserFSTTrainer):
             style_images=style_01,
         )
 
-        # Minimise negative reward
         reward_loss = -reward
         return reward_loss, metrics
 
     # ------------------------------------------------------------------
-    # Override train_step to inject DRO reward
+    # Full train_step override — single forward pass, single backward
     # ------------------------------------------------------------------
 
     def train_step(
         self,
         samples: dict[str, torch.Tensor],
     ) -> tuple[torch.Tensor, dict[str, float]]:
-        """FST training step augmented with DRO reward loss.
+        """Combined FST + DRO training step.
 
-        The DRO reward loss is only added after ``dro_warmup_steps`` to allow
-        the diffusion objective to stabilise first.
+        Runs one forward pass, computes all losses (diffusion, consistency,
+        identity, phase-2 SCR, and DRO reward), sums them, and returns the
+        combined loss for the caller (train()) to call accelerator.backward on.
+
+        DRO is only added after dro_warmup_steps and only for timesteps below
+        dro_max_timestep_frac * num_train_timesteps so that pred_x0 is reliable.
 
         Args:
             samples: Batch dict from FontDatasetFST.
 
         Returns:
-            Tuple of (total_loss, loss_dict).
+            Tuple of (combined_loss tensor, loss_dict).
         """
-        # Run standard FST training step
-        total_loss, loss_dict = super().train_step(samples)
+        self.model.train()
 
-        # Skip DRO if disabled or still in warmup
-        if not self.use_dro or self.reward_module is None:
-            return total_loss, loss_dict
-
-        if self.global_step < self.dro_warmup_steps:
-            loss_dict["dro/skipped"] = 1.0
-            return total_loss, loss_dict
-
-        # Re-run forward pass to get noise_pred with grad for reward
-        # (super().train_step already called backward — we need a fresh forward
-        #  under no_grad-free context for the reward branch)
         content_images = samples["content_image"]
         style_images = samples["style_image"]
         target_images = samples["target_image"]
+        nonorm_target = samples["nonorm_target_image"]
 
         noise = torch.randn_like(target_images)
         bsz = target_images.shape[0]
+
+        # Decide timestep range: if DRO is active this step, restrict to low
+        # timesteps so that pred_x0 is reliable for reward computation.
+        global_step = getattr(self, "global_step", 0)
+        dro_active = (
+            self.use_dro
+            and self.reward_module is not None
+            and global_step >= self.dro_warmup_steps
+        )
+
+        num_train_ts = self.noise_scheduler.config.num_train_timesteps
+        if dro_active:
+            max_ts = max(1, int(num_train_ts * self.dro_max_timestep_frac))
+        else:
+            max_ts = num_train_ts
+
         timesteps = torch.randint(
             0,
-            self.noise_scheduler.config.num_train_timesteps,
+            max_ts,
             (bsz,),
             device=target_images.device,
         ).long()
-        noisy_target_images = self.noise_scheduler.add_noise(target_images, noise, timesteps)
 
-        content_images_cfg, style_images_cfg = self.apply_classifier_free_guidance(
+        noisy_targets = self.noise_scheduler.add_noise(target_images, noise, timesteps)
+
+        # Classifier-free guidance dropout — pass full samples so style_source
+        # conditioning is also dropped correctly (fixes samples=None bug).
+        content_cfg, style_cfg = self.apply_classifier_free_guidance(
             content_images.clone(),
             style_images.clone(),
             self.config.drop_prob,
-            samples=None,
+            samples=samples,
         )
 
-        self.model.train()
+        # ---- Forward pass ------------------------------------------------
         if self.use_fst:
-            style_source_images = samples.get("style_source_image")
-            model_output = self.model(
-                noisy_latents=noisy_target_images,
-                timestep=timesteps,
-                content_images=content_images_cfg,
-                style_source_images=style_source_images,
-                style_target_images=style_images_cfg,
-                content_encoder_downsample_size=self.args.content_encoder_downsample_size,
+            out = self.model(
+                noisy_targets,
+                timesteps,
+                content_cfg,
+                samples.get("style_source_image"),
+                style_cfg,
+                self.args.content_encoder_downsample_size,
             )
-            noise_pred = model_output["noise_pred"]
+            noise_pred = out["noise_pred"]
+            offset_out_sum = out["offset_out_sum"]
         else:
-            noise_pred, _ = self.model(
-                x_t=noisy_target_images,
-                timesteps=timesteps,
-                style_images=style_images_cfg,
-                content_images=content_images_cfg,
-                content_encoder_downsample_size=self.args.content_encoder_downsample_size,
+            noise_pred, offset_out_sum = self.model(
+                noisy_targets,
+                timesteps,
+                style_cfg,
+                content_cfg,
+                self.args.content_encoder_downsample_size,
             )
 
-        reward_loss, reward_metrics = self._compute_dro_reward_loss(
-            noise_pred=noise_pred,
-            noise=noise,
-            noisy_target_images=noisy_target_images,
-            timesteps=timesteps,
-            content_images=content_images,
-            style_images=style_images,
+        # ---- Diffusion losses --------------------------------------------
+        total_loss, loss_dict, pred_orig_norm = self.compute_losses(
+            noise_pred, noise, offset_out_sum, noisy_targets, nonorm_target, timesteps
         )
 
-        # Scale and accumulate reward loss
-        scaled_reward_loss = self.dro_weight * reward_loss
-        total_loss = total_loss + scaled_reward_loss
+        # ---- Phase-2 SCR loss --------------------------------------------
+        if self.config.phase_2 and self.scr and samples.get("neg_images") is not None:
+            sc_loss = self.compute_phase2_loss(
+                pred_orig_norm, target_images, samples["neg_images"]
+            )
+            total_loss = total_loss + self.config.sc_coefficient * sc_loss
+            loss_dict["sc_loss"] = sc_loss.item()
 
-        loss_dict.update(reward_metrics)
-        loss_dict["dro/reward_loss"] = reward_loss.item()
-        loss_dict["dro/scaled_reward_loss"] = scaled_reward_loss.item()
+        # ---- Consistency loss --------------------------------------------
+        if (
+            self.use_fst
+            and self.num_consistency_pairs > 0
+            and samples.get("consistency_source_images") is not None
+            and samples["consistency_source_images"].numel() > 0
+        ):
+            unwrapped = self.accelerator.unwrap_model(self.model)
+            c_loss = unwrapped.compute_consistency_loss(
+                samples["consistency_source_images"],
+                samples["consistency_target_images"],
+            )
+            total_loss = total_loss + self.consistency_loss_weight * c_loss
+            loss_dict["consistency_loss"] = c_loss.item()
+
+        # ---- Identity loss -----------------------------------------------
+        if (
+            self.use_fst
+            and self.num_identity_pairs > 0
+            and samples.get("num_identity_pairs_total", 0) > 0
+        ):
+            unwrapped = self.accelerator.unwrap_model(self.model)
+            id_loss, id_metrics = unwrapped.compute_identity_loss(
+                samples["identity_pair_sources"],
+                samples["identity_pair_targets"],
+                self.fst_num_queries,
+            )
+            total_loss = total_loss + self.identity_loss_weight * id_loss
+            loss_dict["identity_loss"] = id_loss.item()
+            loss_dict.update({f"identity_{k}": v for k, v in id_metrics.items()})
+
+        # ---- DRO reward loss (same forward, same timesteps) --------------
+        if dro_active:
+            reward_loss, reward_metrics = self._compute_dro_reward_loss(
+                noise_pred=noise_pred,
+                noisy_target_images=noisy_targets,
+                timesteps=timesteps,
+                content_images=content_images,
+                style_images=style_images,
+            )
+            scaled_reward_loss = self.dro_weight * reward_loss
+            total_loss = total_loss + scaled_reward_loss
+            loss_dict.update(reward_metrics)
+            loss_dict["dro/reward_loss"] = reward_loss.item()
+            loss_dict["dro/scaled_reward_loss"] = scaled_reward_loss.item()
+        elif self.use_dro:
+            loss_dict["dro/warmup_active"] = 1.0
 
         return total_loss, loss_dict
 
     # ------------------------------------------------------------------
-    # Override save/load checkpoint to persist DRO config
+    # Checkpoint — persist and restore DRO config
     # ------------------------------------------------------------------
 
     def save_checkpoint(self, is_final: bool = False) -> None:
         """Save FST checkpoint extended with DRO configuration.
 
         Args:
-            is_final: If True, saves to ``final/`` subdirectory.
+            is_final: If True, saves to the ``final/`` subdirectory.
         """
         super().save_checkpoint(is_final=is_final)
 
-        # Append DRO config to training_state.pt
-        if self.accelerator.is_main_process:
-            save_dir = (
-                Path(self.args.output_dir) / "final"
-                if is_final
-                else Path(self.args.output_dir) / f"checkpoint_step_{self.global_step}"
+        if not self.accelerator.is_main_process:
+            return
+
+        save_dir = (
+            Path(self.args.output_dir) / "final"
+            if is_final
+            else Path(self.args.output_dir) / f"checkpoint_step_{self.global_step}"
+        )
+        state_path = save_dir / "training_state.pt"
+
+        if not state_path.exists():
+            logger.warning(
+                f"[DRO] training_state.pt not found at {state_path} — "
+                "DRO config was NOT saved."
             )
-            state_path = save_dir / "training_state.pt"
-            if state_path.exists():
-                training_state = torch.load(state_path, map_location="cpu")
-                training_state["dro_config"] = {
-                    "use_dro": self.use_dro,
-                    "dro_weight": self.dro_weight,
-                    "dro_ssim_weight": self.dro_ssim_weight,
-                    "dro_lpips_weight": self.dro_lpips_weight,
-                    "dro_reward_scale": self.dro_reward_scale,
-                    "dro_warmup_steps": self.dro_warmup_steps,
-                }
-                torch.save(training_state, state_path)
-                logger.info("✓ DRO config appended to training_state.pt")
+            return
+
+        training_state = torch.load(
+            state_path, map_location="cpu", weights_only=True
+        )
+        training_state["dro_config"] = {
+            "use_dro": self.use_dro,
+            "dro_weight": self.dro_weight,
+            "dro_ssim_weight": self.dro_ssim_weight,
+            "dro_lpips_weight": self.dro_lpips_weight,
+            "dro_reward_scale": self.dro_reward_scale,
+            "dro_warmup_steps": self.dro_warmup_steps,
+            "dro_max_timestep_frac": self.dro_max_timestep_frac,
+            "dro_sharp_weight": self.dro_sharp_weight,
+            "dro_div_weight": self.dro_div_weight,
+            "dro_normalise_reward": self.dro_normalise_reward,
+        }
+        torch.save(training_state, state_path)
+        logger.info(f"[OK] DRO config appended to {state_path}")
 
     def load_checkpoint(self, checkpoint_path: str) -> bool:
         """Load FST checkpoint and validate DRO configuration.
@@ -329,15 +414,22 @@ class FontDiffuserDROTrainer(FontDiffuserFSTTrainer):
             return False
 
         state_path = Path(checkpoint_path) / "training_state.pt"
-        if state_path.exists():
-            training_state = torch.load(state_path, map_location="cpu")
-            dro_cfg = training_state.get("dro_config", {})
-            if dro_cfg:
-                logger.info(f"DRO config from checkpoint: {dro_cfg}")
-                if dro_cfg.get("use_dro") != self.use_dro:
-                    logger.warning(
-                        f"⚠️ DRO mode mismatch: checkpoint={dro_cfg.get('use_dro')}, "
-                        f"current={self.use_dro}"
-                    )
+        if not state_path.exists():
+            return True
+
+        training_state = torch.load(
+            state_path, map_location="cpu", weights_only=True
+        )
+        dro_cfg = training_state.get("dro_config", {})
+        if not dro_cfg:
+            return True
+
+        logger.info(f"DRO config from checkpoint: {dro_cfg}")
+
+        if dro_cfg.get("use_dro") != self.use_dro:
+            logger.warning(
+                f"DRO mode mismatch: checkpoint={dro_cfg.get('use_dro')}, "
+                f"current={self.use_dro}"
+            )
 
         return True
