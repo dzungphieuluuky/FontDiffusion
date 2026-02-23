@@ -424,18 +424,11 @@ class FontDiffuserDROTrainer(FontDiffuserFSTTrainer):
     # ------------------------------------------------------------------
 
     def save_checkpoint(self, is_final: bool = False) -> None:
-        """Save FST checkpoint then append dro_config to training_state.pt.
+        """Save FST checkpoint then append dro_config and EMA normaliser
+        state to training_state.pt.
 
-        The parent saves all model components (unet, style_encoder,
-        content_encoder, mss_encoder, fst_module, fst_projection,
-        original_style_projection, identity_loss_module, scr) and writes
-        training_state.pt with optimizer/scheduler state and fst_config.
-        This override re-opens that file to append the dro_config block so
-        the full training configuration is preserved in one file.
-
-        Args:
-            is_final: If True saves to <output_dir>/final/, otherwise to
-                      <output_dir>/checkpoint_step_<global_step>/.
+        The EMA normaliser buffers (ema_mean, ema_var, initialised) must be
+        persisted so that reward normalisation does not restart cold on resume.
         """
         super().save_checkpoint(is_final=is_final)
 
@@ -452,7 +445,7 @@ class FontDiffuserDROTrainer(FontDiffuserFSTTrainer):
         if not state_path.exists():
             logger.warning(
                 f"[DRO] training_state.pt not found at {state_path} -- "
-                "DRO config was NOT saved."
+                "DRO config and EMA state were NOT saved."
             )
             return
 
@@ -471,20 +464,25 @@ class FontDiffuserDROTrainer(FontDiffuserFSTTrainer):
             "dro_div_weight": self.dro_div_weight,
             "dro_normalise_reward": self.dro_normalise_reward,
         }
-        torch.save(training_state, state_path)
-        logger.info(f"[OK] DRO config appended to {state_path}")
 
-    # ------------------------------------------------------------------
-    # load_checkpoint — FST checkpoint loading + dro_config validation
-    # ------------------------------------------------------------------
+        # Persist EMA normaliser buffers so reward normalisation does not
+        # restart cold on resume. VGG weights are excluded -- they are always
+        # reloaded from torchvision at runtime.
+        if self.use_dro and self.reward_module is not None:
+            unwrapped_reward = self.accelerator.unwrap_model(self.reward_module)
+            ema_state: dict = {}
+            if self.dro_normalise_reward:
+                for name in ("norm_ssim", "norm_lpips", "norm_sharp", "norm_div"):
+                    normaliser = getattr(unwrapped_reward, name, None)
+                    if normaliser is not None:
+                        ema_state[name] = normaliser.state_dict()
+            training_state["dro_ema_state"] = ema_state
+
+        torch.save(training_state, state_path)
+        logger.info(f"[OK] DRO config and EMA state appended to {state_path}")
 
     def load_checkpoint(self, checkpoint_path: str) -> bool:
-        """Load FST checkpoint then validate the stored dro_config.
-
-        The parent restores global_step, current_epoch, optimizer state,
-        lr_scheduler state, and all model component weights.  This override
-        reads back dro_config and warns if the DRO mode does not match the
-        current run configuration so the user is not silently misled.
+        """Load FST checkpoint, validate dro_config, and restore EMA buffers.
 
         Args:
             checkpoint_path: Path to the checkpoint directory.
@@ -503,16 +501,29 @@ class FontDiffuserDROTrainer(FontDiffuserFSTTrainer):
         training_state = torch.load(
             state_path, map_location="cpu", weights_only=True
         )
+
         dro_cfg = training_state.get("dro_config", {})
-        if not dro_cfg:
-            return True
+        if dro_cfg:
+            logger.info(f"DRO config restored from checkpoint: {dro_cfg}")
+            if dro_cfg.get("use_dro") != self.use_dro:
+                logger.warning(
+                    f"DRO mode mismatch: checkpoint={dro_cfg.get('use_dro')}, "
+                    f"current={self.use_dro}. Continuing with current settings."
+                )
 
-        logger.info(f"DRO config restored from checkpoint: {dro_cfg}")
-
-        if dro_cfg.get("use_dro") != self.use_dro:
-            logger.warning(
-                f"DRO mode mismatch: checkpoint={dro_cfg.get('use_dro')}, "
-                f"current={self.use_dro}. Continuing with current settings."
-            )
+        # Restore EMA normaliser buffers so running statistics are not lost.
+        ema_state = training_state.get("dro_ema_state", {})
+        if ema_state and self.use_dro and self.reward_module is not None:
+            unwrapped_reward = self.accelerator.unwrap_model(self.reward_module)
+            for name, state in ema_state.items():
+                normaliser = getattr(unwrapped_reward, name, None)
+                if normaliser is not None:
+                    normaliser.load_state_dict(state)
+                    logger.info(f"[OK] Restored EMA normaliser: {name}")
+                else:
+                    logger.warning(
+                        f"[DRO] EMA normaliser '{name}' found in checkpoint "
+                        "but not present in current reward module -- skipped."
+                    )
 
         return True
