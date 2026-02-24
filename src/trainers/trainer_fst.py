@@ -88,7 +88,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
         if self.args.phase_1_ckpt_dir:
             self._load_phase1_checkpoints(unet, style_encoder, content_encoder, self.args.phase_1_ckpt_dir)
         else:
-            logger.warning("⚠️ No phase_1_ckpt_dir specified - training from scratch!")
+            logger.warning("[WARNING] No phase_1_ckpt_dir specified - training from scratch!")
 
         if self.use_fst:
             logger.info("Building FST-enhanced model...")
@@ -190,7 +190,7 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
             try:
                 path = find_checkpoint(ckpt_dir, name)
                 if path.exists(): comp.load_state_dict(load_model_checkpoint(path)); logger.info(f"✓ Loaded {name}")
-                else: logger.warning(f"⚠️ {name} not found")
+                else: logger.warning(f"[WARNING] {name} not found")
             except Exception as e: logger.error(f"Failed loading {name}: {e}")
 
         if self.use_fst:
@@ -296,15 +296,18 @@ class FontDiffuserFSTTrainer(FontDiffuserTrainer):
                         self.accelerator.log(logs, step=self.global_step)
                         loss_accum, count_accum = 0.0, 0
                         
-                        if self.global_step % self.args.ckpt_interval == 0 and self.accelerator.is_main_process: self.save_checkpoint()
+                        if self.global_step % self.args.ckpt_interval == 0:
+                            self.accelerator.wait_for_everyone()
+                            if self.accelerator.is_main_process:
+                                self.save_checkpoint()
                 progress_bar.set_postfix(loss=loss.item(), lr=self.lr_scheduler.get_last_lr()[0], step=self.global_step)
         
         progress_bar.close()
+        self.accelerator.wait_for_everyone()
         if self.accelerator.is_main_process: self.save_checkpoint(is_final=True)
         self.accelerator.end_training()
 
     def save_checkpoint(self, is_final=False):
-        self.accelerator.wait_for_everyone()
         unwrapped = self.accelerator.unwrap_model(self.model)
         if not self.accelerator.is_main_process: return
         
