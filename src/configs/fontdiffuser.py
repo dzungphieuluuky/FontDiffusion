@@ -810,6 +810,57 @@ def get_parser():
         help="Normalise composite reward to unit variance before scaling (default: False).",
     )
 
+    # ==================== GRPO ====================
+    grpo_group = parser.add_argument_group("GRPO Policy Optimization")
+    grpo_group.add_argument(
+        "--use_grpo",
+        action="store_true",
+        default=False,
+        help="Enable GRPO policy gradient on top of DRO losses",
+    )
+    grpo_group.add_argument(
+        "--grpo_group_size",
+        type=int,
+        default=4,
+        help="Number of rollouts per prompt for group-relative baseline",
+    )
+    grpo_group.add_argument(
+        "--grpo_clip_eps",
+        type=float,
+        default=0.2,
+        help="PPO-style clipping epsilon for importance ratio",
+    )
+    grpo_group.add_argument(
+        "--grpo_pg_weight",
+        type=float,
+        default=0.01,
+        help="Weight of GRPO policy gradient loss",
+    )
+    grpo_group.add_argument(
+        "--grpo_sample_steps",
+        type=int,
+        default=5,
+        help="Denoising steps per rollout (shorter = faster, noisier signal)",
+    )
+    grpo_group.add_argument(
+        "--grpo_warmup_steps",
+        type=int,
+        default=1000,
+        help="Steps before GRPO activates",
+    )
+    grpo_group.add_argument(
+        "--grpo_kl_coeff",
+        type=float,
+        default=0.01,
+        help="KL penalty coefficient against frozen reference policy",
+    )
+    grpo_group.add_argument(
+        "--grpo_reward_clip",
+        type=float,
+        default=5.0,
+        help="Clip reward to [-clip, clip] before normalization",
+    )
+
     # ==================== Optimization Flags ====================
     optimization_group = parser.add_argument_group("Performance Optimization")
     optimization_group.add_argument(

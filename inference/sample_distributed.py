@@ -715,7 +715,7 @@ def main():
                 log_to_wandb(results, args)
 
             logger.info("=" * 60)
-            logger.info("✅ NomGenie dataset generation complete!")
+            logger.info("[OK] NomGenie dataset generation complete!")
             logger.info("=" * 60)
 
         # FIX 18: Final synchronization
