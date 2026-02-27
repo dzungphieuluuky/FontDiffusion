@@ -109,7 +109,7 @@ class FontDiffuserGRPOTrainer(FontDiffuserDROTrainer):
         unwrapped = self.accelerator.unwrap_model(self.model)
         unwrapped.eval()
 
-        with torch.no_grad():
+        with torch.inference_mode():
             for t_val in ts_schedule:
                 t = torch.full((bsz,), t_val, device=device, dtype=torch.long)
 
