@@ -1,128 +1,88 @@
-from __future__ import annotations
+#!/usr/bin/env python3
+"""Utility functions for model inspection, file‑system helpers, checkpoint conversion and CLI."""
 
-import argparse
-import json
-import logging
-import shutil
-import sys
-import time
+from __future__ import annotations
+import argparse, json, logging, shutil, sys, time, os
 from pathlib import Path
 from typing import Any, Iterable, Optional, TypeVar, Generic, Iterator
-import os
-
 import torch
-from safetensors.torch import save_file
+from safetensors.torch import save_file, load_file as safe_load
 from datasets.utils import tqdm as hf_tqdm, enable_progress_bar
 from tqdm.auto import tqdm as auto_tqdm
-
 enable_progress_bar()
-"""Utility functions for model inspection and logging."""
 
-import logging
-import torch.nn as nn
+# --------------------------------------------------------------------------- #
+# Logging
+# --------------------------------------------------------------------------- #
 
-logger = logging.getLogger(__name__)
+def setup_logger(name: str, level: int = logging.INFO) -> logging.Logger:
+    logging.basicConfig(level=level, stream=sys.stdout,
+                        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+                        datefmt="%Y-%m-%d %H:%M:%S")
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+    if not logger.handlers:
+        logger.addHandler(logging.StreamHandler(sys.stdout))
+    return logger
 
+logger = setup_logger(__name__)
 
-def count_parameters(model: nn.Module) -> tuple[int, int]:
-    """
-    Count total and trainable parameters in a model.
+# --------------------------------------------------------------------------- #
+# Model utilities
+# --------------------------------------------------------------------------- #
 
-    Args:
-        model: PyTorch model
+def count_parameters(model: torch.nn.Module) -> tuple[int, int]:
+    total = sum(p.numel() for p in model.parameters())
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    return total, trainable
 
-    Returns:
-        tuple of (total_params, trainable_params)
-    """
-    total_params = sum(p.numel() for p in model.parameters())
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    return total_params, trainable_params
-
-
-def log_model_info(model: nn.Module, model_name: str = "Model") -> None:
-    """
-    Log parameter counts and architecture info for a model.
-
-    Args:
-        model: PyTorch model to analyze
-        model_name: Name for logging
-    """
-    # Use the model's built-in logging if available
+def log_model_info(model: torch.nn.Module, name: str = "Model") -> None:
     if hasattr(model, "log_model_info"):
         model.log_model_info()
     else:
-        # Fallback to basic parameter counting
         total, trainable = count_parameters(model)
         logger.info(f"\n{'=' * 80}")
-        logger.info(f"{model_name} Parameter Summary")
+        logger.info(f"{name} Parameter Summary")
         logger.info(f"{'=' * 80}")
         logger.info(f"Total parameters: {total:,}")
         logger.info(f"Trainable parameters: {trainable:,}")
-        logger.info(f"Non-trainable parameters: {total - trainable:,}")
+        logger.info(f"Non‑trainable parameters: {total - trainable:,}")
         logger.info(f"{'=' * 80}\n")
 
+# --------------------------------------------------------------------------- #
+# Hugging‑Face style progress bar
+# --------------------------------------------------------------------------- #
 
-HF_BLUE = "#1055C9"
-HF_GREEN = "#41A67E"
-HF_ORANGE = "#FF8C00"
-HF_RED = "#E03E3E"
-HF_CYAN = "#00B8D9"
-HF_INDIGO = "#6554C0"
-HF_BAR_FORMAT = (
-    "{desc}: {percentage:3.0f}%|{bar}| "
-    "{n_fmt}/{total_fmt} "
-    "[{elapsed}<{remaining}, {rate_fmt}]"
+HF_BLUE, HF_GREEN, HF_ORANGE, HF_RED, HF_CYAN, HF_INDIGO = (
+    "#1055C9", "#41A67E", "#FF8C00", "#E03E3E", "#00B8D9", "#6554C0"
 )
+HF_BAR_FORMAT = ("{desc}: {percentage:3.0f}%|{bar}| "
+                 "{n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]")
 
 T = TypeVar("T")
 
-
 class HFTqdm(auto_tqdm, Generic[T]):
-    def __init__(
-        self,
-        iterable: Optional[Iterable[T]] = None,
-        desc: str = "Processing",
-        total: Optional[int] = None,
-        unit: str = "iteration",
-        disable: bool = False,
-        **kwargs: Any,
-    ) -> None:
-        # Default values matching the Hugging‑Face style
-        kwargs.setdefault("unit", unit)
-        kwargs.setdefault("unit_scale", True)
-        kwargs.setdefault("bar_format", HF_BAR_FORMAT)
-        kwargs.setdefault("colour", HF_INDIGO)
-        kwargs.setdefault("ascii", False)
-        kwargs.setdefault("ncols", 100)
-        kwargs.setdefault("leave", True)
-        kwargs["disable"] = disable
+    def __init__(self, iterable: Optional[Iterable[T]] = None,
+                 desc: str = "Processing", total: Optional[int] = None,
+                 unit: str = "iteration", disable: bool = False, **kwargs: Any):
+        kwargs.setdefault("unit", unit); kwargs.setdefault("unit_scale", True)
+        kwargs.setdefault("bar_format", HF_BAR_FORMAT); kwargs.setdefault("colour", HF_INDIGO)
+        kwargs.setdefault("ascii", False); kwargs.setdefault("ncols", 100)
+        kwargs.setdefault("leave", True); kwargs["disable"] = disable
         super().__init__(iterable=iterable, desc=desc, total=total, **kwargs)
-        self._base_desc = desc
-        self._start_time = time.time()
-        self._warning_shown = False
+        self._base_desc = desc; self._start_time = time.time(); self._warning_shown = False
 
-    def __iter__(self) -> Iterator[T]:
-        return super().__iter__()  # type: ignore[return-value]
-
-    def update(self, n: int = 1) -> None:  # type: ignore[override]
+    def __iter__(self) -> Iterator[T]: return super().__iter__()          # type: ignore[return-value]
+    def update(self, n: int = 1) -> None:
         super().update(n)
         if self.total:
-            progress = self.n / self.total
-            self.colour = HF_INDIGO if progress < 1.0 else HF_GREEN
-
+            self.colour = HF_INDIGO if self.n / self.total < 1.0 else HF_GREEN
     def set_description(self, desc: Optional[str] = None, refresh: bool = True) -> None:
-        if desc:
-            self._base_desc = desc
+        if desc: self._base_desc = desc
         super().set_description(desc, refresh=refresh)
-
-    def set_postfix(
-        self,
-        ordered_dict: Optional[dict[str, Any]] = None,
-        refresh: bool = True,
-        **kwargs: Any,
-    ) -> None:
+    def set_postfix(self, ordered_dict: Optional[dict[str, Any]] = None,
+                    refresh: bool = True, **kwargs: Any) -> None:
         super().set_postfix(ordered_dict=ordered_dict, refresh=refresh, **kwargs)
-
     def close(self) -> None:
         if self.total and self.n >= self.total:
             self.colour = HF_GREEN
@@ -131,432 +91,165 @@ class HFTqdm(auto_tqdm, Generic[T]):
             self.set_description(f"✓ {self._base_desc}", refresh=False)
         else:
             self.colour = HF_ORANGE
-        self.refresh()
-        super().close()
-
-    def __enter__(self) -> "HFTqdm":
-        return self
-
+        self.refresh(); super().close()
+    def __enter__(self) -> HFTqdm: return self
     def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
-        if exc_type is not None:
+        if exc_type:
             self.colour = HF_RED
             self.set_description(f"✗ {self._base_desc} (failed)", refresh=False)
-        self.close()
-        return False
+        self.close(); return False
 
+# --------------------------------------------------------------------------- #
+# Path utilities
+# --------------------------------------------------------------------------- #
+
+def _ensure_path(p: Path | str) -> Path:
+    return p if isinstance(p, Path) else Path(p)
 
 # --------------------------------------------------------------------------- #
 # Checkpoint utilities
 # --------------------------------------------------------------------------- #
 
+def load_model_checkpoint(path: Path | str) -> dict[str, Any]:
+    path = _ensure_path(path)
+    if not path.exists(): raise FileNotFoundError(f"Checkpoint not found: {path}")
+    return safe_load(path) if path.suffix == ".safetensors" else torch.load(path, map_location="cpu")
 
-def _ensure_path(path: Path | str) -> Path:
-    """Return a Path object regardless of input type."""
-    return path if isinstance(path, Path) else Path(path)
+def save_model_checkpoint(state: dict[str, Any], path: Path | str) -> None:
+    path = _ensure_path(path); path.parent.mkdir(parents=True, exist_ok=True)
+    from safetensors.torch import save_file as safe_save
+    if path.suffix == ".safetensors": safe_save(state, path)
+    else: torch.save(state, path)
 
-
-def load_model_checkpoint(checkpoint_path: Path | str) -> dict[str, Any]:
-    """
-    Load a model checkpoint from disk.
-
-    Supports both .pth (torch) and .safetensors formats.
-
-    Parameters
-    ----------
-    checkpoint_path : Path | str
-        Path to the checkpoint file.
-
-    Returns
-    -------
-    dict[str, Any]
-        The state dictionary.
-    """
-    checkpoint_path = _ensure_path(checkpoint_path)
-
-    if not checkpoint_path.exists():
-        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
-
-    if checkpoint_path.suffix == ".safetensors":
-        from safetensors.torch import load_file as safe_load
-
-        return safe_load(checkpoint_path, device="cpu")
-    return torch.load(checkpoint_path, map_location="cpu")
-
-
-def save_model_checkpoint(
-    model_state_dict: dict[str, Any], checkpoint_path: Path | str
-) -> None:
-    """
-    Save a model state dictionary to disk.
-
-    Parameters
-    ----------
-    model_state_dict : dict[str, Any]
-        The state dictionary to save.
-    checkpoint_path : Path | str
-        Destination path.
-    """
-    checkpoint_path = _ensure_path(checkpoint_path)
-    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-
-    if checkpoint_path.suffix == ".safetensors":
-        from safetensors.torch import save_file as safe_save
-
-        safe_save(model_state_dict, checkpoint_path)
-    else:
-        torch.save(model_state_dict, checkpoint_path)
-
-
-def find_checkpoint(checkpoint_dir: Path | str, checkpoint_name: str) -> Path:
-    """
-    Find a checkpoint file in a directory.
-
-    Prefers .safetensors over .pth.
-
-    Parameters
-    ----------
-    checkpoint_dir : Path | str
-        Directory containing checkpoints.
-    checkpoint_name : str
-        Base name of the checkpoint (without extension).
-
-    Returns
-    -------
-    Path
-        Full path to the found checkpoint file.
-
-    Raises
-    ------
-    FileNotFoundError
-        If neither format is present.
-    """
-    checkpoint_dir = _ensure_path(checkpoint_dir)
-    safetensors_path = checkpoint_dir / f"{checkpoint_name}.safetensors"
-    pth_path = checkpoint_dir / f"{checkpoint_name}.pth"
-
-    if safetensors_path.exists():
-        return safetensors_path
-    if pth_path.exists():
-        return pth_path
-
-    raise FileNotFoundError(
-        f"Checkpoint not found for '{checkpoint_name}' in {checkpoint_dir}\n"
-        f"  Expected: {safetensors_path} or {pth_path}"
-    )
-
+def find_checkpoint(dir_: Path | str, name: str) -> Path:
+    dir_ = _ensure_path(dir_)
+    for ext in (".safetensors", ".pth"):
+        cand = dir_ / f"{name}{ext}"
+        if cand.exists(): return cand
+    raise FileNotFoundError(f"Checkpoint not found for '{name}' in {dir_}")
 
 # --------------------------------------------------------------------------- #
 # File‑system helpers
 # --------------------------------------------------------------------------- #
 
-
-def flatten_folder(root_dir: Path | str) -> None:
-    """
-    Move all files from nested subdirectories into the root directory.
-
-    Parameters
-    ----------
-    root_dir : Path | str
-        The directory to flatten.
-    """
-    root_dir = _ensure_path(root_dir)
-
-    for subdir, _, files in os.walk(root_dir):
-        if Path(subdir) == root_dir:
-            continue
-        for file in files:
-            src = Path(subdir) / file
-            dst = root_dir / file
+def flatten_folder(root: Path | str) -> None:
+    root = _ensure_path(root)
+    for sub, _, files in os.walk(root):
+        if Path(sub) == root: continue
+        for f in files:
+            src = Path(sub) / f
+            dst = root / f
             if dst.exists():
                 base, ext = dst.stem, dst.suffix
                 i = 1
-                while (root_dir / f"{base}_{i}{ext}").exists():
-                    i += 1
-                dst = root_dir / f"{base}_{i}{ext}"
+                while (root / f"{base}_{i}{ext}").exists(): i += 1
+                dst = root / f"{base}_{i}{ext}"
             shutil.move(str(src), str(dst))
-
-    # Remove empty sub‑directories
-    for subdir, _, files in os.walk(root_dir, topdown=False):
-        sub_path = Path(subdir)
-        if sub_path != root_dir and not any(sub_path.iterdir()):
-            sub_path.rmdir()
-
+    for sub, _, _ in os.walk(root, topdown=False):
+        sp = Path(sub)
+        if sp != root and not any(sp.iterdir()): sp.rmdir()
 
 def rename_images(json_file: Path | str) -> None:
-    """
-    Rename image files referenced in a JSON metadata file.
-
-    The new filenames follow the pattern ``style+char.png`` for target images
-    and ``char.png`` for content images.
-
-    Parameters
-    ----------
-    json_file : Path | str
-        Path to the JSON file containing ``generations`` entries.
-    """
     json_file = _ensure_path(json_file)
-
-    with json_file.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    generations = data.get("generations", [])
-    for entry in generations:
-        char = entry.get("character")
-        style = entry.get("style")
-        new_filename = f"{style}+{char}.png"
-
+    with json_file.open("r", encoding="utf-8") as f: data = json.load(f)
+    for entry in data.get("generations", []):
+        char, style = entry.get("character"), entry.get("style")
         for key in ("content_image_path", "target_image_path"):
-            old_path = entry.get(key)
-            if not old_path:
-                continue
-            old_path = Path(old_path)
-            if not old_path.exists():
-                print(f"Skipping: File not found {old_path}")
-                continue
-
-            directory = old_path.parent
-            if "content" in key:
-                new_filename = f"{char}.png"
-            new_path = directory / new_filename
-
+            old = entry.get(key)
+            if not old: continue
+            old_path = Path(old)
+            if not old_path.exists(): print(f"Skipping: File not found {old_path}"); continue
+            new_name = f"{char}.png" if "content" in key else f"{style}+{char}.png"
+            new_path = old_path.parent / new_name
             try:
                 old_path.rename(new_path)
-                print(f"Renamed: {old_path} -> {new_path}")
                 entry[key] = str(new_path)
-            except OSError as e:
-                print(f"Error renaming {old_path}: {e}")
+                print(f"Renamed: {old_path} -> {new_path}")
+            except OSError as e: print(f"Error renaming {old_path}: {e}")
+    out = json_file.with_name("updated_generations.json")
+    with out.open("w", encoding="utf-8") as f: json.dump(data, f, ensure_ascii=False, indent=2)
+    print(f"\nProcessing complete. Updated JSON saved as: {out}")
 
-    output_file = json_file.with_name("updated_generations.json")
-    with output_file.open("w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    print(f"\nProcessing complete. Updated JSON saved as: {output_file}")
+def rename_content_images(dir_: Path | str) -> None:
+    dir_ = _ensure_path(dir_) / "ContentImage"
+    for f in dir_.iterdir():
+        if "+" in f.name:
+            new = dir_ / f.name.split("+")[1]
+            f.rename(new)
+            print(f"Renamed: {f} -> {new}")
 
-
-def rename_content_images(path: Path | str) -> None:
-    """
-    Rename all files in ``ContentImage/`` from ``1+char.png`` to ``char.png``.
-
-    Parameters
-    ----------
-    path : Path | str
-        Root directory containing the ``ContentImage`` sub‑folder.
-    """
-    path = _ensure_path(path)
-    content_dir = path / "ContentImage"
-
-    for filename in content_dir.iterdir():
-        if "+" in filename.name:
-            char = filename.name.split("+")[1]
-            new_path = content_dir / char
-            filename.rename(new_path)
-            print(f"Renamed: {filename} -> {new_path}")
-
-
-def update_paths(
-    input_file: Path | str, output_file: Optional[Path | str] = None
-) -> None:
-    """
-    Update ``content_image_path`` and ``target_image_path`` fields in a JSON file.
-
-    Parameters
-    ----------
-    input_file : Path | str
-        Path to the source JSON file.
-    output_file : Path | str | None
-        Destination path. If ``None``, overwrites ``input_file``.
-    """
-    input_file = _ensure_path(input_file)
-    output_file = _ensure_path(output_file) if output_file else input_file
-
-    with input_file.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    items = data.get("generations", [])
-    for item in items:
+def update_paths(inp: Path | str, out: Optional[Path | str] = None) -> None:
+    inp = _ensure_path(inp); out = _ensure_path(out) if out else inp
+    with inp.open("r", encoding="utf-8") as f: data = json.load(f)
+    for item in data.get("generations", []):
         char, style = item["character"], item["style"]
         item["content_image_path"] = f"ContentImage/{char}.png"
         item["target_image_path"] = f"TargetImage/{style}/{style}+{char}.png"
+    with out.open("w", encoding="utf-8") as f: json.dump(data, f, ensure_ascii=False, indent=2)
 
-    with output_file.open("w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-
-def print_font_glyph_counts(fonts_dir: Path | str) -> None:
-    """
-    Print the number of glyphs (supported Unicode characters) for each font in a directory.
-
-    Parameters
-    ----------
-    fonts_dir : Path | str
-        Directory containing font files (.ttf, .otf).
-    """
+def print_font_glyph_counts(dir_: Path | str) -> None:
     from fontTools.ttLib import TTFont
-
-    fonts_dir = _ensure_path(fonts_dir)
-    font_extensions = {".ttf", ".otf", ".ttf", ".otf"}
-
-    font_files = [p for p in fonts_dir.iterdir() if p.suffix.lower() in font_extensions]
-
-    print(f"\nFont glyph count summary for directory: {fonts_dir}")
-    for font_path in font_files:
+    dir_ = _ensure_path(dir_)
+    exts = {".ttf", ".otf"}
+    fonts = [p for p in dir_.iterdir() if p.suffix.lower() in exts]
+    print(f"\nFont glyph count summary for directory: {dir_}")
+    for fp in fonts:
         try:
-            font = TTFont(font_path)
-            cmap = font.getBestCmap()
-            num_glyphs = len(cmap)
-            font_name = font_path.stem
-            print(f"  {font_name}: {num_glyphs} glyphs")
-        except Exception as e:
-            print(f"  {font_path.name}: Failed to read ({e})")
-
+            cmap = TTFont(fp).getBestCmap()
+            print(f"  {fp.stem}: {len(cmap)} glyphs")
+        except Exception as e: print(f"  {fp.name}: Failed to read ({e})")
 
 # --------------------------------------------------------------------------- #
 # Conversion utilities
 # --------------------------------------------------------------------------- #
 
+def pth_to_safetensors(pth: Path | str, out: Path | str) -> None:
+    pth, out = _ensure_path(pth), _ensure_path(out)
+    print(f"\nConverting {pth.name} to safetensors...")
+    state = torch.load(pth, map_location="cpu")
+    save_file(state, out)
+    size_pth = pth.stat().st_size / (1024**3)
+    size_safe = out.stat().st_size / (1024**3)
+    print(f"✓ Converted: {pth}")
+    print(f"  .pth size:  {size_pth:.2f} GB")
+    print(f"  .safetensors size: {size_safe:.2f} GB")
 
-def pth_to_safetensors(pth_path: Path | str, output_path: Path | str) -> None:
-    """
-    Convert a .pth checkpoint to .safetensors format.
-
-    Parameters
-    ----------
-    pth_path : Path | str
-        Source .pth file.
-    output_path : Path | str
-        Destination .safetensors file.
-    """
-    pth_path = _ensure_path(pth_path)
-    output_path = _ensure_path(output_path)
-
-    print(f"\nConverting {pth_path.name} to safetensors...")
-    try:
-        state_dict = torch.load(pth_path, map_location="cpu")
-        save_file(state_dict, output_path)
-
-        size_pth = pth_path.stat().st_size / (1024**3)
-        size_safe = output_path.stat().st_size / (1024**3)
-
-        print(f"✓ Converted: {pth_path}")
-        print(f"  .pth size:  {size_pth:.2f} GB")
-        print(f"  .safetensors size: {size_safe:.2f} GB")
-    except Exception as e:
-        print(f"✗ Error converting {pth_path}: {e}")
-        raise
-
-
-def convert_checkpoint_folder(
-    ckpt_dir: Path | str,
-    output_dir: Optional[Path | str] = None,
-) -> Path:
-    """
-    Convert all .pth files in a directory to .safetensors.
-
-    Parameters
-    ----------
-    ckpt_dir : Path | str
-        Source directory containing .pth checkpoints.
-    output_dir : Path | str | None
-        Destination directory for .safetensors files.
-        If ``None`` the source directory is used.
-
-    Returns
-    -------
-    Path
-        The directory that contains the converted files.
-    """
-    ckpt_dir = _ensure_path(ckpt_dir)
-    output_dir = _ensure_path(output_dir) if output_dir else ckpt_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    print(f"\n{'=' * 60}")
-    print("CONVERTING CHECKPOINTS TO SAFETENSORS")
-    print("=" * 60)
-
-    pth_files = list(ckpt_dir.glob("*.pth"))
-    if not pth_files:
-        print(f"⚠ No .pth files found in {ckpt_dir}")
-        return output_dir
-
-    print(f"Found {len(pth_files)} .pth files")
-    for pth_file in pth_files:
-        safe_file = output_dir / f"{pth_file.stem}.safetensors"
-        pth_to_safetensors(pth_file, safe_file)
-
+def convert_checkpoint_folder(src_dir: Path | str, dst_dir: Optional[Path | str] = None) -> Path:
+    src_dir = _ensure_path(src_dir); dst_dir = _ensure_path(dst_dir) if dst_dir else src_dir
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    print(f"\n{'=' * 60}\nCONVERTING CHECKPOINTS TO SAFETENSORS\n{'=' * 60}")
+    pths = list(src_dir.glob("*.pth"))
+    if not pths:
+        print(f"⚠ No .pth files found in {src_dir}")
+        return dst_dir
+    print(f"Found {len(pths)} .pth files")
+    for pth in pths:
+        pth_to_safetensors(pth, dst_dir / f"{pth.stem}.safetensors")
     print(f"\n✓ Conversion complete!")
-    return output_dir
-
+    return dst_dir
 
 # --------------------------------------------------------------------------- #
 # Command‑line interface
 # --------------------------------------------------------------------------- #
 
-
 def _cli() -> None:
-    parser = argparse.ArgumentParser(
-        description="Utility functions for font diffusion project"
-    )
-    parser.add_argument(
-        "--flatten_dir",
-        type=str,
-        help="Path to directory to flatten (move all files from subdirs to root)",
-    )
-    parser.add_argument(
-        "--font_glyphs_dir",
-        type=str,
-        help="Path to directory containing fonts to print glyph counts",
-    )
-    parser.add_argument(
-        "--convert_ckpt_dir",
-        type=str,
-        help="Path to directory containing .pth checkpoints to convert to .safetensors",
-    )
-    parser.add_argument(
-        "--output_dir",
-        type=str,
-        default=None,
-        help="Output directory for converted safetensors (if not specified, uses input dir)",
-    )
-    parser.add_argument(
-        "--rename_images_json",
-        type=str,
-        help="Path to JSON file for renaming images based on character and style",
-    )
-    parser.add_argument(
-        "--rename_content_images_dir",
-        type=str,
-        help="Path to directory to rename content images from '1+char.png' to 'char.png'",
-    )
-    parser.add_argument(
-        "--update_paths",
-        type=str,
-        nargs=2,
-        help="Path to JSON file to update content and target image paths",
-    )
+    parser = argparse.ArgumentParser(description="Utility functions for font diffusion project")
+    parser.add_argument("--flatten_dir", type=str, help="Flatten directory")
+    parser.add_argument("--font_glyphs_dir", type=str, help="Print glyph counts")
+    parser.add_argument("--convert_ckpt_dir", type=str, help="Convert .pth checkpoints")
+    parser.add_argument("--output_dir", type=str, default=None, help="Output dir for safetensors")
+    parser.add_argument("--rename_images_json", type=str, help="Rename images from JSON")
+    parser.add_argument("--rename_content_images_dir", type=str, help="Rename content images")
+    parser.add_argument("--update_paths", type=str, nargs=2, help="Update JSON paths")
     args = parser.parse_args()
 
-    if args.flatten_dir:
-        flatten_folder(args.flatten_dir)
-        print(f"✓ Flattened directory: {args.flatten_dir}")
-
-    if args.font_glyphs_dir:
-        print_font_glyph_counts(args.font_glyphs_dir)
-
-    if args.convert_ckpt_dir:
-        convert_checkpoint_folder(args.convert_ckpt_dir, args.output_dir)
-
-    if args.rename_images_json:
-        rename_images(args.rename_images_json)
-
-    if args.rename_content_images_dir:
-        rename_content_images(args.rename_content_images_dir)
-
-    if args.update_paths:
-        update_paths(args.update_paths[0], args.update_paths[1])
-        print(f"✓ Updated paths in JSON file: {args.update_paths}")
-
-    if not any(vars(args).values()):
-        print("No arguments provided. Use --help for usage information.")
-
+    if args.flatten_dir: flatten_folder(args.flatten_dir); print(f"✓ Flattened directory: {args.flatten_dir}")
+    if args.font_glyphs_dir: print_font_glyph_counts(args.font_glyphs_dir)
+    if args.convert_ckpt_dir: convert_checkpoint_folder(args.convert_ckpt_dir, args.output_dir)
+    if args.rename_images_json: rename_images(args.rename_images_json)
+    if args.rename_content_images_dir: rename_content_images(args.rename_content_images_dir)
+    if args.update_paths: update_paths(*args.update_paths); print(f"✓ Updated paths in JSON file: {args.update_paths}")
+    if not any(vars(args).values()): print("No arguments provided. Use --help for usage information.")
 
 if __name__ == "__main__":
     _cli()

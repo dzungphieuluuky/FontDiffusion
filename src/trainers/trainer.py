@@ -1,6 +1,7 @@
 import logging
 import math
 import os
+import argparse
 from dataclasses import asdict
 from pathlib import Path
 import traceback
@@ -47,8 +48,8 @@ logger = logging.getLogger(__name__)
 class FontDiffuserTrainer:
     """Main trainer class for FontDiffuser."""
 
-    def __init__(self, args):
-        self.args = args
+    def __init__(self, args: argparse.Namespace):
+        self.args: argparse.Namespace = args
         self.config = self._create_config(args)
         self.config.validate()
 
@@ -71,7 +72,7 @@ class FontDiffuserTrainer:
         self.perceptual_loss = None
         self.scr = None
 
-    def _create_config(self, args) -> TrainingConfig:
+    def _create_config(self, args: argparse.Namespace) -> TrainingConfig:
         """Create TrainingConfig from parsed args."""
         return TrainingConfig(
             learning_rate=args.learning_rate,

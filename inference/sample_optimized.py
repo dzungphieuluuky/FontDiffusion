@@ -44,7 +44,36 @@ from src.tools.filename_utils import (
     compute_file_hash,
 )
 
+from src.builders.build import (
+    build_fst_projection,
+    build_original_style_projection,
+    get_unet_cross_attention_dim,
+    build_unet,
+    build_style_encoder,
+    build_content_encoder,
+    build_skeleton_transform,
+    build_dual_channel_content_encoder,
+    build_ddpm_scheduler,
+    build_fst,
+    build_identity_loss_module,
+    build_mss_encoder,
+    build_scr,
+    load_components
+)
+
+import logging
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    level=logging.INFO,
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(f"{__name__}.log", mode="a"),
+    ],
+)
 logger = logging.getLogger(__name__)
+
 
 class FontManager:
     """Manages single or multiple font files"""
@@ -216,28 +245,19 @@ def get_style_transform(style_image_size: tuple[int, int]) -> transforms.Compose
     )
 
 
-def load_state_dict_auto(path: str):
-    if path.endswith(".safetensors"):
-        try:
-            from safetensors.torch import load_file as safe_load_file
-        except ImportError:
-            raise ImportError("Please install safetensors to load .safetensors files.")
-        return safe_load_file(path)
-    else:
-        return torch.load(path, map_location="cpu")
-
-
 def load_fontdiffuser_pipeline(
     args: Namespace, use_fst: bool = False
 ) -> FontDiffuserDPMPipeline:
-    """Load Font Diffuser pipeline with optimizations"""
+    """Load Font Diffuser pipeline with optimizations, skeleton transform, and frequency decomposition support"""
+    from src.builders.build import load_state_dict_auto
+
     logger.info(f"Loading FontDiffuser{'WithFST' if use_fst else ''} pipeline...")
 
     # Build base components
     unet: UNet = build_unet(args=args)
     style_encoder: StyleEncoder = build_style_encoder(args=args)
     content_encoder: ContentEncoder = build_content_encoder(args=args)
-
+    
     # Load base component weights
     unet_ckpt_path = (
         f"{args.ckpt_dir}/unet.safetensors"
@@ -253,25 +273,71 @@ def load_fontdiffuser_pipeline(
     )
     style_encoder.load_state_dict(load_state_dict_auto(style_encoder_ckpt_path))
 
+    # Load content encoder with skeleton transform compatibility
     content_encoder_ckpt_path = (
         f"{args.ckpt_dir}/content_encoder.safetensors"
         if os.path.exists(f"{args.ckpt_dir}/content_encoder.safetensors")
         else f"{args.ckpt_dir}/content_encoder.pth"
     )
-    content_encoder.load_state_dict(load_state_dict_auto(content_encoder_ckpt_path))
+    
+    content_encoder_state = load_state_dict_auto(content_encoder_ckpt_path)
+    
+    # Check if checkpoint is from skeleton-wrapped encoder
+    is_wrapped_checkpoint = any(
+        k.startswith("original_encoder.") or k.startswith("fusion_conv.")
+        for k in content_encoder_state.keys()
+    )
+    
+    # Build skeleton transform if enabled
+    skeleton_transform = None
+    if is_wrapped_checkpoint:
+        # Use wrapped encoder if checkpoint was saved as wrapped
+        if getattr(args, "use_skeleton_content", False):
+            # Wrap content encoder with skeleton transform
+            skeleton_transform = build_skeleton_transform(args=args)
+            content_encoder = build_dual_channel_content_encoder(
+                content_encoder=content_encoder,
+                skeleton_fusion_method=getattr(args, "skeleton_fusion_method", "concat"),
+            )
+            content_encoder.load_state_dict(content_encoder_state)
+            logger.info("✓ Wrapped ContentEncoder with DualChannelContentEncoder for skeleton transform")
+        else:
+            # Extract original encoder keys from wrapped checkpoint
+            original_state = {}
+            for k, v in content_encoder_state.items():
+                if k.startswith("original_encoder."):
+                    new_k = k.replace("original_encoder.", "")
+                    original_state[new_k] = v
+            
+            if original_state:
+                content_encoder.load_state_dict(original_state)
+                logger.info("✓ Extracted and loaded original encoder from wrapped checkpoint")
+            else:
+                raise RuntimeError(
+                    "Could not extract original encoder state from wrapped checkpoint"
+                )
+    else:
+        # Plain checkpoint - load normally
+        content_encoder.load_state_dict(content_encoder_state)
+        logger.info("✓ Loaded plain content encoder")
 
     logger.info("✓ Loaded base model components (unet, style_encoder, content_encoder)")
 
-    if use_fst:
-        from src.model import FontDiffuserModelDPMWithFST
-        from src.builders.build import (
-            build_fst,
-            build_mss_encoder,
-            build_fst_projection,
-            build_original_style_projection,
-            get_unet_cross_attention_dim,
+    # Build frequency decomposition if enabled
+    frequency_decomp = None
+    if getattr(args, "use_frequency_decomp", False):
+        from src.builders.build import build_frequency_decomposition
+        
+        frequency_decomp = build_frequency_decomposition(args=args)
+        logger.info(
+            f"✓ Frequency decomposition enabled "
+            f"(low_cutoff={getattr(args, 'frequency_low_cutoff', 0.10)}, "
+            f"mid_cutoff={getattr(args, 'frequency_mid_cutoff', 0.40)}, "
+            f"filter={getattr(args, 'frequency_filter_type', 'gaussian')})"
         )
 
+    if use_fst:
+        from src.model import FontDiffuserModelDPMWithFST
         logger.info("Building FST modules...")
 
         # Build FST modules
@@ -305,21 +371,11 @@ def load_fontdiffuser_pipeline(
                 "fst_projection": fst_projection,
                 "original_style_projection": original_style_projection,
             }
-
-            for name, module in fst_components.items():
-                ckpt_path = f"{fst_ckpt_dir}/{name}.safetensors"
-                if not os.path.exists(ckpt_path):
-                    ckpt_path = f"{fst_ckpt_dir}/{name}.pth"
-
-                if os.path.exists(ckpt_path):
-                    module.load_state_dict(load_state_dict_auto(ckpt_path))
-                    logger.info(f"  ✓ Loaded {name}")
-                else:
-                    logger.warning(f"  ⚠ {name} checkpoint not found")
+            load_components(fst_components, args)
         else:
             logger.warning("No FST checkpoint path provided - using random weights")
-
-        # Create FST-enhanced model
+        
+        # Create FST-enhanced model with frequency decomposition
         model: FontDiffuserModelDPMWithFST = FontDiffuserModelDPMWithFST(
             unet=unet,
             style_encoder=style_encoder,
@@ -328,21 +384,28 @@ def load_fontdiffuser_pipeline(
             fst_module=fst_module,
             fst_projection=fst_projection,
             original_style_projection=original_style_projection,
+            skeleton_transform=skeleton_transform,
+            frequency_decomp=frequency_decomp,
         )
         logger.info("✓ Created FontDiffuserModelDPMWithFST")
     else:
         # Standard model (non-FST)
+        # Note: Standard model doesn't support frequency decomposition or skeleton transform
+        # These features require FST model architecture
+        if frequency_decomp is not None or skeleton_transform is not None:
+            logger.warning(
+                "⚠️  Frequency decomposition and skeleton transform require --use_fst flag. "
+                "Creating standard model without these features."
+            )
+        
         model: FontDiffuserModelDPM = FontDiffuserModelDPM(
-            unet=unet, style_encoder=style_encoder, content_encoder=content_encoder
+            unet=unet, 
+            style_encoder=style_encoder, 
+            content_encoder=content_encoder
         )
         logger.info("✓ Created standard FontDiffuserModelDPM")
 
     # Apply optimizations
-    if getattr(args, "fp16", False):
-        logger.info("Converting to FP16 precision...")
-        model = model.half()
-        logger.info("✓ Converted to FP16")
-
     if getattr(args, "channels_last", False):
         logger.info("Converting to channels-last memory format...")
         model = model.to(memory_format=torch.channels_last)
@@ -430,7 +493,7 @@ def sampling_batch(
             content_filename = get_content_filename(char)
             pil_img.save(os.path.join(content_dir, content_filename))
 
-    with torch.no_grad():
+    with torch.inference_mode():
         dtype: torch.dtype = (
             torch.float16 if getattr(args, "fp16", False) else torch.float32
         )
@@ -556,6 +619,7 @@ def image_process_batch(
 def main() -> None:
     """Main function"""
     from src.configs.fontdiffuser import get_parser
+
     parser: ArgumentParser = get_parser()
     args: Namespace = parser.parse_args()
 

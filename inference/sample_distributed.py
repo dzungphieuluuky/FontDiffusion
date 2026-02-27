@@ -39,6 +39,17 @@ from inference.sample_batch import (
 from src.configs.fontdiffuser import get_parser
 from src.dpm_solver.pipeline_dpm_solver import FontDiffuserDPMPipeline
 
+import logging
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    level=logging.INFO,
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(f"{__name__}.log", mode="a"),
+    ],
+)
 logger = logging.getLogger(__name__)
 # Optional dependencies
 try:
@@ -704,7 +715,7 @@ def main():
                 log_to_wandb(results, args)
 
             logger.info("=" * 60)
-            logger.info("✅ NomGenie dataset generation complete!")
+            logger.info("[OK] NomGenie dataset generation complete!")
             logger.info("=" * 60)
 
         # FIX 18: Final synchronization

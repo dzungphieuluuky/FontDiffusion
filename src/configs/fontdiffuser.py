@@ -1,6 +1,19 @@
 import os
 import argparse
 
+import logging
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    level=logging.INFO,
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(f"{__name__}.log", mode="a"),
+    ],
+)
+logger = logging.getLogger(__name__)
+
 
 def get_parser():
     """
@@ -96,6 +109,15 @@ def get_parser():
         type=int,
         default=64,
         help="Style encoder first layer channels",
+    )
+    model_group.add_argument(
+        "--freeze_modules",
+        type=str,
+        default="",
+        help="Comma-separated list of modules to freeze during FST training. "
+        "Options: unet, style_encoder, content_encoder, mss_encoder, fst_module, "
+        "fst_projection, original_style_projection. "
+        "Example: 'unet,style_encoder,content_encoder'",
     )
 
     # ==================== Training Configuration ====================
@@ -445,8 +467,8 @@ def get_parser():
     fst_group.add_argument(
         "--fst_query_dim",
         type=int,
-        default=128,
-        help="Dimension of query vectors in FST",
+        default=256,
+        help="Dimension of query vectors in FST, must be divisible by num_heads",
     )
     fst_group.add_argument(
         "--fst_num_scales",
@@ -466,11 +488,6 @@ def get_parser():
         default=0.5,
         help="Probability that source and target style use same font style",
     )
-    fst_group.add_argument(
-        "--freeze_original_encoders",
-        action="store_true",
-        help="Freeze original style and content encoders during training",
-    )
     # MSS Encoder specific
     fst_group.add_argument(
         "--mss_base_channels",
@@ -481,8 +498,367 @@ def get_parser():
     fst_group.add_argument(
         "--mss_num_scales",
         type=int,
-        default=None,
+        default=5,
         help="Number of scales in MSSE (if None, uses fst_num_scales)",
+    )
+
+    fst_group.add_argument(
+        "--num_consistency_pairs",
+        type=int,
+        default=0,
+        help="Number of same-style pairs for style consistency loss (0 to disable). "
+        "Example: 3 = load 3 pairs per batch where both images have same style.",
+    )
+    fst_group.add_argument(
+        "--consistency_loss_weight",
+        type=float,
+        default=0.1,
+        help="Weight for style consistency loss (0.0-1.0). "
+        "Higher values enforce stronger style consistency.",
+    )
+
+    # ==================== Identity Loss for FST ====================
+    fst_group.add_argument(
+        "--num_identity_pairs",
+        type=int,
+        default=0,
+        help="Number of same-style pairs for identity mapping loss (0 to disable). "
+        "Example: 3 = load 3 pairs per batch where both images have same style.",
+    )
+    fst_group.add_argument(
+        "--identity_loss_weight",
+        type=float,
+        default=0.1,
+        help="Weight for identity mapping loss (0.0-1.0). "
+        "Higher values enforce stronger identity constraint.",
+    )
+    fst_group.add_argument(
+        "--identity_pair_mode",
+        type=str,
+        default="random",
+        choices=["random", "same_style"],
+        help="How to sample identity pairs:\n"
+        "  'random': Each pair can have different style\n"
+        "  'same_style': All pairs use same style as main sample (stronger constraint)",
+    )
+
+    # ADD THESE NEW PARAMETERS:
+    fst_group.add_argument(
+        "--identity_loss_type",
+        type=str,
+        default="frobenius",
+        choices=["frobenius", "mse", "cosine"],
+        help="Distance metric for identity mapping loss:\n"
+        "  'frobenius': Frobenius norm ||T - I||_F (default, most stable)\n"
+        "  'mse': Mean squared error\n"
+        "  'cosine': Cosine distance (normalized)",
+    )
+    fst_group.add_argument(
+        "--identity_regularization",
+        type=str,
+        default="orthogonal",
+        choices=["orthogonal", "spectral", None],
+        help="Regularization for transformation matrix:\n"
+        "  'orthogonal': Enforce T^T T ≈ I (orthogonality)\n"
+        "  'spectral': Penalize large singular values\n"
+        "  None: No additional regularization",
+    )
+    fst_group.add_argument(
+        "--identity_reg_weight",
+        type=float,
+        default=0.01,
+        help="Weight for identity regularization term (0.0-1.0). "
+        "Controls strength of orthogonality/spectral constraints.",
+    )
+    fst_group.add_argument(
+        "--identity_matrix_size",
+        type=int,
+        default=None,
+        help="Size of transformation matrix for identity loss. "
+        "If None, defaults to fst_num_queries. "
+        "Must match FST output query dimension.",
+    )
+    fst_group.add_argument(
+        "--use_adaptive_identity_loss",
+        action="store_true",
+        default=False,
+        help="Use AdaptiveIdentityMappingLoss that adjusts loss weight based on "
+        "style similarity between pairs (more robust to style variations).",
+    )
+    fst_group.add_argument(
+        "--identity_similarity_threshold",
+        type=float,
+        default=0.8,
+        help="Similarity threshold for adaptive identity loss (0.0-1.0). "
+        "If actual style similarity > threshold, apply strong identity constraint. "
+        "Otherwise, apply weak constraint to avoid false penalties.",
+    )
+    fst_group.add_argument(
+        "--identity_adaptive_max_weight",
+        type=float,
+        default=1.0,
+        help="Maximum weight for adaptive identity loss when styles are very similar.",
+    )
+    fst_group.add_argument(
+        "--identity_adaptive_min_weight",
+        type=float,
+        default=0.1,
+        help="Minimum weight for adaptive identity loss when styles are dissimilar.",
+    )
+    fst_group.add_argument(
+        "--use_pooled_identity_loss",
+        action="store_true",
+        default=False,
+        help="Use PooledIdentityMappingLoss that computes identity constraint over "
+        "multiple same-style pairs simultaneously (stronger constraint).",
+    )
+    fst_group.add_argument(
+        "--identity_pooled_reduction",
+        type=str,
+        default="mean",
+        choices=["mean", "sum", "max"],
+        help="Reduction method for pooled identity loss:\n"
+        "  'mean': Average loss across all pairs\n"
+        "  'sum': Sum loss across all pairs\n"
+        "  'max': Maximum loss across all pairs",
+    )
+    fst_group.add_argument(
+        "--identity_log_metrics",
+        action="store_true",
+        default=True,
+        help="Log detailed identity loss metrics (diagonal/off-diagonal analysis, "
+        "eigenvalue stats) to W&B and console.",
+    )
+    fst_group.add_argument(
+        "--identity_metric_interval",
+        type=int,
+        default=100,
+        help="Log identity loss metrics every N steps.",
+    )
+    # ==================== Skeleton Distance Transform ====================
+    skeleton_group = parser.add_argument_group("Skeleton Distance Transform")
+    skeleton_group.add_argument(
+        "--use_skeleton_content",
+        action="store_true",
+        help="Use skeleton-distance transform for content images (prevents style leakage)",
+    )
+
+    skeleton_group.add_argument(
+        "--skeleton_method",
+        type=str,
+        default="medial_axis",
+        choices=["skeletonize", "medial_axis", "zhang_suen"],
+        help="Skeletonization algorithm: "
+            "'skeletonize' (morphological thinning), "
+            "'medial_axis' (distance-based, robust for fonts), "
+            "'zhang_suen' (Zhang-Suen algorithm)",
+    )
+
+    skeleton_group.add_argument(
+        "--skeleton_distance_method",
+        type=str,
+        default="hybrid",
+        choices=["edt", "gaussian", "hybrid"],
+        help="Distance field generation method: "
+            "'edt' (Euclidean Distance Transform), "
+            "'gaussian' (Gaussian blur of skeleton), "
+            "'hybrid' (EDT + Gaussian smoothing)",
+    )
+
+    skeleton_group.add_argument(
+        "--skeleton_max_distance",
+        type=float,
+        default=12.0,
+        help="Maximum influence radius for skeleton distance field (in pixels). "
+            "Smaller values = tighter guidance, larger values = more diffuse influence.",
+    )
+
+    skeleton_group.add_argument(
+        "--skeleton_sigma",
+        type=float,
+        default=1.5,
+        help="Gaussian sigma for distance field smoothing (used in 'gaussian' and 'hybrid' methods)",
+    )
+
+    skeleton_group.add_argument(
+        "--skeleton_output_mode",
+        type=str,
+        default="dual_channel",
+        choices=["skeleton_only", "distance_only", "dual_channel"],
+        help="Output mode: "
+            "'skeleton_only' (binary 1-channel), "
+            "'distance_only' (smooth 1-channel), "
+            "'dual_channel' (skeleton + distance, 2-channel)",
+    )
+
+    skeleton_group.add_argument(
+        "--skeleton_fusion_method",
+        type=str,
+        default="concat",
+        choices=["concat", "add", "weighted"],
+        help="How to fuse skeleton and distance channels in content encoder: "
+            "'concat' (1x1 conv to merge), "
+            "'add' (simple addition), "
+            "'weighted' (learnable weighted sum)",
+    )
+    # ==================== Fourier-Based Frequency Decomposition ====================
+    frequency_group = parser.add_argument_group("Frequency Decomposition")
+    # Frequency Decomposition Arguments
+    frequency_group.add_argument(
+        "--use_frequency_decomp",
+        action="store_true",
+        help="Use frequency decomposition for content-style separation",
+    )
+
+    frequency_group.add_argument(
+        "--frequency_low_cutoff",
+        type=float,
+        default=0.10,
+        help="Boundary between low and mid frequencies (fraction of max freq)",
+    )
+
+    frequency_group.add_argument(
+        "--frequency_mid_cutoff",
+        type=float,
+        default=0.40,
+        help="Boundary between mid and high frequencies (fraction of max freq)",
+    )
+
+    frequency_group.add_argument(
+        "--frequency_filter_type",
+        type=str,
+        default="gaussian",
+        choices=["ideal", "butterworth", "gaussian"],
+        help="Type of frequency filter",
+    )
+
+    frequency_group.add_argument(
+        "--frequency_use_mid_band",
+        action="store_true",
+        default=True,
+        help="Whether to use mid-frequency band",
+    )
+
+    frequency_group.add_argument(
+        "--frequency_mid_target",
+        type=str,
+        default="both",
+        choices=["content", "style", "both"],
+        help="Where to send mid-frequency band",
+    )
+    # ==================== Direct Reward Optimization (DRO) ====================
+    dro_group = parser.add_argument_group("DRO — Direct Reward Optimization")
+    dro_group.add_argument(
+        "--use_dro",
+        action="store_true",
+        help="Enable Direct Reward Optimization on top of FST diffusion loss.",
+    )
+    dro_group.add_argument(
+        "--dro_weight",
+        type=float,
+        default=0.1,
+        help="Weight applied to the DRO reward loss term (default: 0.1).",
+    )
+    dro_group.add_argument(
+        "--dro_ssim_weight",
+        type=float,
+        default=1.0,
+        help="Weight for SSIM content-fidelity reward inside DRO (default: 1.0).",
+    )
+    dro_group.add_argument(
+        "--dro_lpips_weight",
+        type=float,
+        default=1.0,
+        help="Weight for LPIPS style-similarity penalty inside DRO (default: 1.0).",
+    )
+    dro_group.add_argument(
+        "--dro_reward_scale",
+        type=float,
+        default=1.0,
+        help="Global scale applied to the composite reward (default: 1.0).",
+    )
+    dro_group.add_argument(
+        "--dro_warmup_steps",
+        type=int,
+        default=0,
+        help="Number of steps before DRO reward is activated (default: 0).",
+    )
+    # --- missing args below ---
+    dro_group.add_argument(
+        "--dro_max_timestep_frac",
+        type=float,
+        default=0.3,
+        help="Only evaluate DRO reward at timesteps below this fraction of "
+             "num_train_timesteps. Lower = more reliable pred_x0 (default: 0.3).",
+    )
+    dro_group.add_argument(
+        "--dro_sharp_weight",
+        type=float,
+        default=0.0,
+        help="Weight for sharpness reward inside DRO (default: 0.0, disabled).",
+    )
+    dro_group.add_argument(
+        "--dro_div_weight",
+        type=float,
+        default=0.0,
+        help="Weight for diversity penalty inside DRO (default: 0.0, disabled).",
+    )
+    dro_group.add_argument(
+        "--dro_normalise_reward",
+        action="store_true",
+        default=False,
+        help="Normalise composite reward to unit variance before scaling (default: False).",
+    )
+
+    # ==================== GRPO ====================
+    grpo_group = parser.add_argument_group("GRPO Policy Optimization")
+    grpo_group.add_argument(
+        "--use_grpo",
+        action="store_true",
+        default=False,
+        help="Enable GRPO policy gradient on top of DRO losses",
+    )
+    grpo_group.add_argument(
+        "--grpo_group_size",
+        type=int,
+        default=4,
+        help="Number of rollouts per prompt for group-relative baseline",
+    )
+    grpo_group.add_argument(
+        "--grpo_clip_eps",
+        type=float,
+        default=0.2,
+        help="PPO-style clipping epsilon for importance ratio",
+    )
+    grpo_group.add_argument(
+        "--grpo_pg_weight",
+        type=float,
+        default=0.01,
+        help="Weight of GRPO policy gradient loss",
+    )
+    grpo_group.add_argument(
+        "--grpo_sample_steps",
+        type=int,
+        default=5,
+        help="Denoising steps per rollout (shorter = faster, noisier signal)",
+    )
+    grpo_group.add_argument(
+        "--grpo_warmup_steps",
+        type=int,
+        default=1000,
+        help="Steps before GRPO activates",
+    )
+    grpo_group.add_argument(
+        "--grpo_kl_coeff",
+        type=float,
+        default=0.01,
+        help="KL penalty coefficient against frozen reference policy",
+    )
+    grpo_group.add_argument(
+        "--grpo_reward_clip",
+        type=float,
+        default=5.0,
+        help="Clip reward to [-clip, clip] before normalization",
     )
 
     # ==================== Optimization Flags ====================
@@ -526,13 +902,19 @@ def get_parser():
         default=False,
         help="Use fast sampling mode",
     )
+    optimization_group.add_argument(
+        "--num_workers",
+        type=int,
+        default=os.cpu_count() - 1,
+        help="Number of DataLoader workers",
+    )
 
     # ==================== Evaluation ====================
     eval_group = parser.add_argument_group("Evaluation")
     eval_group.add_argument(
         "--evaluate",
         action="store_true",
-        default=True,
+        default=False,
         help="Evaluate generated images",
     )
     eval_group.add_argument(
@@ -547,7 +929,7 @@ def get_parser():
     logging_group.add_argument(
         "--use_wandb",
         action="store_true",
-        default=True,
+        default=False,
         help="Log to Weights & Biases",
     )
     logging_group.add_argument(
@@ -558,6 +940,36 @@ def get_parser():
     )
     logging_group.add_argument(
         "--wandb_run_name", type=str, default=None, help="W&B run name"
+    )
+
+    # ==================== Model Summary ====================
+    summary_group = parser.add_argument_group("Model Summary")
+    summary_group.add_argument(
+        "--summary",
+        action="store_true",
+        default=False,
+        help="If set, outputs a torchinfo summary of all core models to model_summary.txt",
+    )
+
+    # ==================== ONNX Export ====================
+    export_group = parser.add_argument_group("Model Export")
+    export_group.add_argument(
+        "--export_onnx",
+        action="store_true",
+        default=False,
+        help="Export model to ONNX format after training for visualization with netron.app",
+    )
+    export_group.add_argument(
+        "--onnx_opset_version",
+        type=int,
+        default=17,
+        help="ONNX opset version (default: 17 for better operator support)",
+    )
+    export_group.add_argument(
+        "--onnx_export_dir",
+        type=str,
+        default=None,
+        help="Directory to save ONNX models (defaults to output_dir/onnx)",
     )
 
     # ==================== Distributed Training ====================
@@ -582,6 +994,12 @@ def get_parser():
         action="store_true",
         default=False,
         help="Use InstructPix2Pix",
+    )
+    advanced_group.add_argument(
+        "--resume_from_checkpoint",
+        type=str,
+        default=None,
+        help="Path to checkpoint directory to resume training from.",
     )
 
     return parser

@@ -132,37 +132,44 @@ class AdaptivePositionalEncoding(nn.Module):
         """x: (B, C, H, W)"""
         B, C, H, W = x.shape
 
-        # Interpolate if input size doesn't match
+        # Interpolate height embedding: (max_h, C//2) -> (H, C//2)
         h_embed = (
             F.interpolate(
-                self.height_embed.unsqueeze(0).unsqueeze(-1),
-                size=(H, 1),
+                self.height_embed.unsqueeze(0).unsqueeze(0),  # (1, 1, max_h, C//2)
+                size=(H, C // 2),
                 mode="bilinear",
                 align_corners=False,
             )
-            .squeeze(-1)
-            .permute(0, 2, 1)
-        )  # (1, H, C//2)
+            .squeeze(0)
+            .squeeze(0)
+        )  # (H, C//2)
 
+        # Interpolate width embedding: (max_w, C//2) -> (W, C//2)
         w_embed = (
             F.interpolate(
-                self.width_embed.unsqueeze(0).unsqueeze(1),
-                size=(1, W),
+                self.width_embed.unsqueeze(0).unsqueeze(0),  # (1, 1, max_w, C//2)
+                size=(W, C // 2),
                 mode="bilinear",
                 align_corners=False,
             )
-            .squeeze(1)
-            .permute(0, 2, 1)
-        )  # (1, W, C//2)
+            .squeeze(0)
+            .squeeze(0)
+        )  # (W, C//2)
 
-        # Combine height and width embeddings
+        # Broadcast to spatial grid
+        # h_embed: (H, C//2) -> (1, H, 1, C//2)
+        # w_embed: (W, C//2) -> (1, 1, W, C//2)
+        h_embed_spatial = h_embed.unsqueeze(0).unsqueeze(2)  # (1, H, 1, C//2)
+        w_embed_spatial = w_embed.unsqueeze(0).unsqueeze(1)  # (1, 1, W, C//2)
+
+        # Concatenate and expand: (1, H, W, C)
         pos_embed = torch.cat(
             [
-                h_embed.repeat(1, 1, W).reshape(1, H, W, C // 2),
-                w_embed.repeat(1, H, 1).reshape(1, H, W, C // 2),
+                h_embed_spatial.expand(B, H, W, C // 2),
+                w_embed_spatial.expand(B, H, W, C // 2),
             ],
             dim=-1,
-        ).permute(0, 3, 1, 2)  # (1, C, H, W)
+        ).permute(0, 3, 1, 2)  # (B, C, H, W)
 
         return x + self.scale * pos_embed
 
@@ -217,12 +224,14 @@ class FontStyleTransformationModule(nn.Module):
         final_dim = msse_output_channels[-1]
         self.projection = nn.Sequential(
             nn.LayerNorm(fusion_dim),
-            nn.Linear(fusion_dim, final_dim * 2),
+            nn.Linear(fusion_dim, final_dim * 4),  # Wider
+            nn.GELU(),
+            nn.Dropout(0.1),
+            nn.Linear(final_dim * 4, final_dim * 2),  # Additional layer
             nn.GELU(),
             nn.Dropout(0.1),
             nn.Linear(final_dim * 2, final_dim),
         )
-
         # Residual connection projection
         self.residual_proj = nn.Sequential(
             nn.LayerNorm(final_dim), nn.Linear(final_dim, final_dim)
@@ -262,8 +271,8 @@ class FontStyleTransformationModule(nn.Module):
 
             # Add learnable positional encoding (before Eq. 5)
             pe = self.pos_encodings[i]
-            f_src = f_src + pe
-            f_tgt = f_tgt + pe
+            f_src = f_src + pe(f_src)  # Call pe as a module
+            f_tgt = f_tgt + pe(f_tgt)  # Call pe as a module
 
             # Flatten spatial dimensions: (B, C, H, W) -> (B, H*W, C)
             f_src_flat = rearrange(f_src, "b c h w -> b (h w) c")
@@ -351,12 +360,14 @@ class TransformerBlock(nn.Module):
 class SelfAttention(nn.Module):
     """Standard multi-head self-attention."""
 
-    def __init__(self, dim: int, num_heads: int = 8):
+    def __init__(self, dim: int, num_heads: int = 8, use_flash_attn: bool = True):
         super().__init__()
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
         self.scale = self.head_dim**-0.5
-
+        self.use_flash_attn = use_flash_attn and hasattr(
+            F, "scaled_dot_product_attention"
+        )
         self.to_qkv = nn.Linear(dim, dim * 3)
         self.proj = nn.Linear(dim, dim)
 
@@ -367,23 +378,32 @@ class SelfAttention(nn.Module):
             .reshape(B, N, 3, self.num_heads, self.head_dim)
             .permute(2, 0, 3, 1, 4)
         )
-        q, k, v = qkv[0], qkv[1], qkv[2]
+        q, k, v = qkv[0], qkv[1], qkv[2]  # Each: (B, num_heads, N, head_dim)
 
-        attn = (q @ k.transpose(-2, -1)) * self.scale
-        attn = attn.softmax(dim=-1)
+        if self.use_flash_attn:
+            out = F.scaled_dot_product_attention(
+                q, k, v, dropout_p=0.0, scale=self.scale
+            )  # (B, num_heads, N, head_dim)
+            out = out.transpose(1, 2).reshape(B, N, C)  # FIX: Add reshape
+        else:
+            attn = (q @ k.transpose(-2, -1)) * self.scale
+            attn = attn.softmax(dim=-1)
+            out = (attn @ v).transpose(1, 2).reshape(B, N, C)
 
-        out = (attn @ v).transpose(1, 2).reshape(B, N, C)
         return self.proj(out)
 
 
 class CrossAttention(nn.Module):
     """Multi-head cross-attention."""
 
-    def __init__(self, dim: int, num_heads: int = 8):
+    def __init__(self, dim: int, num_heads: int = 8, use_flash_attn: bool = True):
         super().__init__()
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
         self.scale = self.head_dim**-0.5
+        self.use_flash_attn = use_flash_attn and hasattr(
+            F, "scaled_dot_product_attention"
+        )
 
         self.to_q = nn.Linear(dim, dim)
         self.to_k = nn.Linear(dim, dim)
@@ -403,20 +423,26 @@ class CrossAttention(nn.Module):
             self.to_q(x)
             .reshape(B, N, self.num_heads, self.head_dim)
             .permute(0, 2, 1, 3)
-        )
+        )  # (B, num_heads, N, head_dim)
         k = (
             self.to_k(context)
             .reshape(B, M, self.num_heads, self.head_dim)
             .permute(0, 2, 1, 3)
-        )
+        )  # (B, num_heads, M, head_dim)
         v = (
             self.to_v(value)
             .reshape(B, M, self.num_heads, self.head_dim)
             .permute(0, 2, 1, 3)
-        )
+        )  # (B, num_heads, M, head_dim)
 
-        attn = (q @ k.transpose(-2, -1)) * self.scale
-        attn = attn.softmax(dim=-1)
+        if self.use_flash_attn:
+            out = F.scaled_dot_product_attention(
+                q, k, v, dropout_p=0.0, scale=self.scale
+            )  # (B, num_heads, N, head_dim)
+            out = out.transpose(1, 2).reshape(B, N, C)  # FIX: Add reshape
+        else:
+            attn = (q @ k.transpose(-2, -1)) * self.scale
+            attn = attn.softmax(dim=-1)
+            out = (attn @ v).transpose(1, 2).reshape(B, N, C)
 
-        out = (attn @ v).transpose(1, 2).reshape(B, N, C)
         return self.proj(out)

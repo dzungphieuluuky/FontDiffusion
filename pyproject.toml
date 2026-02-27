@@ -1,7 +1,7 @@
 [project]
 name = "fontdiffusion"
 version = "0.1.0"
-description = "Add your description here"
+description = "FontDiffusion: A Diffusion Model for Font Generation"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

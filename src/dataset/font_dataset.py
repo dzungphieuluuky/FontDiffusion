@@ -6,6 +6,19 @@ import torch
 from torch.utils.data import Dataset
 import torchvision.transforms as transforms
 
+import logging
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    level=logging.INFO,
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(f"{__name__}.log", mode="a"),
+    ],
+)
+logger = logging.getLogger(__name__)
+
 
 def get_nonorm_transform(resolution):
     nonorm_transform = transforms.Compose(

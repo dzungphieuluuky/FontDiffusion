@@ -22,7 +22,6 @@ class CollateFN(object):
     def __init__(
         self,
         return_tensors: str = "pt",
-        num_consistency_refs: int = 0,
     ):
         """
         Args:
@@ -30,7 +29,6 @@ class CollateFN(object):
             num_consistency_refs: Number of additional content refs for consistency
         """
         self.return_tensors = return_tensors
-        self.num_consistency_refs = num_consistency_refs
 
     def __call__(self, batch: list[dict]) -> dict[str, torch.Tensor]:
         """
@@ -44,55 +42,106 @@ class CollateFN(object):
         - content_image: Content reference (from dataset)
         - style_source_image: Source style reference (FST mode, from dataset)
         - style_image: Target style reference (from dataset)
-        - (optional) ref_content_imgs: List of additional content refs
+        - consistency_pairs: List of (source_tensor, target_tensor) tuples
         """
-        # Stack main tensors - read with dataset keys, output with trainer keys
-        target_imgs = torch.stack([item["target_image"] for item in batch])
-        content_imgs = torch.stack([item["content_image"] for item in batch])
-        style_imgs = torch.stack([item["style_image"] for item in batch])
-
-        result = {
-            "target_image": target_imgs,
-            "content_image": content_imgs,
-            "style_image": style_imgs,
-        }
-
-        # Add nonorm_target_image if present
+        result = {}
+        
+        # Content images (low frequency band if using freq decomp)
+        result["content_image"] = torch.stack([
+            item["content_image"] for item in batch
+        ])
+        
+        # Mid-frequency band (optional)
+        if "content_image_mid" in batch[0]:
+            result["content_image_mid"] = torch.stack([
+                item["content_image_mid"] for item in batch
+            ])
+        
+        # Original image (for reference)
+        if "content_image_original" in batch[0]:
+            result["content_image_original"] = torch.stack([
+                item["content_image_original"] for item in batch
+            ])
+        
+        # Style frequency bands
+        if "style_image_high" in batch[0]:
+            result["style_image_high"] = torch.stack([
+                item["style_image_high"] for item in batch
+            ])
+        
+        if "style_image_mid" in batch[0]:
+            result["style_image_mid"] = torch.stack([
+                item["style_image_mid"] for item in batch
+            ])
+        
+        # Standard tensors (no changes needed)
+        if "style_image" in batch[0]:
+            result["style_image"] = torch.stack([item["style_image"] for item in batch])
+        
+        if "target_image" in batch[0]:
+            result["target_image"] = torch.stack([item["target_image"] for item in batch])
+        
         if "nonorm_target_image" in batch[0]:
-            nonorm_targets = torch.stack(
-                [item["nonorm_target_image"] for item in batch]
-            )
-            result["nonorm_target_image"] = nonorm_targets
-
-        # Add style_source_image for FST mode
+            result["nonorm_target_image"] = torch.stack([
+                item["nonorm_target_image"] for item in batch
+            ])
+        
+        # FST-specific tensors
         if "style_source_image" in batch[0]:
-            style_source_imgs = torch.stack(
-                [item["style_source_image"] for item in batch]
-            )
-            result["style_source_image"] = style_source_imgs
-
-        # Add neg_images for SCR mode
-        if "neg_images" in batch[0]:
-            neg_imgs = self._collate_neg_images([item["neg_images"] for item in batch])
-            result["neg_images"] = neg_imgs
-
-        # Collect consistency references if available
-        if self.num_consistency_refs > 0:
-            ref_content_images = []
+            result["style_source_image"] = torch.stack([
+                item["style_source_image"] for item in batch
+            ])
+        
+        # String paths (no stacking)
+        if "target_image_path" in batch[0]:
+            result["target_image_path"] = [item["target_image_path"] for item in batch]
+        
+        # Handle consistency pairs
+        if "consistency_pairs" in batch[0] and batch[0]["consistency_pairs"]:
+            consistency_sources = []
+            consistency_targets = []
+            
             for item in batch:
-                refs = item.get("ref_content_images", [])
-                if len(refs) > 0:
-                    # Take up to num_consistency_refs
-                    item_refs = refs[: self.num_consistency_refs]
-                    ref_content_images.append(torch.stack(item_refs))
-            if len(ref_content_images) > 0:
-                # Stack across batch: (B, num_refs, C, H, W)
-                ref_content_images = torch.stack(ref_content_images)
-                # Reshape to list of (B, C, H, W) tensors
-                result["ref_content_images"] = [
-                    ref_content_images[:, i] for i in range(ref_content_images.shape[1])
-                ]
-
+                pairs = item.get("consistency_pairs", [])
+                if pairs:
+                    sources = torch.stack([p[0] for p in pairs])  # (k, C, H, W)
+                    targets = torch.stack([p[1] for p in pairs])  # (k, C, H, W)
+                    consistency_sources.append(sources)
+                    consistency_targets.append(targets)
+            
+            if consistency_sources:
+                result["consistency_source_images"] = torch.stack(consistency_sources)
+                result["consistency_target_images"] = torch.stack(consistency_targets)
+        
+        # Handle identity pairs
+        if "identity_pairs" in batch[0] and batch[0]["identity_pairs"]:
+            identity_sources = []
+            identity_targets = []
+            
+            for item in batch:
+                pairs = item.get("identity_pairs", [])
+                if pairs:
+                    # Each pair is (source_tensor, target_tensor) with shape (C, H, W)
+                    # Stack pairs for this sample: (k, C, H, W)
+                    sources = torch.stack([p[0] for p in pairs])
+                    targets = torch.stack([p[1] for p in pairs])
+                    identity_sources.append(sources)
+                    identity_targets.append(targets)
+            
+            if identity_sources:
+                # FIXED: Concatenate instead of stack to avoid extra dimension
+                # sources: list of (k, C, H, W) → concatenate to (B*k, C, H, W)
+                result["identity_pair_sources"] = torch.cat(identity_sources, dim=0)
+                result["identity_pair_targets"] = torch.cat(identity_targets, dim=0)
+                
+                # Track total number of identity pairs
+                result["num_identity_pairs_total"] = result["identity_pair_sources"].shape[0]
+                        
+        # Handle SCR negative samples
+        if "neg_images" in batch[0]:
+            neg_image_tensors = [item["neg_images"] for item in batch]
+            result["neg_images"] = self._collate_neg_images(neg_image_tensors)
+        
         return result
 
     def _collate_neg_images(

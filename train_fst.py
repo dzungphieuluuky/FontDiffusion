@@ -3,7 +3,7 @@ Training runner for FontDiffuserWithFST.
 Simple entry point that initializes and runs the FST trainer.
 """
 
-import logging
+import argparse
 import os
 import sys
 
@@ -11,6 +11,8 @@ from src.configs.fontdiffuser import get_parser
 from src.trainers.trainer_fst import FontDiffuserFSTTrainer
 
 # Setup logging
+import logging
+
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
@@ -21,8 +23,8 @@ logger = logging.getLogger(__name__)
 
 def get_args():
     """Parse command line arguments with FST-specific options."""
-    parser = get_parser()
-    args = parser.parse_args()
+    parser: argparse.ArgumentParser = get_parser()
+    args: argparse.Namespace = parser.parse_args()
 
     # Handle local rank for distributed training
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -42,7 +44,7 @@ def main():
     """Main training entry point."""
     try:
         # Parse arguments
-        args = get_args()
+        args: argparse.Namespace = get_args()
 
         # Log configuration
         logger.info("=" * 80)
@@ -56,7 +58,6 @@ def main():
             logger.info(f"  Num queries: {args.fst_num_queries}")
             logger.info(f"  Query dim: {args.fst_query_dim}")
             logger.info(f"  Num scales: {args.fst_num_scales}")
-            logger.info(f"  Freeze encoders: {args.freeze_original_encoders}")
             logger.info(f"  Style source same prob: {args.style_source_same_prob}")
         logger.info(f"Phase 2 (SCR): {args.phase_2}")
         logger.info(f"Batch size: {args.train_batch_size}")
@@ -79,6 +80,12 @@ def main():
         logger.info("=" * 80)
         logger.info("✅ Training completed successfully!")
         logger.info("=" * 80)
+
+        # Export to ONNX if flag is set
+        if args.export_onnx:
+            logger.info("\nStarting ONNX export...")
+            trainer.export_to_onnx()
+            logger.info("✓ ONNX export finished!")
 
     except KeyboardInterrupt:
         logger.warning("Training interrupted by user")
@@ -131,7 +138,6 @@ accelerate launch train_fst.py \
     --max_train_steps=50000 \
     --learning_rate=1e-5 \
     --output_dir="outputs/fst_training_phase2" \
-    --freeze_original_encoders \
     --mixed_precision="fp16"
 
 # ============================================================================
@@ -194,7 +200,6 @@ accelerate launch train_fst.py \
 # ============================================================================
 accelerate launch train_fst.py \
     --use_fst \
-    --freeze_original_encoders \
     --phase_1_ckpt_dir="pretrained/fontdiffuser_base" \
     --experience_name="fontdiffuser_fst_finetune" \
     --data_root="my_dataset" \

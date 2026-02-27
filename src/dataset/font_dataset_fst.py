@@ -3,16 +3,17 @@ Enhanced FontDataset for FontDiffuserWithFST.
 Supports both original and FST training modes.
 """
 
-import os
-import random
 from PIL import Image
 from typing import List, Dict, Optional
-
-import torch
 from torch.utils.data import Dataset
-import torchvision.transforms as transforms
+import torch
+import random
 import logging
+import os
+from torchvision import transforms
 
+from src.modules.skeleton_distance_transform import SkeletonDistanceTransform  # ADD THIS IMPORT
+from src.modules.frequency_decomposition import FrequencyDecomposition  # ADD THIS IMPORT
 logger = logging.getLogger(__name__)
 
 
@@ -31,24 +32,6 @@ def get_nonorm_transform(resolution):
 
 
 class FontDataset(Dataset):
-    """
-    Enhanced dataset for font generation supporting both original and FST modes.
-
-    For FST mode, provides:
-    - content_image: The character to generate
-    - style_image: Target style reference (same character, different font)
-    - style_source_image: Source style reference (optional, for style transformation)
-    - target_image: Ground truth
-
-    Args:
-        args: Arguments containing data_root, resolution, etc.
-        phase: 'train' or 'test'
-        transforms: List of [content_transform, style_transform, target_transform]
-        scr: Whether to use SCR loss (loads negative samples)
-        use_fst: Whether to use FST mode (loads source style images)
-        style_source_same_prob: Probability of using same style for source/target (0.0-1.0)
-    """
-
     def __init__(
         self,
         args,
@@ -57,14 +40,40 @@ class FontDataset(Dataset):
         scr: bool = False,
         use_fst: bool = False,
         style_source_same_prob: float = 0.5,
+        num_consistency_pairs: int = 0,
+        num_identity_pairs: int = 0,
+        identity_pair_mode: str = "random",
+        use_skeleton_transform: bool = False,  # ADD THIS
+        skeleton_config: Optional[dict] = None,  # ADD THIS
+        use_frequency_decomp: bool = False,
+        frequency_config: Optional[dict] = None,
+
     ):
+        """
+        Initialize FontDataset with optional skeleton transform.
+        
+        Args:
+            args: Configuration arguments
+            phase: Dataset phase ("train", "val", "test")
+            transforms: List of transforms for [content, style, target]
+            scr: Whether to use SCR loss
+            use_fst: Whether to use FST model
+            style_source_same_prob: Probability of using same style for source
+            num_consistency_pairs: Number of consistency pairs
+            num_identity_pairs: Number of identity pairs
+            identity_pair_mode: Mode for selecting identity pairs
+            use_skeleton_transform: Whether to apply skeleton-distance transform
+            skeleton_config: Configuration for skeleton transform
+        """
         super().__init__()
         self.root = args.data_root
         self.phase = phase
         self.scr = scr
         self.use_fst = use_fst
         self.style_source_same_prob = style_source_same_prob
-
+        self.num_consistency_pairs = num_consistency_pairs
+        self.num_identity_pairs = num_identity_pairs  # ADD THIS
+        self.identity_pair_mode = identity_pair_mode  # ADD THIS
         if self.scr:
             self.num_neg = args.num_neg
 
@@ -73,11 +82,36 @@ class FontDataset(Dataset):
         self.transforms = transforms
         self.nonorm_transforms = get_nonorm_transform(args.resolution)
 
+        # Frequency decomposition setup
+        self.use_frequency_decomp = use_frequency_decomp
+        
+        if self.use_frequency_decomp:
+            # Default configuration
+            default_config = {
+                "image_size": 96,
+                "low_cutoff": 0.10,
+                "mid_cutoff": 0.40,
+                "filter_type": "gaussian",
+                "normalize_bands": True,
+            }
+            
+            # Update with user config
+            if frequency_config:
+                default_config.update(frequency_config)
+            
+            # Create decomposition module
+            self.freq_decomp = FrequencyDecomposition(**default_config)
+            logger.info(f"Frequency decomposition enabled: {default_config}")
+        else:
+            self.freq_decomp = None
+
+
         logger.info(
             f"Dataset initialized:\n "
             f"Phase: {phase}\n"
             f"Use_FST: {use_fst}\n"
             f"SCR: {scr}\n"
+            f"Frequency Decomposition: {self.use_frequency_decomp}\n"
             f"Total samples: {len(self.target_images)}"
         )
 
@@ -127,6 +161,64 @@ class FontDataset(Dataset):
             f"Found {len(self.target_images)} target images across "
             f"{len(self.style_to_images)} styles"
         )
+
+    def get_same_style_pairs(
+        self,
+        num_pairs: int,
+        target_style: Optional[str] = None,
+        exclude_content: Optional[str] = None,
+    ) -> list[tuple[str, str]]:
+        """Sample pairs of images with same style but different content.
+
+        Args:
+            num_pairs: Number of pairs to sample
+            target_style: If provided, sample from this specific style
+            exclude_content: Content character to exclude
+
+        Returns:
+            List of (image1_path, image2_path) tuples
+        """
+        pairs = []
+
+        if target_style:
+            # Sample from specific style
+            if target_style not in self.style_to_images:
+                return pairs
+
+            images_in_style = self.style_to_images[target_style].copy()
+
+            # Remove excluded content
+            if exclude_content:
+                images_in_style = [
+                    img for img in images_in_style if exclude_content not in img
+                ]
+
+            # Sample up to num_pairs
+            sample_size = min(num_pairs, len(images_in_style) // 2)
+            for _ in range(sample_size):
+                if len(images_in_style) < 2:
+                    break
+                img1, img2 = random.sample(images_in_style, 2)
+                pairs.append((img1, img2))
+
+        else:
+            # Sample from random styles
+            available_styles = list(self.style_to_images.keys())
+
+            for _ in range(num_pairs):
+                if not available_styles:
+                    break
+
+                style = random.choice(available_styles)
+                images = self.style_to_images[style]
+
+                if len(images) < 2:
+                    continue
+
+                img1, img2 = random.sample(images, 2)
+                pairs.append((img1, img2))
+
+        return pairs
 
     def get_style_source_image(
         self, target_style: str, content: str, target_image_path: str
@@ -190,6 +282,79 @@ class FontDataset(Dataset):
         source_image = Image.open(source_image_path).convert("RGB")
         return source_image
 
+    def get_consistency_pairs(
+        self, target_style: str, source_style: str, exclude_content: str, num_pairs: int
+    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
+        """
+        Get k pairs of images for consistency loss.
+
+        Each pair contains the SAME content in source→target style transformation:
+        - pair 1: char A in source_style → char A in target_style
+        - pair 2: char B in source_style → char B in target_style
+        - pair 3: char C in source_style → char C in target_style
+
+        All pairs use the SAME style transformation (source_style → target_style)
+        but with DIFFERENT characters.
+
+        Args:
+            target_style: Target style name (e.g., "style2")
+            source_style: Source style name (e.g., "style1")
+            exclude_content: Content to exclude (the main training sample)
+            num_pairs: Number of pairs to return (k)
+
+        Returns:
+            List of (source_image, target_image) tuples, each already transformed
+        """
+        pairs = []
+
+        # Find contents that exist in BOTH source_style AND target_style
+        available_contents = []
+        for content, styles_dict in self.content_to_images.items():
+            if content == exclude_content:
+                continue
+            # Content must exist in both styles
+            if source_style in styles_dict and target_style in styles_dict:
+                available_contents.append(content)
+
+        if not available_contents:
+            logger.warning(
+                f"No available contents for consistency pairs "
+                f"(source_style={source_style}, target_style={target_style}, "
+                f"exclude_content={exclude_content})"
+            )
+            return pairs
+
+        # Sample k different contents
+        selected_contents = random.sample(
+            available_contents, min(num_pairs, len(available_contents))
+        )
+
+        # Build pairs: each pair has same content, different styles
+        for content in selected_contents:
+            # Source image: content in source_style
+            source_candidates = self.content_to_images[content][source_style]
+            source_image_path = random.choice(source_candidates)
+            source_image = Image.open(source_image_path).convert("RGB")
+
+            # Target image: SAME content in target_style
+            target_candidates = self.content_to_images[content][target_style]
+            target_image_path = random.choice(target_candidates)
+            target_image = Image.open(target_image_path).convert("RGB")
+
+            # Apply transforms if available
+            if self.transforms is not None:
+                source_image = self.transforms[1](source_image)  # Style transform
+                target_image = self.transforms[1](target_image)  # Style transform
+
+            pairs.append((source_image, target_image))
+
+        logger.debug(
+            f"Created {len(pairs)} consistency pairs with contents={selected_contents}, "
+            f"source_style={source_style}, target_style={target_style}"
+        )
+
+        return pairs
+
     def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
         """
         Get a sample from the dataset.
@@ -202,6 +367,7 @@ class FontDataset(Dataset):
             - target_image: Ground truth
             - nonorm_target_image: Target without normalization
             - neg_images: Negative samples (SCR only)
+            - consistency_pairs: List of (source, target) tuples for consistency loss (FST only)
         """
         target_image_path = self.target_images[index]
         target_image_name = target_image_path.split("/")[-1]
@@ -257,10 +423,11 @@ class FontDataset(Dataset):
             "target_image_path": target_image_path,
             "nonorm_target_image": nonorm_target_image,
         }
-
         # Add source style image for FST
+        source_style = None  # Track source style for consistency pairs
         if self.use_fst:
-            style_source_image = self.get_style_source_image(
+            # Get source style image AND track which style it came from
+            source_style, style_source_image = self.get_style_source_image_with_name(
                 target_style=style, content=content, target_image_path=target_image_path
             )
 
@@ -268,6 +435,28 @@ class FontDataset(Dataset):
                 style_source_image = self.transforms[1](style_source_image)
 
             sample["style_source_image"] = style_source_image
+
+        # Add consistency pairs for FST consistency loss
+        if self.num_consistency_pairs > 0:
+            # If FST not enabled, we can't create consistency pairs
+            if source_style is None:
+                logger.warning(
+                    "num_consistency_pairs > 0 but use_fst=False. "
+                    "Consistency pairs require FST mode. Skipping consistency pairs."
+                )
+                # Don't add empty list to sample - omit the key entirely
+            else:
+                # Get consistency pairs: same source→target style transformation, different contents
+                consistency_pairs = self.get_consistency_pairs(
+                    target_style=style,
+                    source_style=source_style,
+                    exclude_content=content,
+                    num_pairs=self.num_consistency_pairs,
+                )
+
+                # Only add to sample if we got valid pairs
+                if consistency_pairs:
+                    sample["consistency_pairs"] = consistency_pairs
 
         # Add negative samples for SCR loss
         if self.scr:
@@ -320,7 +509,132 @@ class FontDataset(Dataset):
 
             sample["neg_images"] = neg_images
 
+        if self.num_identity_pairs > 0 and self.use_fst:
+            identity_pairs = []
+
+            if self.identity_pair_mode == "same_style":
+                # All pairs from same style as main sample
+                pair_paths = self.get_same_style_pairs(
+                    num_pairs=self.num_identity_pairs,
+                    target_style=style,
+                    exclude_content=content,
+                )
+            else:  # "random"
+                # Random styles for each pair
+                pair_paths = self.get_same_style_pairs(
+                    num_pairs=self.num_identity_pairs,
+                )
+
+            # Load and transform pairs
+            for img1_path, img2_path in pair_paths:
+                try:
+                    img1 = Image.open(img1_path).convert("RGB")
+                    img2 = Image.open(img2_path).convert("RGB")
+
+                    if self.transforms is not None:
+                        img1 = self.transforms[1](img1)  # Style transform
+                        img2 = self.transforms[1](img2)  # Style transform
+
+                    identity_pairs.append((img1, img2))
+                except Exception as e:
+                    logger.debug(f"Failed to load identity pair: {e}")
+                    continue
+
+            if identity_pairs:
+                sample["identity_pairs"] = identity_pairs
+
+        if self.use_frequency_decomp:
+            # Decompose into frequency bands
+            # Input: (C, H, W) → Add batch dim → (1, C, H, W)
+            bands = self.freq_decomp(content_image.unsqueeze(0))
+            
+            # Extract bands and remove batch dim
+            content_low_freq = bands["low_freq"].squeeze(0)
+            content_mid_freq = bands["mid_freq"].squeeze(0)
+            content_high_freq = bands["high_freq"].squeeze(0)
+            
+            # Store frequency bands
+            sample["content_image"] = content_low_freq  # Use low freq for content
+            sample["content_image_mid"] = content_mid_freq
+            sample["content_image_original"] = content_image
+            
+            # Also decompose style images if available
+            if style_image is not None:
+                style_bands = self.freq_decomp(style_image.unsqueeze(0))
+                sample["style_image_high"] = style_bands["high_freq"].squeeze(0)
+                sample["style_image_mid"] = style_bands["mid_freq"].squeeze(0)
+        else:
+            sample["content_image"] = content_image
+
         return sample
+
+    def get_style_source_image_with_name(
+        self, target_style: str, content: str, target_image_path: str
+    ) -> tuple[str, Image.Image]:
+        """
+        Get source style image for FST, returning both the style name and image.
+
+        Strategy:
+        1. With probability style_source_same_prob: use same style (different character)
+        2. Otherwise: use different style (same or different character)
+
+        Returns:
+            tuple of (source_style_name, source_image)
+        """
+        use_same_style = random.random() < self.style_source_same_prob
+
+        if use_same_style:
+            # Same style, different character (standard case)
+            source_style = target_style
+            images_in_style = self.style_to_images[target_style].copy()
+            images_in_style.remove(target_image_path)
+            if images_in_style:
+                source_image_path = random.choice(images_in_style)
+            else:
+                # Fallback: use target image if no other images available
+                source_image_path = target_image_path
+        else:
+            # Different style for style transformation learning
+            # Try to get same content in different style
+            if content in self.content_to_images:
+                available_styles = list(self.content_to_images[content].keys())
+                if target_style in available_styles:
+                    available_styles.remove(target_style)
+
+                if available_styles:
+                    # Same content, different style
+                    source_style = random.choice(available_styles)
+                    source_candidates = self.content_to_images[content][source_style]
+                    source_image_path = random.choice(source_candidates)
+                else:
+                    # Fallback: random style image
+                    other_styles = [
+                        s for s in self.style_to_images.keys() if s != target_style
+                    ]
+                    if other_styles:
+                        source_style = random.choice(other_styles)
+                        source_image_path = random.choice(
+                            self.style_to_images[source_style]
+                        )
+                    else:
+                        source_style = target_style
+                        source_image_path = target_image_path
+            else:
+                # Fallback: random different style
+                other_styles = [
+                    s for s in self.style_to_images.keys() if s != target_style
+                ]
+                if other_styles:
+                    source_style = random.choice(other_styles)
+                    source_image_path = random.choice(
+                        self.style_to_images[source_style]
+                    )
+                else:
+                    source_style = target_style
+                    source_image_path = target_image_path
+
+        source_image = Image.open(source_image_path).convert("RGB")
+        return source_style, source_image
 
     def __len__(self) -> int:
         return len(self.target_images)
