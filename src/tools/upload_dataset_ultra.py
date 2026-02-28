@@ -2,21 +2,16 @@ import json
 import logging
 import time
 import os
-import mmap
-import pickle
 import argparse
 import io
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
-from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from datasets import Dataset, Features, Image as HFImage, Value
 from PIL import Image, ImageFile
 import cv2
 import numpy as np
-
-from utilities import HFTqdm
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 Image.MAX_IMAGE_PIXELS = None
@@ -30,6 +25,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class DatasetConfig:
     data_dir: Path
@@ -42,43 +38,42 @@ class DatasetConfig:
     token: Optional[str] = None
     resize_height: int = 256
     spacing: int = 10
-    jpeg_quality: int = 90
-    num_shards: int = 8
+
     def __post_init__(self):
         if isinstance(self.data_dir, str):
             self.data_dir = Path(self.data_dir)
         if isinstance(self.style_images_dir, str):
             self.style_images_dir = Path(self.style_images_dir)
 
+
 class UltraFastDatasetBuilder:
     REQUIRED_DIRS = ["ContentImage", "TargetImage"]
     CHECKPOINT_FILE = "results_checkpoint.json"
-    
+
     def __init__(self, config: DatasetConfig):
         self.config = config
         self.data_dir = config.data_dir
         self.style_images_dir = config.style_images_dir
         self.resize_height = config.resize_height
         self.spacing = config.spacing
-        self.jpeg_quality = config.jpeg_quality
-        
+
         self.cpu_count = os.cpu_count() or 4
         self.num_proc = min(self.cpu_count, 8)
         self.process_batch_size = 1000
-        
-        self.style_cache: dict[str, Image.Image] = {}
+
+        self.style_paths: dict[str, Path] = {}
         self.path_cache: dict[str, dict] = {}
-        
+
         self._validate_structure()
-        self._preload_style_images_mmap()
+        self._build_style_path_index()
         self._build_path_cache_with_dims()
         self.generations = self._load_checkpoint()
-        
-        logger.info(f"Ultra-fast pipeline initialized:")
+
+        logger.info("Ultra-fast pipeline initialized:")
         logger.info(f"  Total generations: {len(self.generations)}")
         logger.info(f"  CPU workers: {self.num_proc} processes")
         logger.info(f"  Process batch size: {self.process_batch_size}")
-        logger.info(f"  JPEG quality: {self.jpeg_quality}")
+        logger.info(f"  Style images: {len(self.style_paths)}")
 
     def _validate_structure(self) -> None:
         for dir_name in self.REQUIRED_DIRS:
@@ -92,35 +87,17 @@ class UltraFastDatasetBuilder:
             raise ValueError(f"Style images directory not found: {self.style_images_dir}")
         logger.info("Directory structure validated")
 
-    def _preload_style_images_mmap(self):
-        cache_path = self.style_images_dir / ".style_cache.mmap"
-        if cache_path.exists():
-            try:
-                with open(cache_path, 'rb') as f:
-                    with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as m:
-                        self.style_cache = pickle.loads(m.read())
-                logger.info(f"Loaded {len(self.style_cache)} styles from mmap cache (instant)")
-                return
-            except Exception as e:
-                logger.warning(f"Failed to load mmap cache: {e}, rebuilding...")
-        
-        logger.info("Building style cache (first run)...")
-        self.style_cache = {}
+    def _build_style_path_index(self) -> None:
+        """Build index of style image paths for direct loading."""
+        logger.info("Building style image path index...")
+        self.style_paths = {}
         for ext in [".png", ".jpg", ".jpeg"]:
             for style_file in self.style_images_dir.glob(f"*{ext}"):
                 style_name = style_file.stem
-                try:
-                    self.style_cache[style_name] = Image.open(style_file).convert("RGB")
-                except Exception as e:
-                    logger.warning(f"Failed to load {style_file}: {e}")
-        try:
-            with open(cache_path, 'wb') as f:
-                f.write(pickle.dumps(self.style_cache))
-            logger.info(f"Created mmap cache with {len(self.style_cache)} styles")
-        except Exception as e:
-            logger.warning(f"Failed to save mmap cache: {e}")
+                self.style_paths[style_name] = style_file
+        logger.info(f"Indexed {len(self.style_paths)} style images")
 
-    def _build_path_cache_with_dims(self):
+    def _build_path_cache_with_dims(self) -> None:
         logger.info("Building path cache with dimensions...")
         content_dir = self.data_dir / "ContentImage"
         content_paths = {}
@@ -138,7 +115,7 @@ class UltraFastDatasetBuilder:
                         }
                     except Exception as e:
                         logger.debug(f"Failed to read dimensions for {img_file}: {e}")
-        
+
         target_paths = {}
         target_dir = self.data_dir / "TargetImage"
         if target_dir.exists():
@@ -162,15 +139,21 @@ class UltraFastDatasetBuilder:
                                 except Exception as e:
                                     logger.debug(f"Failed to read dimensions for {img_file}: {e}")
                     target_paths[style] = style_paths
-        
+
+        # Build style dimensions from direct file access
         style_dims = {}
-        for style_name, style_img in self.style_cache.items():
-            style_dims[style_name] = style_img.size
-        
+        for style_name, style_path in self.style_paths.items():
+            try:
+                with Image.open(style_path) as img:
+                    style_dims[style_name] = img.size
+            except Exception as e:
+                logger.debug(f"Failed to read style dimensions for {style_path}: {e}")
+
         self.path_cache = {
             'content': content_paths,
             'target': target_paths,
             'style_dims': style_dims,
+            'style_paths': {k: str(v) for k, v in self.style_paths.items()},
         }
         total_targets = sum(len(v) for v in target_paths.values())
         logger.info(f"Path cache built: {len(content_paths)} content, {total_targets} target paths")
@@ -192,62 +175,18 @@ class UltraFastDatasetBuilder:
         return Image.fromarray(resized)
 
     @staticmethod
-    def _encode_image_to_bytes(img: Image.Image, quality: int = 90) -> bytes:
+    def _encode_image_to_bytes(img: Image.Image) -> bytes:
         buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=quality, optimize=True)
+        img.save(buf, format="PNG")
         return buf.getvalue()
 
-    def _process_sample(self, gen: dict) -> Optional[dict]:
-        char = gen.get("character", "")
-        style = gen.get("style", "")
-        font = gen.get("font", "unknown")
-        content_info = self.path_cache['content'].get(char)
-        target_info = self.path_cache['target'].get(style, {}).get(char)
-        style_dims = self.path_cache['style_dims'].get(style)
-        if not all([content_info, target_info, style in self.style_cache]):
-            return None
-        
-        try:
-            content_img = Image.open(content_info['path']).convert("RGB")
-            target_img = Image.open(target_info['path']).convert("RGB")
-            style_img = self.style_cache[style]
-            
-            c_width, c_height = content_info['width'], content_info['height']
-            t_width, t_height = target_info['width'], target_info['height']
-            s_width, s_height = style_dims
-            
-            c_new_width = int(c_width * (self.resize_height / c_height))
-            s_new_width = int(s_width * (self.resize_height / s_height))
-            t_new_width = int(t_width * (self.resize_height / t_height))
-            
-            content_resized = self._resize_image_opencv(content_img, c_new_width, self.resize_height)
-            style_resized = self._resize_image_opencv(style_img, s_new_width, self.resize_height)
-            target_resized = self._resize_image_opencv(target_img, t_new_width, self.resize_height)
-            
-            total_width = c_new_width + s_new_width + t_new_width + 2 * self.spacing
-            comparison = Image.new("RGB", (total_width, self.resize_height), color=(255, 255, 255))
-            comparison.paste(content_resized, (0, 0))
-            comparison.paste(style_resized, (c_new_width + self.spacing, 0))
-            comparison.paste(target_resized, (c_new_width + s_new_width + 2 * self.spacing, 0))
-            
-            return {
-                "character": char,
-                "style": style,
-                "font": font,
-                "content_image": {"bytes": self._encode_image_to_bytes(content_img, self.jpeg_quality)},
-                "style_image": {"bytes": self._encode_image_to_bytes(style_img, self.jpeg_quality)},
-                "target_image": {"bytes": self._encode_image_to_bytes(target_img, self.jpeg_quality)},
-                "comparison_image": {"bytes": self._encode_image_to_bytes(comparison, self.jpeg_quality)},
-                "content_hash": compute_file_hash(char, "", font),
-                "target_hash": compute_file_hash(char, style, font),
-            }
-        except Exception as e:
-            logger.debug(f"Failed to process {char}/{style}: {e}")
-            return None
-
     @staticmethod
-    def _process_batch_parallel(batch: dict, path_cache: dict, style_cache: dict, 
-                                resize_height: int, spacing: int, jpeg_quality: int) -> dict:
+    def _process_batch_parallel(
+        batch: dict,
+        path_cache: dict,
+        resize_height: int,
+        spacing: int,
+    ) -> dict:
         batch_size = len(batch["character"])
         results = {
             "character": [],
@@ -260,29 +199,35 @@ class UltraFastDatasetBuilder:
             "content_hash": [],
             "target_hash": [],
         }
+
+        style_paths = path_cache.get('style_paths', {})
+
         for i in range(batch_size):
             char = batch["character"][i]
             style = batch["style"][i]
             font = batch["font"][i]
+
             content_info = path_cache['content'].get(char)
             target_info = path_cache['target'].get(style, {}).get(char)
             style_dims = path_cache['style_dims'].get(style)
-            if not all([content_info, target_info, style in style_cache]):
+            style_path = style_paths.get(style)
+
+            if not all([content_info, target_info, style_dims, style_path]):
                 continue
-            
+
             try:
                 content_img = Image.open(content_info['path']).convert("RGB")
                 target_img = Image.open(target_info['path']).convert("RGB")
-                style_img = style_cache[style]
-                
+                style_img = Image.open(style_path).convert("RGB")
+
                 c_width, c_height = content_info['width'], content_info['height']
                 t_width, t_height = target_info['width'], target_info['height']
                 s_width, s_height = style_dims
-                
+
                 c_new_width = int(c_width * (resize_height / c_height))
                 s_new_width = int(s_width * (resize_height / s_height))
                 t_new_width = int(t_width * (resize_height / t_height))
-                
+
                 content_resized = UltraFastDatasetBuilder._resize_image_opencv(
                     content_img, c_new_width, resize_height
                 )
@@ -292,44 +237,47 @@ class UltraFastDatasetBuilder:
                 target_resized = UltraFastDatasetBuilder._resize_image_opencv(
                     target_img, t_new_width, resize_height
                 )
-                
+
                 total_width = c_new_width + s_new_width + t_new_width + 2 * spacing
                 comparison = Image.new("RGB", (total_width, resize_height), color=(255, 255, 255))
                 comparison.paste(content_resized, (0, 0))
                 comparison.paste(style_resized, (c_new_width + spacing, 0))
                 comparison.paste(target_resized, (c_new_width + s_new_width + 2 * spacing, 0))
-                
+
                 results["character"].append(char)
                 results["style"].append(style)
                 results["font"].append(font)
                 results["content_image"].append({
-                    "bytes": UltraFastDatasetBuilder._encode_image_to_bytes(content_img, jpeg_quality)
+                    "bytes": UltraFastDatasetBuilder._encode_image_to_bytes(content_img)
                 })
                 results["style_image"].append({
-                    "bytes": UltraFastDatasetBuilder._encode_image_to_bytes(style_img, jpeg_quality)
+                    "bytes": UltraFastDatasetBuilder._encode_image_to_bytes(style_img)
                 })
                 results["target_image"].append({
-                    "bytes": UltraFastDatasetBuilder._encode_image_to_bytes(target_img, jpeg_quality)
+                    "bytes": UltraFastDatasetBuilder._encode_image_to_bytes(target_img)
                 })
                 results["comparison_image"].append({
-                    "bytes": UltraFastDatasetBuilder._encode_image_to_bytes(comparison, jpeg_quality)
+                    "bytes": UltraFastDatasetBuilder._encode_image_to_bytes(comparison)
                 })
                 results["content_hash"].append(compute_file_hash(char, "", font))
                 results["target_hash"].append(compute_file_hash(char, style, font))
             except Exception as e:
                 logger.debug(f"Failed to process {char}/{style}: {e}")
                 continue
+
         return results
-    
+
     def build(self) -> Dataset:
         logger.info("Building dataset with batched map() pipeline...")
         start_time = time.time()
+
         metadata = {
             "character": [g.get("character", "") for g in self.generations],
             "style": [g.get("style", "") for g in self.generations],
             "font": [g.get("font", "unknown") for g in self.generations],
         }
         thin_dataset = Dataset.from_dict(metadata)
+
         features = Features({
             "character": Value("string"),
             "style": Value("string"),
@@ -341,7 +289,9 @@ class UltraFastDatasetBuilder:
             "content_hash": Value("string"),
             "target_hash": Value("string"),
         })
+
         logger.info(f"Processing with {self.num_proc} workers (batch_size={self.process_batch_size})...")
+
         dataset = thin_dataset.map(
             self._process_batch_parallel,
             batched=True,
@@ -352,23 +302,24 @@ class UltraFastDatasetBuilder:
             desc="Processing images",
             fn_kwargs={
                 "path_cache": self.path_cache,
-                "style_cache": self.style_cache,
                 "resize_height": self.resize_height,
                 "spacing": self.spacing,
-                "jpeg_quality": self.jpeg_quality,
             },
         )
+
         build_time = time.time() - start_time
         logger.info(f"Dataset built: {len(dataset)} samples in {build_time:.2f}s")
         logger.info(f"Processing speed: {len(dataset)/build_time:.1f} samples/s")
         return dataset
-        
+
     def push_to_hub_streaming(self, dataset: Dataset) -> None:
         if not self.config.push_to_hub:
             logger.info("Skipping push to Hub")
             return
+
         logger.info(f"Streaming dataset to {self.config.repo_id}...")
         start_time = time.time()
+
         try:
             dataset.push_to_hub(
                 repo_id=self.config.repo_id,
@@ -377,9 +328,7 @@ class UltraFastDatasetBuilder:
                 private=self.config.private,
                 token=self.config.token,
                 embed_external_files=False,
-                num_shards=self.config.num_shards,
-                num_proc=1,
-                commit_message="Ultra-fast dataset upload with pre-encoded bytes",
+                commit_message="Dataset upload",
             )
             upload_time = time.time() - start_time
             logger.info(f"Upload completed in {upload_time:.2f}s ({len(dataset)/upload_time:.1f} samples/s)")
@@ -395,6 +344,7 @@ class UltraFastDatasetBuilder:
         save_time = time.time() - start_time
         logger.info(f"Dataset saved in {save_time:.2f}s")
 
+
 def create_dataset_ultra(
     data_dir: str | Path,
     style_images_dir: str | Path,
@@ -407,8 +357,6 @@ def create_dataset_ultra(
     local_save_path: Optional[str | Path] = None,
     resize_height: int = 256,
     spacing: int = 10,
-    jpeg_quality: int = 90,
-    num_shards: int = 8,
 ) -> Dataset:
     config = DatasetConfig(
         data_dir=Path(data_dir),
@@ -421,20 +369,23 @@ def create_dataset_ultra(
         token=token,
         resize_height=resize_height,
         spacing=spacing,
-        jpeg_quality=jpeg_quality,
-        num_shards=num_shards
     )
+
     builder = UltraFastDatasetBuilder(config)
     dataset = builder.build()
+
     if local_save_path:
         builder.save_local(dataset, Path(local_save_path))
+
     if push_to_hub:
         builder.push_to_hub_streaming(dataset)
+
     return dataset
+
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Ultra-fast HuggingFace dataset creator with map() and pre-encoded bytes",
+        description="Ultra-fast HuggingFace dataset creator with map() pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -499,30 +450,22 @@ Examples:
         help="Spacing between images in comparison (default: 10)"
     )
     parser.add_argument(
-        "--jpeg-quality",
-        type=int,
-        default=90,
-        help="JPEG quality for pre-encoding (85-95, default: 90)"
-    )
-    parser.add_argument(
-        "--num-shards",
-        type=int,
-        default=8,
-        help="Number of shards for dataset upload (default: 8)"
-    )
-    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Enable verbose logging"
     )
+
     args = parser.parse_args()
+
     log_level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(
         level=log_level,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
+
     try:
         start_time = time.time()
+
         dataset = create_dataset_ultra(
             data_dir=args.data_dir,
             style_images_dir=args.style_images_dir,
@@ -535,25 +478,27 @@ Examples:
             local_save_path=args.local_save,
             resize_height=args.resize_height,
             spacing=args.spacing,
-            jpeg_quality=args.jpeg_quality,
-            num_shards=args.num_shards,
         )
+
         total_time = time.time() - start_time
-        print(f"\n✅ Ultra-fast dataset creation completed in {total_time:.2f}s!")
-        print(f"📊 Samples: {len(dataset)}")
-        print(f"⚡ Speed: {len(dataset)/total_time:.1f} samples/second")
-        print(f"🔤 Unique characters: {len(set(dataset['character']))}")
-        print(f"🎨 Unique styles: {len(set(dataset['style']))}")
+        print(f"\nDataset creation completed in {total_time:.2f}s")
+        print(f"Samples: {len(dataset)}")
+        print(f"Speed: {len(dataset)/total_time:.1f} samples/second")
+        print(f"Unique characters: {len(set(dataset['character']))}")
+        print(f"Unique styles: {len(set(dataset['style']))}")
+
         if not args.no_push:
-            print(f"🌐 Uploaded to: https://huggingface.co/datasets/{args.repo_id}")
+            print(f"Uploaded to: https://huggingface.co/datasets/{args.repo_id}")
         if args.local_save:
-            print(f"💾 Local copy saved to: {args.local_save}")
+            print(f"Local copy saved to: {args.local_save}")
+
     except KeyboardInterrupt:
         logger.warning("Dataset creation interrupted by user")
         raise SystemExit(130)
     except Exception as e:
         logger.exception(f"Dataset creation failed: {e}")
         raise SystemExit(1)
+
 
 if __name__ == "__main__":
     main()
