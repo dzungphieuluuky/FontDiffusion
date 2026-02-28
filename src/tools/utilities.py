@@ -32,22 +32,55 @@ logger = setup_logger(__name__)
 # --------------------------------------------------------------------------- #
 
 def count_parameters(model: torch.nn.Module) -> tuple[int, int]:
+    """Count total and trainable parameters in a model.
+    
+    Args:
+        model: PyTorch model to analyze.
+        
+    Returns:
+        Tuple of (total_params, trainable_params).
+    """
     total = sum(p.numel() for p in model.parameters())
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     return total, trainable
 
+
+def _format_param_count(count: int) -> str:
+    """Format parameter count with appropriate suffix (K, M, B)."""
+    if count >= 1_000_000_000:
+        return f"{count / 1_000_000_000:.2f}B"
+    elif count >= 1_000_000:
+        return f"{count / 1_000_000:.2f}M"
+    elif count >= 1_000:
+        return f"{count / 1_000:.2f}K"
+    return str(count)
+
+
 def log_model_info(model: torch.nn.Module, name: str = "Model") -> None:
+    """Log model parameter summary with human-readable formatting.
+    
+    Args:
+        model: PyTorch model to analyze.
+        name: Display name for the model.
+    """
     if hasattr(model, "log_model_info"):
         model.log_model_info()
-    else:
-        total, trainable = count_parameters(model)
-        logger.info(f"\n{'=' * 80}")
-        logger.info(f"{name} Parameter Summary")
-        logger.info(f"{'=' * 80}")
-        logger.info(f"Total parameters: {total:,}")
-        logger.info(f"Trainable parameters: {trainable:,}")
-        logger.info(f"Non‑trainable parameters: {total - trainable:,}")
-        logger.info(f"{'=' * 80}\n")
+        return
+    
+    total, trainable = count_parameters(model)
+    frozen = total - trainable
+    trainable_pct = (trainable / total * 100) if total > 0 else 0.0
+    
+    logger.info("")
+    logger.info(f"+{'-' * 50}+")
+    logger.info(f"|  {name:^46}  |")
+    logger.info(f"+{'-' * 50}+")
+    logger.info(f"|  {'Total Parameters':<30} {_format_param_count(total):>16}  |")
+    logger.info(f"|  {'Trainable Parameters':<30} {_format_param_count(trainable):>16}  |")
+    logger.info(f"|  {'Frozen Parameters':<30} {_format_param_count(frozen):>16}  |")
+    logger.info(f"|  {'Trainable Ratio':<30} {trainable_pct:>15.1f}%  |")
+    logger.info(f"+{'-' * 50}+")
+    logger.info("")
 
 # --------------------------------------------------------------------------- #
 # Hugging‑Face style progress bar
