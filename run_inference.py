@@ -139,7 +139,12 @@ SUBCOMMAND HELP:
     parser.add_argument(
         "--mode",
         type=str,
-        choices=["sample_optimized", "sample_batch", "sample_distributed", "export_onnx"],
+        choices=[
+            "sample_optimized",
+            "sample_batch",
+            "sample_distributed",
+            "export_onnx",
+        ],
         default="sample_optimized",
         help="Inference mode to use (default: sample_optimized)",
     )

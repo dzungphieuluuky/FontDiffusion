@@ -2,6 +2,7 @@
 Pytest suite for StyleEncoder module.
 Tests all components: StyleEncoder, DBlock, GBlock, GBlock2, and utility layers.
 """
+
 import pytest
 import torch
 import torch.nn as nn
@@ -408,9 +409,7 @@ def test_various_channel_counts(device, batch_size, G_ch):
 @pytest.mark.parametrize("G_wide", [True, False])
 def test_wide_mode(device, batch_size, G_wide):
     """Parametrized test for wide mode."""
-    encoder = StyleEncoder(G_ch=64, resolution=96, input_nc=1, G_wide=G_wide).to(
-        device
-    )
+    encoder = StyleEncoder(G_ch=64, resolution=96, input_nc=1, G_wide=G_wide).to(device)
 
     x = torch.randn(batch_size, 1, 96, 96, device=device)
     style_emd, h, residuals = encoder(x)

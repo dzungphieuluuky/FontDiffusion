@@ -11,10 +11,14 @@ from src.modules.skeleton_distance_transform import (
     SkeletonDistanceTransform,
     DualChannelContentEncoder,
 )
-from src.modules.adversarial import StyleDiscriminator, AdversarialContentStyleLoss, StyleLabelExtractor
+from src.modules.adversarial import (
+    StyleDiscriminator,
+    AdversarialContentStyleLoss,
+    StyleLabelExtractor,
+)
 from src.modules.frequency_decomposition import (
     FrequencyDecomposition,
-    MultiScaleFrequencyEncoder
+    MultiScaleFrequencyEncoder,
 )
 
 
@@ -22,6 +26,7 @@ import logging
 from src.tools.utilities import setup_logger
 
 logger = setup_logger(__name__, logging.INFO)
+
 
 def load_state_dict_auto(path: str):
     """Load state dict from .safetensors or .pth file."""
@@ -187,7 +192,9 @@ def build_mss_encoder(args: argparse.Namespace) -> MultiScaleStyleEncoder:
         base_channels=base_channels,
         num_scales=num_scales,
     )
-    print(f"✓ MSSE built successfully (scales={num_scales}, base_channels={base_channels}).")
+    print(
+        f"✓ MSSE built successfully (scales={num_scales}, base_channels={base_channels})."
+    )
     return mss_encoder
 
 
@@ -205,7 +212,9 @@ def build_fst_projection(feature_dim: int, cross_attn_dim: int) -> nn.Linear:
 
 def build_original_style_projection(style_dim: int, cross_attn_dim: int) -> nn.Linear:
     """Build original style projection layer."""
-    print(f"Building original style projection layer ({style_dim} → {cross_attn_dim})...")
+    print(
+        f"Building original style projection layer ({style_dim} → {cross_attn_dim})..."
+    )
     projection = nn.Linear(style_dim, cross_attn_dim)
     print("✓ Original style projection layer built successfully.")
     return projection
@@ -231,7 +240,9 @@ def build_dual_channel_content_encoder(
     args: argparse.Namespace,
 ) -> DualChannelContentEncoder:
     """Build dual-channel content encoder for skeleton transform."""
-    print(f"Building Dual-Channel Content Encoder (fusion method: {args.skeleton_fusion_method})...")
+    print(
+        f"Building Dual-Channel Content Encoder (fusion method: {args.skeleton_fusion_method})..."
+    )
     content_encoder = build_content_encoder(args)
     fusion_method = getattr(args, "skeleton_fusion_method", "concat")
     dual_channel_content_encoder = DualChannelContentEncoder(
@@ -253,7 +264,9 @@ def get_unet_cross_attention_dim(unet: UNet) -> int:
         if hasattr(module, "to_k") and isinstance(module.to_k, nn.Linear):
             return module.to_k.in_features
 
-    logger.warning("Cross-attention dimension not found in U-Net. Using default value of 1024.")
+    logger.warning(
+        "Cross-attention dimension not found in U-Net. Using default value of 1024."
+    )
     return 1024
 
 
@@ -269,31 +282,32 @@ def build_identity_loss_module(args: argparse.Namespace) -> IdentityMappingLoss:
     print("✓ Identity Mapping Loss module built successfully.")
     return identity_loss
 
+
 def build_style_discriminator(args: argparse.Namespace) -> StyleDiscriminator:
     """Build style discriminator for adversarial content-style disentanglement.
-    
+
     Args:
         args (argparse.Namespace): Configuration arguments with:
             - use_adversarial_disc: Whether to use adversarial training
             - num_styles: Number of style families
             - adversarial_hidden_dims: Hidden layer dimensions (optional)
             - adversarial_dropout: Dropout probability (optional)
-    
+
     Returns:
         StyleDiscriminator: Style discriminator module instance.
-    """    
+    """
     if not getattr(args, "use_adversarial_disc", False):
         print("Adversarial discriminator disabled - skipping build")
         return None
-    
+
     print("Building Style Discriminator for adversarial training...")
-    
+
     num_styles = getattr(args, "num_styles", 10)
     input_channels = getattr(args, "adversarial_input_channels", 256)
     hidden_dims = getattr(args, "adversarial_hidden_dims", [512, 256, 128])
     dropout = getattr(args, "adversarial_dropout", 0.3)
     use_spectral_norm = getattr(args, "adversarial_spectral_norm", True)
-    
+
     discriminator = StyleDiscriminator(
         input_channels=input_channels,
         num_styles=num_styles,
@@ -301,7 +315,7 @@ def build_style_discriminator(args: argparse.Namespace) -> StyleDiscriminator:
         dropout=dropout,
         use_spectral_norm=use_spectral_norm,
     )
-    
+
     print(
         f"✓ Style Discriminator built successfully "
         f"({num_styles} styles, input_channels={input_channels})."
@@ -309,37 +323,39 @@ def build_style_discriminator(args: argparse.Namespace) -> StyleDiscriminator:
     return discriminator
 
 
-def build_adversarial_loss_module(args: argparse.Namespace) -> AdversarialContentStyleLoss:
+def build_adversarial_loss_module(
+    args: argparse.Namespace,
+) -> AdversarialContentStyleLoss:
     """Build adversarial loss module for content-style disentanglement.
-    
+
     Args:
         args (argparse.Namespace): Configuration arguments with:
             - num_styles: Number of style families
             - adversarial_weight: Weight for adversarial loss
             - adversarial_entropy_weight: Weight for entropy regularization
             - adversarial_lambda: Gradient reversal strength
-    
+
     Returns:
         AdversarialContentStyleLoss: Adversarial loss module instance.
-    """    
+    """
     if not getattr(args, "use_adversarial_disc", False):
         print("Adversarial discriminator disabled - skipping loss module build")
         return None
-    
+
     print("Building Adversarial Content-Style Loss module...")
-    
+
     num_styles = getattr(args, "num_styles", 10)
     adversarial_weight = getattr(args, "adversarial_weight", 0.5)
     entropy_weight = getattr(args, "adversarial_entropy_weight", 0.1)
     gradient_reversal_lambda = getattr(args, "adversarial_lambda", 1.0)
-    
+
     loss_module = AdversarialContentStyleLoss(
         num_styles=num_styles,
         adversarial_weight=adversarial_weight,
         entropy_weight=entropy_weight,
         gradient_reversal_lambda=gradient_reversal_lambda,
     )
-    
+
     print(
         f"✓ Adversarial Loss module built successfully "
         f"(weight={adversarial_weight}, entropy_weight={entropy_weight})."
@@ -349,22 +365,23 @@ def build_adversarial_loss_module(args: argparse.Namespace) -> AdversarialConten
 
 def build_style_label_extractor(args: argparse.Namespace) -> StyleLabelExtractor:
     """Build style label extractor for filename-based style annotation.
-    
+
     Args:
         args (argparse.Namespace): Configuration arguments (minimal deps)
-    
+
     Returns:
         StyleLabelExtractor: Style label extractor instance.
-    """    
+    """
     if not getattr(args, "use_adversarial_disc", False):
         return None
-    
+
     print("Building Style Label Extractor...")
-    
+
     extractor = StyleLabelExtractor()
-    
+
     print("✓ Style Label Extractor built successfully.")
     return extractor
+
 
 def load_components(components: dict, args: argparse.Namespace) -> None:
     """
@@ -385,9 +402,10 @@ def load_components(components: dict, args: argparse.Namespace) -> None:
         else:
             logger.warning(f"⚠ Checkpoint for '{name}' not found in {args.ckpt_dir}")
 
+
 def build_frequency_decomposition(args: argparse.Namespace) -> FrequencyDecomposition:
     """Build frequency decomposition module.
-    
+
     Args:
         args (argparse.Namespace): Configuration arguments with:
             - frequency_image_size: Input image size (default: 96)
@@ -396,19 +414,19 @@ def build_frequency_decomposition(args: argparse.Namespace) -> FrequencyDecompos
             - frequency_filter_type: Filter type (default: "gaussian")
             - frequency_normalize_bands: Whether to normalize bands (default: True)
             - frequency_return_fft: Return FFT spectrums (default: False)
-    
+
     Returns:
         FrequencyDecomposition: Frequency decomposition module instance.
     """
     print("Building Frequency Decomposition module...")
-    
+
     image_size = getattr(args, "frequency_image_size", 96)
     low_cutoff = getattr(args, "frequency_low_cutoff", 0.10)
     mid_cutoff = getattr(args, "frequency_mid_cutoff", 0.40)
     filter_type = getattr(args, "frequency_filter_type", "gaussian")
     normalize_bands = getattr(args, "frequency_normalize_bands", True)
     return_fft = getattr(args, "frequency_return_fft", False)
-    
+
     freq_decomp = FrequencyDecomposition(
         image_size=image_size,
         low_cutoff=low_cutoff,
@@ -417,7 +435,7 @@ def build_frequency_decomposition(args: argparse.Namespace) -> FrequencyDecompos
         normalize_bands=normalize_bands,
         return_fft=return_fft,
     )
-    
+
     print(
         f"✓ Frequency Decomposition built successfully "
         f"(low_cutoff={low_cutoff}, mid_cutoff={mid_cutoff}, filter={filter_type})."
@@ -431,9 +449,9 @@ def build_frequency_encoder_wrapper(
     style_encoder: StyleEncoder,
 ) -> MultiScaleFrequencyEncoder:
     """Build multi-scale frequency encoder wrapper.
-    
+
     Wraps content and style encoders to process frequency-decomposed inputs.
-    
+
     Args:
         args (argparse.Namespace): Configuration arguments with:
             - frequency_image_size: Input image size (default: 96)
@@ -443,18 +461,18 @@ def build_frequency_encoder_wrapper(
             - frequency_mid_target: Where to send mid-band (default: "both")
         content_encoder: Content encoder to wrap
         style_encoder: Style encoder to wrap
-    
+
     Returns:
         MultiScaleFrequencyEncoder: Wrapped encoder instance.
     """
     print("Building Multi-Scale Frequency Encoder wrapper...")
-    
+
     image_size = getattr(args, "frequency_image_size", 96)
     low_cutoff = getattr(args, "frequency_low_cutoff", 0.10)
     mid_cutoff = getattr(args, "frequency_mid_cutoff", 0.40)
     use_mid_band = getattr(args, "frequency_use_mid_band", True)
     mid_band_target = getattr(args, "frequency_mid_target", "both")
-    
+
     freq_encoder = MultiScaleFrequencyEncoder(
         content_encoder=content_encoder,
         style_encoder=style_encoder,
@@ -464,7 +482,7 @@ def build_frequency_encoder_wrapper(
         use_mid_band=use_mid_band,
         mid_band_target=mid_band_target,
     )
-    
+
     print(
         f"✓ Frequency Encoder wrapper built successfully "
         f"(use_mid_band={use_mid_band}, mid_target={mid_band_target})."

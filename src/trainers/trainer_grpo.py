@@ -18,6 +18,7 @@ New args (add to configs/fontdiffuser.py --grpo group):
     --grpo_kl_coeff         : float -- KL penalty coefficient (default: 0.01)
     --grpo_reward_clip      : float -- reward clip value (default: 5.0)
 """
+
 import logging
 from pathlib import Path
 
@@ -70,6 +71,7 @@ class FontDiffuserGRPOTrainer(FontDiffuserDROTrainer):
 
         if self.use_grpo and self.grpo_kl_coeff > 0.0:
             import copy
+
             self._ref_model = copy.deepcopy(self.model)
             for p in self._ref_model.parameters():
                 p.requires_grad_(False)
@@ -103,7 +105,9 @@ class FontDiffuserGRPOTrainer(FontDiffuserDROTrainer):
         x = torch.randn(bsz, C, H, W, device=device)
         num_train_ts = self.noise_scheduler.config.num_train_timesteps
         step_size = num_train_ts // self.grpo_sample_steps
-        ts_schedule = list(range(num_train_ts - 1, 0, -step_size))[: self.grpo_sample_steps]
+        ts_schedule = list(range(num_train_ts - 1, 0, -step_size))[
+            : self.grpo_sample_steps
+        ]
 
         log_probs = torch.zeros(bsz, device=device)
         unwrapped = self.accelerator.unwrap_model(self.model)
@@ -115,23 +119,28 @@ class FontDiffuserGRPOTrainer(FontDiffuserDROTrainer):
 
                 if self.use_fst:
                     out = unwrapped(
-                        x, t, content_images, style_source, style_images,
+                        x,
+                        t,
+                        content_images,
+                        style_source,
+                        style_images,
                         self.args.content_encoder_downsample_size,
                     )
                     noise_pred = out["noise_pred"]
                 else:
                     noise_pred, _ = unwrapped(
-                        x, t, style_images, content_images,
+                        x,
+                        t,
+                        style_images,
+                        content_images,
                         self.args.content_encoder_downsample_size,
                     )
 
                 # Gaussian log p: -0.5 * ||noise_pred - noise||^2 per sample
-                noise_sample = (x - self.noise_scheduler.alphas_cumprod[t_val] ** 0.5 * x) / (
-                    (1 - self.noise_scheduler.alphas_cumprod[t_val]) ** 0.5 + 1e-8
-                )
-                step_lp = -0.5 * (
-                    (noise_pred - noise_sample) ** 2
-                ).mean(dim=(1, 2, 3))
+                noise_sample = (
+                    x - self.noise_scheduler.alphas_cumprod[t_val] ** 0.5 * x
+                ) / ((1 - self.noise_scheduler.alphas_cumprod[t_val]) ** 0.5 + 1e-8)
+                step_lp = -0.5 * ((noise_pred - noise_sample) ** 2).mean(dim=(1, 2, 3))
                 log_probs = log_probs + step_lp
 
                 x = self.noise_scheduler.step(noise_pred, t[0], x).prev_sample
@@ -180,19 +189,24 @@ class FontDiffuserGRPOTrainer(FontDiffuserDROTrainer):
 
         if self.use_fst:
             out = model(
-                noisy, t, content_images, style_source, style_images,
+                noisy,
+                t,
+                content_images,
+                style_source,
+                style_images,
                 self.args.content_encoder_downsample_size,
             )
             noise_pred = out["noise_pred"]
         else:
             noise_pred, _ = model(
-                noisy, t, style_images, content_images,
+                noisy,
+                t,
+                style_images,
+                content_images,
                 self.args.content_encoder_downsample_size,
             )
 
-        log_probs = -0.5 * (
-            (noise_pred - noise) ** 2
-        ).mean(dim=(1, 2, 3))
+        log_probs = -0.5 * ((noise_pred - noise) ** 2).mean(dim=(1, 2, 3))
         return log_probs
 
     # ------------------------------------------------------------------
@@ -253,9 +267,9 @@ class FontDiffuserGRPOTrainer(FontDiffuserDROTrainer):
                 rewards[g] = r.clamp(-self.grpo_reward_clip, self.grpo_reward_clip)
 
         # -- Group-relative normalization (GRPO baseline) -----------------
-        r_mean = rewards.mean(dim=0, keepdim=True)       # (1, B)
+        r_mean = rewards.mean(dim=0, keepdim=True)  # (1, B)
         r_std = rewards.std(dim=0, keepdim=True) + 1e-8  # (1, B)
-        advantages = (rewards - r_mean) / r_std           # (G, B)
+        advantages = (rewards - r_mean) / r_std  # (G, B)
 
         # -- Clipped importance-weighted PG loss (PPO-style clip) ---------
         grpo_losses = []
@@ -267,8 +281,8 @@ class FontDiffuserGRPOTrainer(FontDiffuserDROTrainer):
             )
             old_lp = old_lp_group[g].detach()
 
-            ratio = torch.exp(new_lp - old_lp)         # (B,)
-            adv = advantages[g]                         # (B,)
+            ratio = torch.exp(new_lp - old_lp)  # (B,)
+            adv = advantages[g]  # (B,)
 
             clipped = torch.clamp(
                 ratio, 1.0 - self.grpo_clip_eps, 1.0 + self.grpo_clip_eps
@@ -280,7 +294,9 @@ class FontDiffuserGRPOTrainer(FontDiffuserDROTrainer):
             if self._ref_model is not None and self.grpo_kl_coeff > 0.0:
                 ref_lp = self._recompute_log_probs(
                     x0_group[g].detach(),
-                    content_images, style_images, style_source,
+                    content_images,
+                    style_images,
+                    style_source,
                     model=self._ref_model,
                 )
                 kl = (old_lp.detach() - ref_lp.detach()).mean()
@@ -356,9 +372,7 @@ class FontDiffuserGRPOTrainer(FontDiffuserDROTrainer):
         if not state_path.exists():
             return
 
-        training_state = torch.load(
-            state_path, map_location="cpu", weights_only=True
-        )
+        training_state = torch.load(state_path, map_location="cpu", weights_only=True)
         training_state["grpo_config"] = {
             "use_grpo": self.use_grpo,
             "grpo_group_size": self.grpo_group_size,

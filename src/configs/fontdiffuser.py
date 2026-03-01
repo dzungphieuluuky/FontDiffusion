@@ -649,9 +649,9 @@ def get_parser():
         default="medial_axis",
         choices=["skeletonize", "medial_axis", "zhang_suen"],
         help="Skeletonization algorithm: "
-            "'skeletonize' (morphological thinning), "
-            "'medial_axis' (distance-based, robust for fonts), "
-            "'zhang_suen' (Zhang-Suen algorithm)",
+        "'skeletonize' (morphological thinning), "
+        "'medial_axis' (distance-based, robust for fonts), "
+        "'zhang_suen' (Zhang-Suen algorithm)",
     )
 
     skeleton_group.add_argument(
@@ -660,9 +660,9 @@ def get_parser():
         default="hybrid",
         choices=["edt", "gaussian", "hybrid"],
         help="Distance field generation method: "
-            "'edt' (Euclidean Distance Transform), "
-            "'gaussian' (Gaussian blur of skeleton), "
-            "'hybrid' (EDT + Gaussian smoothing)",
+        "'edt' (Euclidean Distance Transform), "
+        "'gaussian' (Gaussian blur of skeleton), "
+        "'hybrid' (EDT + Gaussian smoothing)",
     )
 
     skeleton_group.add_argument(
@@ -670,7 +670,7 @@ def get_parser():
         type=float,
         default=12.0,
         help="Maximum influence radius for skeleton distance field (in pixels). "
-            "Smaller values = tighter guidance, larger values = more diffuse influence.",
+        "Smaller values = tighter guidance, larger values = more diffuse influence.",
     )
 
     skeleton_group.add_argument(
@@ -686,9 +686,9 @@ def get_parser():
         default="dual_channel",
         choices=["skeleton_only", "distance_only", "dual_channel"],
         help="Output mode: "
-            "'skeleton_only' (binary 1-channel), "
-            "'distance_only' (smooth 1-channel), "
-            "'dual_channel' (skeleton + distance, 2-channel)",
+        "'skeleton_only' (binary 1-channel), "
+        "'distance_only' (smooth 1-channel), "
+        "'dual_channel' (skeleton + distance, 2-channel)",
     )
 
     skeleton_group.add_argument(
@@ -697,9 +697,9 @@ def get_parser():
         default="concat",
         choices=["concat", "add", "weighted"],
         help="How to fuse skeleton and distance channels in content encoder: "
-            "'concat' (1x1 conv to merge), "
-            "'add' (simple addition), "
-            "'weighted' (learnable weighted sum)",
+        "'concat' (1x1 conv to merge), "
+        "'add' (simple addition), "
+        "'weighted' (learnable weighted sum)",
     )
     # ==================== Fourier-Based Frequency Decomposition ====================
     frequency_group = parser.add_argument_group("Frequency Decomposition")
@@ -789,7 +789,7 @@ def get_parser():
         type=float,
         default=0.3,
         help="Only evaluate DRO reward at timesteps below this fraction of "
-             "num_train_timesteps. Lower = more reliable pred_x0 (default: 0.3).",
+        "num_train_timesteps. Lower = more reliable pred_x0 (default: 0.3).",
     )
     dro_group.add_argument(
         "--dro_sharp_weight",

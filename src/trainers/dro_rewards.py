@@ -47,9 +47,10 @@ logger = logging.getLogger(__name__)
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _gaussian_kernel_1d(size: int = 11, sigma: float = 1.5) -> torch.Tensor:
     coords = torch.arange(size, dtype=torch.float32) - size // 2
-    kernel = torch.exp(-(coords ** 2) / (2 * sigma ** 2))
+    kernel = torch.exp(-(coords**2) / (2 * sigma**2))
     return kernel / kernel.sum()
 
 
@@ -71,8 +72,8 @@ def _ssim_single_scale(
     _, C, _, _ = pred.shape
     vals: list[torch.Tensor] = []
     for c in range(C):
-        p = pred[:, c: c + 1]
-        t = target[:, c: c + 1]
+        p = pred[:, c : c + 1]
+        t = target[:, c : c + 1]
         mu1 = F.conv2d(p, kernel, padding=padding)
         mu2 = F.conv2d(t, kernel, padding=padding)
         mu1_sq, mu2_sq, mu1_mu2 = mu1 * mu1, mu2 * mu2, mu1 * mu2
@@ -142,15 +143,16 @@ def compute_ms_ssim_reward(
 # High-frequency energy penalty (anti-blur cheat)
 # ---------------------------------------------------------------------------
 
+
 def _hf_energy(x: torch.Tensor) -> torch.Tensor:
     """Mean squared magnitude of high-frequency content via Laplacian."""
     laplacian_kernel = torch.tensor(
-        [[0., -1., 0.], [-1., 4., -1.], [0., -1., 0.]],
+        [[0.0, -1.0, 0.0], [-1.0, 4.0, -1.0], [0.0, -1.0, 0.0]],
         device=x.device,
     ).view(1, 1, 3, 3)
     vals = []
     for c in range(x.shape[1]):
-        ch = x[:, c: c + 1]
+        ch = x[:, c : c + 1]
         vals.append((F.conv2d(ch, laplacian_kernel, padding=1) ** 2).mean())
     return torch.stack(vals).mean()
 
@@ -178,6 +180,7 @@ def compute_sharpness_penalty(
 # LPIPS-VGG with cosine similarity hardening
 # ---------------------------------------------------------------------------
 
+
 class VGGRewardFeatures(nn.Module):
     """VGG16 feature extractor for differentiable LPIPS-style reward.
 
@@ -199,7 +202,7 @@ class VGGRewardFeatures(nn.Module):
         prev = 0
         for end in self._LAYER_ENDS:
             self.slices.append(
-                nn.Sequential(*list(features.children())[prev: end + 1])
+                nn.Sequential(*list(features.children())[prev : end + 1])
             )
             prev = end + 1
 
@@ -274,6 +277,7 @@ def compute_lpips_reward(
 # Diversity regulariser (anti-mode-collapse / mean-image hack)
 # ---------------------------------------------------------------------------
 
+
 def compute_diversity_bonus(pred: torch.Tensor) -> torch.Tensor:
     """Reward within-batch diversity of predictions.
 
@@ -298,6 +302,7 @@ def compute_diversity_bonus(pred: torch.Tensor) -> torch.Tensor:
 # ---------------------------------------------------------------------------
 # EMA reward normaliser (prevents scale-imbalance hacking)
 # ---------------------------------------------------------------------------
+
 
 class EMANormaliser(nn.Module):
     """Exponential moving average normaliser for reward components.
@@ -334,6 +339,7 @@ class EMANormaliser(nn.Module):
 # ---------------------------------------------------------------------------
 # Combined DRO reward — hardened
 # ---------------------------------------------------------------------------
+
 
 class DRORewardModule(nn.Module):
     """Combines MS-SSIM, LPIPS, sharpness, and diversity into one reward.

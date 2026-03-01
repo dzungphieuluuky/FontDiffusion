@@ -594,7 +594,7 @@ class DatasetSplitCreator:
 
         logger.info("\nSplit summary:")
         logger.info(f"  {'Split':<35} {'Chars':>8} {'Styles':>8} {'Pairs':>10}")
-        logger.info(f"  {'-'*35} {'-'*8} {'-'*8} {'-'*10}")
+        logger.info(f"  {'-' * 35} {'-' * 8} {'-' * 8} {'-' * 10}")
         for split_key, split_info in splits.items():
             logger.info(
                 f"  {split_info.name:<35} "

@@ -15,7 +15,10 @@ from src.modules.content_encoder import ContentEncoder
 from src.modules.style_encoder import StyleEncoder
 from src.modules.scr import SCR
 from src.modules.unet import UNet
-from src.modules.skeleton_distance_transform import SkeletonDistanceTransform, DualChannelContentEncoder
+from src.modules.skeleton_distance_transform import (
+    SkeletonDistanceTransform,
+    DualChannelContentEncoder,
+)
 from src.modules.frequency_decomposition import FrequencyDecomposition
 
 
@@ -162,9 +165,7 @@ class FontDiffuserModelDPM(ModelMixin, ConfigMixin):
         content_images = cond[0]
         style_images = cond[1]
 
-        style_img_feature, _, style_residual_features = self.style_encoder(
-            style_images
-        )
+        style_img_feature, _, style_residual_features = self.style_encoder(style_images)
 
         batch_size, channel, height, width = style_img_feature.shape
         style_hidden_states = style_img_feature.permute(0, 2, 3, 1).reshape(
@@ -204,6 +205,7 @@ class FontDiffuserWithFST(ModelMixin, ConfigMixin):
     FontDiffuser with FST enhancement, optional skeleton-distance transform,
     and optional frequency decomposition.
     """
+
     def __init__(
         self,
         unet: UNet,
@@ -218,7 +220,7 @@ class FontDiffuserWithFST(ModelMixin, ConfigMixin):
     ):
         """
         Initialize FontDiffuserWithFST with optional frequency decomposition.
-        
+
         Args:
             unet: U-Net for diffusion
             style_encoder: Style encoder
@@ -231,23 +233,25 @@ class FontDiffuserWithFST(ModelMixin, ConfigMixin):
             frequency_decomp: Optional frequency decomposition module
         """
         super().__init__()
-        
+
         # Base modules
-        self.content_encoder: ContentEncoder | DualChannelContentEncoder = content_encoder
+        self.content_encoder: ContentEncoder | DualChannelContentEncoder = (
+            content_encoder
+        )
         self.diffusion_unet: UNet = unet
         self.style_encoder: StyleEncoder = style_encoder
-        
+
         # Additional modules for FST
         self.mss_encoder: MultiScaleStyleEncoder = mss_encoder
         self.fst_module: FontStyleTransformationModule = fst_module
         self.fst_projection: nn.Linear = fst_projection
         self.original_style_projection: nn.Linear = original_style_projection
         self.fst_num_queries: int = fst_module.num_queries
-        
+
         # Optional transforms
         self.skeleton_transform: SkeletonDistanceTransform = skeleton_transform
         self.use_skeleton_content: bool = skeleton_transform is not None
-        
+
         self.frequency_decomp: FrequencyDecomposition = frequency_decomp
         self.use_frequency_decomp: bool = frequency_decomp is not None
 
@@ -256,41 +260,48 @@ class FontDiffuserWithFST(ModelMixin, ConfigMixin):
         logger.info("=" * 80)
         logger.info("FontDiffuserWithFST Model Information")
         logger.info("=" * 80)
-        
+
         # Log skeleton configuration
         if self.use_skeleton_content:
             logger.info("✓ Skeleton-Distance Transform: ✅")
             logger.info(f"  Fusion method: {self.content_encoder.fusion_method}")
             if hasattr(self.content_encoder, "fusion_conv"):
-                fusion_params = sum(p.numel() for p in self.content_encoder.fusion_conv.parameters())
+                fusion_params = sum(
+                    p.numel() for p in self.content_encoder.fusion_conv.parameters()
+                )
                 logger.info(f"  Fusion parameters: {fusion_params:,}")
         else:
             logger.info("Skeleton-Distance Transform: ❌")
-        
+
         # Log frequency decomposition configuration
         if self.use_frequency_decomp:
             logger.info("✓ Frequency Decomposition: ✅")
             logger.info(f"  Low cutoff: {self.frequency_decomp.low_cutoff}")
             logger.info(f"  Mid cutoff: {self.frequency_decomp.mid_cutoff}")
-            logger.info(f"  Filter type: {self.frequency_decomp.filter_builder.filter_type}")
+            logger.info(
+                f"  Filter type: {self.frequency_decomp.filter_builder.filter_type}"
+            )
         else:
             logger.info("Frequency Decomposition: ❌")
-        
+
         # Log component parameters
         components = {
             "U-Net": self.diffusion_unet,
             "Style Encoder": self.style_encoder,
-            "Content Encoder (wrapped)" if self.use_skeleton_content else "Content Encoder": 
-                self.content_encoder if not self.use_skeleton_content else self.content_encoder.original_encoder,
+            "Content Encoder (wrapped)"
+            if self.use_skeleton_content
+            else "Content Encoder": self.content_encoder
+            if not self.use_skeleton_content
+            else self.content_encoder.original_encoder,
             "MSS Encoder": self.mss_encoder,
             "FST Module": self.fst_module,
             "FST Projection": self.fst_projection,
             "Original Style Projection": self.original_style_projection,
         }
-        
+
         total_params = 0
         trainable_params = 0
-        
+
         for name, module in components.items():
             module_total, module_trainable = count_parameters(module)
             total_params += module_total
@@ -299,18 +310,22 @@ class FontDiffuserWithFST(ModelMixin, ConfigMixin):
                 f"{name:30s}: {module_total:12,} total | "
                 f"{module_trainable:12,} trainable"
             )
-        
+
         if self.use_skeleton_content and hasattr(self.content_encoder, "fusion_conv"):
-            fusion_total, fusion_trainable = count_parameters(self.content_encoder.fusion_conv)
+            fusion_total, fusion_trainable = count_parameters(
+                self.content_encoder.fusion_conv
+            )
             total_params += fusion_total
             trainable_params += fusion_trainable
             logger.info(
                 f"{'Skeleton Fusion Layer':30s}: {fusion_total:12,} total | "
                 f"{fusion_trainable:12,} trainable"
             )
-        
+
         logger.info("=" * 80)
-        logger.info(f"{'TOTAL':30s}: {total_params:12,} total | {trainable_params:12,} trainable")
+        logger.info(
+            f"{'TOTAL':30s}: {total_params:12,} total | {trainable_params:12,} trainable"
+        )
         logger.info(f"Trainable ratio: {100 * trainable_params / total_params:.2f}%")
         logger.info("=" * 80)
 
@@ -340,25 +355,25 @@ class FontDiffuserWithFST(ModelMixin, ConfigMixin):
             Dictionary containing model outputs
         """
         batch_size = noisy_latents.shape[0]
-        
+
         # Apply frequency decomposition if enabled
         if self.use_frequency_decomp:
             # Decompose content image into frequency bands
             content_bands = self.frequency_decomp(content_images)
-            
+
             # Use low-frequency band for content (contains structure only)
             content_input = content_bands["low_freq"]
-            
+
             logger.debug(
                 f"Applied frequency decomposition: "
                 f"original shape {content_images.shape} → "
                 f"low-freq shape {content_input.shape}"
             )
-            
+
             # Decompose style images as well
             style_source_bands = self.frequency_decomp(style_source_images)
             style_target_bands = self.frequency_decomp(style_target_images)
-            
+
             # Use high-frequency bands for style (contains details/textures)
             style_source_input = style_source_bands["high_freq"]
             style_target_input = style_target_bands["high_freq"]
@@ -366,7 +381,7 @@ class FontDiffuserWithFST(ModelMixin, ConfigMixin):
             content_input = content_images
             style_source_input = style_source_images
             style_target_input = style_target_images
-        
+
         # Apply skeleton-distance transform if enabled
         if self.use_skeleton_content:
             content_input = self.skeleton_transform(content_input)
@@ -670,6 +685,7 @@ class FontDiffuserWithFST(ModelMixin, ConfigMixin):
 
         return loss, metrics
 
+
 class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
     """
     DPM Forward function for FontDiffuser with FST enhancement, optional skeleton-distance transform,
@@ -703,22 +719,22 @@ class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
             frequency_decomp: Optional frequency decomposition module
         """
         super().__init__()
-        
+
         # Base modules
         self.content_encoder = content_encoder
         self.unet: UNet = unet
         self.style_encoder: StyleEncoder = style_encoder
-        
+
         # Font style transformation modules
         self.mss_encoder: MultiScaleStyleEncoder = mss_encoder
         self.fst_module: FontStyleTransformationModule = fst_module
         self.fst_projection: nn.Linear = fst_projection
         self.original_style_projection: nn.Linear = original_style_projection
-        
+
         # Skeleton transform
         self.use_skeleton_content: bool = skeleton_transform is not None
         self.skeleton_transform: SkeletonDistanceTransform = skeleton_transform
-        
+
         # Frequency decomposition
         self.use_frequency_decomp: bool = frequency_decomp is not None
         self.frequency_decomp: FrequencyDecomposition = frequency_decomp
@@ -740,13 +756,15 @@ class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
                 logger.info(f"  Fusion parameters: {fusion_params:,}")
         else:
             logger.info("Skeleton-Distance Transform: ❌")
-        
+
         # Log frequency decomposition configuration
         if self.use_frequency_decomp:
             logger.info("✓ Frequency Decomposition: ✅")
             logger.info(f"  Low cutoff: {self.frequency_decomp.low_cutoff}")
             logger.info(f"  Mid cutoff: {self.frequency_decomp.mid_cutoff}")
-            logger.info(f"  Filter type: {self.frequency_decomp.filter_builder.filter_type}")
+            logger.info(
+                f"  Filter type: {self.frequency_decomp.filter_builder.filter_type}"
+            )
         else:
             logger.info("Frequency Decomposition: ❌")
 
@@ -795,9 +813,7 @@ class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
 
         logger.info("-" * 80)
         logger.info(f"{'TOTAL':<45} {total_all:>15,} {trainable_all:>15,}")
-        logger.info(
-            f"{'Non-trainable':<45} {'':<15} {total_all - trainable_all:>15,}"
-        )
+        logger.info(f"{'Non-trainable':<45} {'':<15} {total_all - trainable_all:>15,}")
         logger.info("=" * 80 + "\n")
 
     def forward(
@@ -829,11 +845,11 @@ class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
             # Decompose content image
             content_bands = self.frequency_decomp(content_images)
             content_input = content_bands["low_freq"]
-            
+
             # Decompose style image
             style_bands = self.frequency_decomp(style_images)
             style_input = style_bands["high_freq"]
-            
+
             logger.debug(
                 f"Applied frequency decomposition: "
                 f"content {content_images.shape} → low-freq {content_input.shape}, "
@@ -852,8 +868,8 @@ class FontDiffuserModelDPMWithFST(ModelMixin, ConfigMixin):
             )
 
         # 1. Original style encoding
-        style_img_feature, style_vec, style_residual_features = (
-            self.style_encoder(style_input)
+        style_img_feature, style_vec, style_residual_features = self.style_encoder(
+            style_input
         )
 
         # 2. Multi-scale style encoding

@@ -12,8 +12,13 @@ import logging
 import os
 from torchvision import transforms
 
-from src.modules.skeleton_distance_transform import SkeletonDistanceTransform  # ADD THIS IMPORT
-from src.modules.frequency_decomposition import FrequencyDecomposition  # ADD THIS IMPORT
+from src.modules.skeleton_distance_transform import (
+    SkeletonDistanceTransform,
+)  # ADD THIS IMPORT
+from src.modules.frequency_decomposition import (
+    FrequencyDecomposition,
+)  # ADD THIS IMPORT
+
 logger = logging.getLogger(__name__)
 
 
@@ -47,11 +52,10 @@ class FontDataset(Dataset):
         skeleton_config: Optional[dict] = None,  # ADD THIS
         use_frequency_decomp: bool = False,
         frequency_config: Optional[dict] = None,
-
     ):
         """
         Initialize FontDataset with optional skeleton transform.
-        
+
         Args:
             args: Configuration arguments
             phase: Dataset phase ("train", "val", "test")
@@ -84,7 +88,7 @@ class FontDataset(Dataset):
 
         # Frequency decomposition setup
         self.use_frequency_decomp = use_frequency_decomp
-        
+
         if self.use_frequency_decomp:
             # Default configuration
             default_config = {
@@ -94,17 +98,16 @@ class FontDataset(Dataset):
                 "filter_type": "gaussian",
                 "normalize_bands": True,
             }
-            
+
             # Update with user config
             if frequency_config:
                 default_config.update(frequency_config)
-            
+
             # Create decomposition module
             self.freq_decomp = FrequencyDecomposition(**default_config)
             logger.info(f"Frequency decomposition enabled: {default_config}")
         else:
             self.freq_decomp = None
-
 
         logger.info(
             f"Dataset initialized:\n "
@@ -547,17 +550,17 @@ class FontDataset(Dataset):
             # Decompose into frequency bands
             # Input: (C, H, W) → Add batch dim → (1, C, H, W)
             bands = self.freq_decomp(content_image.unsqueeze(0))
-            
+
             # Extract bands and remove batch dim
             content_low_freq = bands["low_freq"].squeeze(0)
             content_mid_freq = bands["mid_freq"].squeeze(0)
             content_high_freq = bands["high_freq"].squeeze(0)
-            
+
             # Store frequency bands
             sample["content_image"] = content_low_freq  # Use low freq for content
             sample["content_image_mid"] = content_mid_freq
             sample["content_image_original"] = content_image
-            
+
             # Also decompose style images if available
             if style_image is not None:
                 style_bands = self.freq_decomp(style_image.unsqueeze(0))

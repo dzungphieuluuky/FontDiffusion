@@ -449,9 +449,7 @@ class FontDiffuserDROTrainer(FontDiffuserFSTTrainer):
             )
             return
 
-        training_state = torch.load(
-            state_path, map_location="cpu", weights_only=True
-        )
+        training_state = torch.load(state_path, map_location="cpu", weights_only=True)
         training_state["dro_config"] = {
             "use_dro": self.use_dro,
             "dro_weight": self.dro_weight,
@@ -498,9 +496,7 @@ class FontDiffuserDROTrainer(FontDiffuserFSTTrainer):
         if not state_path.exists():
             return True
 
-        training_state = torch.load(
-            state_path, map_location="cpu", weights_only=True
-        )
+        training_state = torch.load(state_path, map_location="cpu", weights_only=True)
 
         dro_cfg = training_state.get("dro_config", {})
         if dro_cfg:
