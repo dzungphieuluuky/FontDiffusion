@@ -3,7 +3,6 @@ import logging
 import time
 import os
 import argparse
-import io
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -42,7 +41,7 @@ class DatasetConfig:
     spacing: int = 10
     jpeg_quality: int = 90
     num_shards: int = 8
-    num_proc: int = 8
+    num_proc: int = 1
 
     def __post_init__(self):
         if isinstance(self.data_dir, str):
@@ -71,19 +70,58 @@ def _encode_jpeg(arr: np.ndarray, quality: int) -> bytes:
     return encoded.tobytes()
 
 
+# Module-level style cache — populated once per process, never pickled.
+# Workers load style images directly from disk paths on first access.
+_STYLE_BYTES_CACHE: dict[str, bytes] = {}
+_STYLE_DIMS_CACHE: dict[str, tuple[int, int]] = {}
+
+
+def _ensure_style_loaded(style_name: str, style_paths: dict[str, str]) -> bool:
+    """Load a style image into the module-level cache if not already present.
+
+    Parameters
+    ----------
+    style_name : str
+        Name of the style (stem of the image file).
+    style_paths : dict[str, str]
+        Mapping from style name to absolute file path string.
+
+    Returns
+    -------
+    bool
+        True if the style is available in cache after this call.
+    """
+    if style_name in _STYLE_BYTES_CACHE:
+        return True
+    path = style_paths.get(style_name)
+    if not path:
+        return False
+    try:
+        raw = Path(path).read_bytes()
+        arr = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if arr is None:
+            return False
+        h, w = arr.shape[:2]
+        _STYLE_BYTES_CACHE[style_name] = raw
+        _STYLE_DIMS_CACHE[style_name] = (w, h)
+        return True
+    except Exception:
+        return False
+
+
 def _process_batch(
     batch: dict,
     path_cache: dict,
-    style_bytes_cache: dict,
-    style_dims_cache: dict,
+    style_paths: dict,
     resize_height: int,
     spacing: int,
     jpeg_quality: int,
 ) -> dict:
     """Process a batch of generation records into dataset rows.
 
-    Receives style images as raw bytes to avoid pickling PIL objects
-    across subprocess boundaries, which causes worker OOM crashes.
+    Style images are loaded lazily into a module-level cache on first access
+    rather than being passed through fn_kwargs. This avoids pickling large
+    byte buffers across subprocess IPC pipes, which causes worker OOM crashes.
 
     Parameters
     ----------
@@ -91,11 +129,9 @@ def _process_batch(
         Columnar batch from datasets.map() with character/style/font lists.
     path_cache : dict
         Pre-built cache: content paths+dims, target paths+dims.
-    style_bytes_cache : dict
-        Raw PNG/JPEG bytes for each style image, keyed by style name.
-        Bytes are safe to pickle across processes; PIL objects are not.
-    style_dims_cache : dict
-        (width, height) tuples for each style image, keyed by style name.
+    style_paths : dict[str, str]
+        Mapping from style name to absolute file path string.
+        Only paths (strings) are passed — cheap to pickle.
     resize_height : int
         Target height for all output images.
     spacing : int
@@ -111,6 +147,12 @@ def _process_batch(
     batch_size = len(batch["character"])
     content_cache = path_cache["content"]
     target_cache = path_cache["target"]
+
+    empty_result: dict = {
+        "character": [], "style": [], "font": [],
+        "content_image": [], "style_image": [], "target_image": [],
+        "comparison_image": [], "content_hash": [], "target_hash": [],
+    }
 
     chars, styles, fonts = [], [], []
     content_infos, target_infos = [], []
@@ -137,15 +179,9 @@ def _process_batch(
             skipped += 1
             continue
 
-        if style not in style_bytes_cache:
+        if style not in style_paths:
             if len(failure_samples) < 3:
-                failure_samples.append((f"{char}/{style}", "no style_bytes"))
-            skipped += 1
-            continue
-
-        if style not in style_dims_cache:
-            if len(failure_samples) < 3:
-                failure_samples.append((f"{char}/{style}", "no style_dims"))
+                failure_samples.append((f"{char}/{style}", "no style_path"))
             skipped += 1
             continue
 
@@ -155,46 +191,59 @@ def _process_batch(
         content_infos.append(content_info)
         target_infos.append(target_info)
 
-    # Empty batch — return early with useful warning
     if not chars:
         if skipped > 0 and failure_samples:
             logger.warning(
                 f"Batch skipped {batch_size}/{batch_size} items. "
                 f"Examples: {failure_samples}"
             )
-        return {
-            "character": [], "style": [], "font": [],
-            "content_image": [], "style_image": [], "target_image": [],
-            "comparison_image": [], "content_hash": [], "target_hash": [],
-        }
+        return empty_result
 
     num_valid = len(chars)
     rh = resize_height
+
+    # Ensure all unique styles in this batch are loaded into module-level cache
+    unique_styles = list(dict.fromkeys(styles))
+    for uname in unique_styles:
+        _ensure_style_loaded(uname, style_paths)
 
     # Pre-compute resize widths for all valid items
     c_widths, s_widths, t_widths = [], [], []
     for idx in range(num_valid):
         ci = content_infos[idx]
         ti = target_infos[idx]
-        sw, sh = style_dims_cache[styles[idx]]
-        c_widths.append(max(1, int(ci["width"] * (rh / ci["height"]))))
-        s_widths.append(max(1, int(sw * (rh / sh))))
-        t_widths.append(max(1, int(ti["width"] * (rh / ti["height"]))))
+        style_name = styles[idx]
+        dims = _STYLE_DIMS_CACHE.get(style_name)
+        if dims is None:
+            # Fallback: mark as invalid below in the processing loop
+            c_widths.append(1)
+            s_widths.append(1)
+            t_widths.append(1)
+        else:
+            sw, sh = dims
+            c_widths.append(max(1, int(ci["width"] * (rh / ci["height"]))))
+            s_widths.append(max(1, int(sw * (rh / sh))))
+            t_widths.append(max(1, int(ti["width"] * (rh / ti["height"]))))
 
-    # Decode style bytes into arrays once per unique style in this batch
-    # (avoids re-decoding the same style image for every character)
-    unique_styles = list(dict.fromkeys(styles))
+    # Decode unique style images into numpy arrays once per batch
     style_arr_cache: dict[str, np.ndarray] = {}
     for uname in unique_styles:
-        raw = style_bytes_cache[uname]
+        raw = _STYLE_BYTES_CACHE.get(uname)
+        if raw is None:
+            continue
         arr = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR)
         if arr is not None:
             style_arr_cache[uname] = cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)
 
-    content_image_bytes, style_image_bytes = [], []
-    target_image_bytes, comparison_bytes = [], []
-    content_hashes, target_hashes = [], []
-    valid_chars, valid_styles, valid_fonts = [], [], []
+    content_image_bytes: list[dict] = []
+    style_image_bytes: list[dict] = []
+    target_image_bytes: list[dict] = []
+    comparison_bytes: list[dict] = []
+    content_hashes: list[str] = []
+    target_hashes: list[str] = []
+    valid_chars: list[str] = []
+    valid_styles: list[str] = []
+    valid_fonts: list[str] = []
 
     for idx in range(num_valid):
         char = chars[idx]
@@ -202,17 +251,19 @@ def _process_batch(
         font = fonts[idx]
 
         try:
+            style_full = style_arr_cache.get(style)
+            if style_full is None:
+                if len(failure_samples) < 3:
+                    failure_samples.append((f"{char}/{style}", "style decode failed"))
+                skipped += 1
+                continue
+
             content_arr = _load_cv2_resize(
                 content_infos[idx]["path"], c_widths[idx], rh
             )
             target_arr = _load_cv2_resize(
                 target_infos[idx]["path"], t_widths[idx], rh
             )
-
-            style_full = style_arr_cache.get(style)
-            if style_full is None:
-                skipped += 1
-                continue
             style_arr = cv2.resize(
                 style_full, (s_widths[idx], rh), interpolation=cv2.INTER_LINEAR
             )
@@ -224,8 +275,8 @@ def _process_batch(
             )
 
             content_image_bytes.append({"bytes": _encode_jpeg(content_arr, jpeg_quality)})
-            # Use original style bytes for style_image column (no quality loss)
-            style_image_bytes.append({"bytes": style_bytes_cache[style]})
+            # Use original raw style bytes for style_image column (no re-encoding loss)
+            style_image_bytes.append({"bytes": _STYLE_BYTES_CACHE[style]})
             target_image_bytes.append({"bytes": _encode_jpeg(target_arr, jpeg_quality)})
             comparison_bytes.append({"bytes": _encode_jpeg(comparison, jpeg_quality)})
             content_hashes.append(compute_file_hash(char, "", font))
@@ -271,18 +322,16 @@ class UltraFastDatasetBuilder:
         self.resize_height = config.resize_height
         self.spacing = config.spacing
         self.jpeg_quality = config.jpeg_quality
-
-        self.cpu_count = os.cpu_count() or 4
         self.num_proc = config.num_proc
         self.process_batch_size = 1000
 
-        # Stores raw bytes — safe to pickle across processes
-        self.style_bytes_cache: dict[str, bytes] = {}
-        self.style_dims_cache: dict[str, tuple[int, int]] = {}
+        # style_paths maps style name -> absolute path string.
+        # Only paths are pickled to workers; bytes are loaded inside the worker.
+        self.style_paths: dict[str, str] = {}
         self.path_cache: dict[str, dict] = {}
 
         self._validate_structure()
-        self._build_style_index()
+        self._build_style_path_index()
         self._build_path_cache_with_dims()
         self.generations = self._load_checkpoint()
 
@@ -291,7 +340,7 @@ class UltraFastDatasetBuilder:
         logger.info(f"  CPU workers: {self.num_proc} processes")
         logger.info(f"  Process batch size: {self.process_batch_size}")
         logger.info(f"  JPEG quality: {self.jpeg_quality}")
-        logger.info(f"  Style images: {len(self.style_bytes_cache)}")
+        logger.info(f"  Style images indexed: {len(self.style_paths)}")
 
     def _validate_structure(self) -> None:
         """Validate that required directories and checkpoint file exist."""
@@ -308,32 +357,18 @@ class UltraFastDatasetBuilder:
             )
         logger.info("Directory structure validated")
 
-    def _build_style_index(self) -> None:
-        """Load style images as raw bytes and record their dimensions.
+    def _build_style_path_index(self) -> None:
+        """Index style image file paths (strings only — no bytes loaded here).
 
-        Storing bytes instead of PIL Image objects ensures the style cache
-        can be safely pickled and sent to worker subprocesses without OOM.
+        Storing only paths keeps fn_kwargs lightweight for pickling when
+        num_proc > 1. Each worker loads style bytes on first access via
+        _ensure_style_loaded() into the module-level _STYLE_BYTES_CACHE.
         """
-        logger.info("Loading style images as bytes...")
+        logger.info("Indexing style image paths...")
         for ext in [".png", ".jpg", ".jpeg"]:
             for style_file in sorted(self.style_images_dir.glob(f"*{ext}")):
-                style_name = style_file.stem
-                try:
-                    # Read raw bytes for pickling safety
-                    raw_bytes = style_file.read_bytes()
-                    # Decode once just to get dimensions
-                    arr = cv2.imdecode(
-                        np.frombuffer(raw_bytes, dtype=np.uint8), cv2.IMREAD_COLOR
-                    )
-                    if arr is None:
-                        logger.warning(f"Could not decode style image: {style_file}")
-                        continue
-                    h, w = arr.shape[:2]
-                    self.style_bytes_cache[style_name] = raw_bytes
-                    self.style_dims_cache[style_name] = (w, h)
-                except Exception as exc:
-                    logger.warning(f"Failed to load style image {style_file}: {exc}")
-        logger.info(f"Loaded {len(self.style_bytes_cache)} style images")
+                self.style_paths[style_file.stem] = str(style_file)
+        logger.info(f"Indexed {len(self.style_paths)} style image paths")
 
     def _build_path_cache_with_dims(self) -> None:
         """Build file path cache with pre-read image dimensions."""
@@ -447,14 +482,16 @@ class UltraFastDatasetBuilder:
             _process_batch,
             batched=True,
             batch_size=self.process_batch_size,
-            num_proc=1,  # Set to 1 to avoid multiprocessing issues with OpenCV/PIL
+            num_proc=self.num_proc,
             features=features,
             remove_columns=thin_dataset.column_names,
             desc="Processing images",
             fn_kwargs={
+                # path_cache contains only strings and ints — cheap to pickle
                 "path_cache": self.path_cache,
-                "style_bytes_cache": self.style_bytes_cache,
-                "style_dims_cache": self.style_dims_cache,
+                # style_paths contains only strings — cheap to pickle
+                # actual bytes are loaded lazily inside _ensure_style_loaded()
+                "style_paths": self.style_paths,
                 "resize_height": self.resize_height,
                 "spacing": self.spacing,
                 "jpeg_quality": self.jpeg_quality,
@@ -469,8 +506,8 @@ class UltraFastDatasetBuilder:
 
         if num_samples == 0:
             logger.error(
-                "Dataset is empty. Check that style names in checkpoint match "
-                "style image filenames in style_images_dir."
+                "Dataset is empty. Verify that style names in the checkpoint "
+                "match the style image filenames in style_images_dir."
             )
 
         return dataset
@@ -503,7 +540,7 @@ class UltraFastDatasetBuilder:
                 embed_external_files=False,
                 num_shards=self.config.num_shards,
                 num_proc=1,
-                commit_message="Ultra-fast dataset upload with pre-encoded bytes",
+                commit_message="Dataset upload via upload_dataset_ultra",
             )
             upload_time = time.time() - start_time
             speed = len(dataset) / upload_time if upload_time > 0 else 0.0
@@ -547,7 +584,7 @@ def create_dataset_ultra(
     spacing: int = 10,
     jpeg_quality: int = 90,
     num_shards: int = 8,
-    num_proc: int = 8,
+    num_proc: int = 1,
 ) -> Dataset:
     """Create and optionally upload a font style transfer dataset.
 
@@ -579,6 +616,9 @@ def create_dataset_ultra(
         JPEG encoding quality (1-100).
     num_shards : int
         Number of Parquet shards for Hub upload.
+    num_proc : int
+        Number of worker processes for datasets.map().
+        Use 1 to disable multiprocessing (safest on Colab).
 
     Returns
     -------
@@ -599,7 +639,6 @@ def create_dataset_ultra(
         jpeg_quality=jpeg_quality,
         num_shards=num_shards,
         num_proc=num_proc,
-
     )
     builder = UltraFastDatasetBuilder(config)
     dataset = builder.build()
@@ -676,7 +715,8 @@ Examples:
         "--num-proc",
         type=int,
         default=1,
-        help="Number of processes for map() (default: 8, max: CPU count)",
+        help="Number of worker processes for map() (default: 1). "
+             "Increase only if running outside Colab with sufficient RAM.",
     )
     parser.add_argument(
         "--verbose", action="store_true", help="Enable verbose logging"
@@ -706,11 +746,10 @@ Examples:
             num_shards=args.num_shards,
             num_proc=args.num_proc,
         )
-
         total_time = time.time() - start_time
         print(f"\nDataset creation completed in {total_time:.2f}s")
         print(f"Samples: {len(dataset)}")
-        print(f"Speed: {len(dataset)/total_time:.1f} samples/second")
+        print(f"Speed: {len(dataset) / total_time:.1f} samples/second")
         print(f"Unique characters: {len(set(dataset['character']))}")
         print(f"Unique styles: {len(set(dataset['style']))}")
         if not args.no_push:
