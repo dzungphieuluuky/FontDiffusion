@@ -1,28 +1,19 @@
-"""Ultra-fast HuggingFace dataset creator using datasets library parallelism.
-
-Builds a font style transfer dataset from ContentImage/, TargetImage/, and
-style reference images, then uploads to HuggingFace Hub.
-
-Performance strategy:
-  - Pre-cache style image bytes (each style loaded once, not per-character)
-  - Use datasets.map() with num_proc for CPU parallelism — no manual mp/threads
-  - OpenCV for fast resizing + PNG encoding (compression level 1)
-  - Vectorised resize-dimension computation with numpy
-  - Encode resized images (smaller) rather than originals
-"""
-import argparse
 import json
 import logging
-import os
 import time
+import os
+import mmap
+import pickle
+import argparse
+import io
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-import cv2
-import numpy as np
 from datasets import Dataset, Features, Image as HFImage, Value
 from PIL import Image, ImageFile
+import cv2
+import numpy as np
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 Image.MAX_IMAGE_PIXELS = None
@@ -30,23 +21,14 @@ Image.MAX_IMAGE_PIXELS = None
 try:
     from filename_utils import compute_file_hash
 except ImportError:
-
     def compute_file_hash(char: str, style: str, font: str) -> str:
         import hashlib
-
         return hashlib.md5(f"{char}_{style}_{font}".encode()).hexdigest()
-
 
 logger = logging.getLogger(__name__)
 
-# Fast PNG params: compression level 1 is ~3-5x faster than the default (6)
-_PNG_PARAMS = [cv2.IMWRITE_PNG_COMPRESSION, 1]
-
-
 @dataclass
 class DatasetConfig:
-    """Configuration for dataset building and upload."""
-
     data_dir: Path
     style_images_dir: Path
     repo_id: str
@@ -57,434 +39,333 @@ class DatasetConfig:
     token: Optional[str] = None
     resize_height: int = 256
     spacing: int = 10
-    num_proc: int = 1
+    jpeg_quality: int = 90
+    num_shards: int = 8
     def __post_init__(self):
         if isinstance(self.data_dir, str):
             self.data_dir = Path(self.data_dir)
         if isinstance(self.style_images_dir, str):
             self.style_images_dir = Path(self.style_images_dir)
 
-
-# ---------------------------------------------------------------------------
-# Image helpers — module-level for datasets.map() picklability
-# ---------------------------------------------------------------------------
-
-def _load_resize_bgr(path: str, width: int, height: int) -> np.ndarray:
-    """Load + resize with OpenCV, keeping BGR layout."""
-    img = cv2.imread(path, cv2.IMREAD_COLOR)
-    if img is None:
-        raise IOError(f"Failed to load image: {path}")
-    return cv2.resize(img, (width, height), interpolation=cv2.INTER_LINEAR)
-
-
-def _encode_bgr(arr: np.ndarray) -> bytes:
-    """Encode a BGR array to PNG bytes at compression level 1."""
-    ok, buf = cv2.imencode(".png", arr, _PNG_PARAMS)
-    if not ok:
-        raise RuntimeError("cv2.imencode failed")
-    return buf.tobytes()
-
-
-def _assemble_and_encode(
-    content: np.ndarray,
-    style: np.ndarray,
-    target: np.ndarray,
-    spacing: int,
-) -> bytes:
-    """Concatenate three BGR arrays side-by-side and return PNG bytes."""
-    h = content.shape[0]
-    spacer = np.full((h, spacing, 3), 255, dtype=np.uint8)
-    comp = np.concatenate([content, spacer, style, spacer, target], axis=1)
-    ok, buf = cv2.imencode(".png", comp, _PNG_PARAMS)
-    if not ok:
-        raise RuntimeError("cv2.imencode failed for comparison image")
-    return buf.tobytes()
-
-
-# ---------------------------------------------------------------------------
-# Batch processor — called by datasets.map(), one process per shard
-# ---------------------------------------------------------------------------
-
-def _process_batch(
-    batch: dict,
-    path_cache: dict,
-    style_bytes_cache: dict,
-    resize_height: int,
-    spacing: int,
-) -> dict:
-    """Process a columnar batch into dataset rows.
-
-    Parameters
-    ----------
-    batch : dict
-        Columnar batch from datasets.map() with character/style/font lists.
-    path_cache : dict
-        Pre-built mapping: content paths+dims, target paths+dims,
-        style dims, style paths.
-    style_bytes_cache : dict
-        Pre-loaded style image bytes keyed by style name.
-    resize_height : int
-        Target height for all resized images.
-    spacing : int
-        Pixel spacing between panels in the comparison image.
-
-    Returns
-    -------
-    dict
-        Columnar results matching the dataset Features schema.
-    """
-    content_cache = path_cache["content"]
-    target_cache = path_cache["target"]
-    style_dims_cache = path_cache["style_dims"]
-    style_paths_cache = path_cache["style_paths"]
-    rh = resize_height
-
-    batch_chars: list = batch["character"]
-    batch_styles: list = batch["style"]
-    batch_fonts: list = batch["font"]
-    batch_size = len(batch_chars)
-
-    # ------------------------------------------------------------------
-    # 1. Single-pass validation — collect only processable items
-    # ------------------------------------------------------------------
-    chars, styles, fonts = [], [], []
-    content_infos, target_infos, style_dim_list = [], [], []
-    skipped = 0
-    failure_samples: list = []
-
-    for i in range(batch_size):
-        char = batch_chars[i]
-        style = batch_styles[i]
-
-        ci = content_cache.get(char)
-        if not ci:
-            skipped += 1
-            if len(failure_samples) < 3:
-                failure_samples.append((f"{char}/{style}", "no content_info"))
-            continue
-
-        ti = target_cache.get(style, {}).get(char)
-        if not ti:
-            skipped += 1
-            if len(failure_samples) < 3:
-                failure_samples.append((f"{char}/{style}", "no target_info"))
-            continue
-
-        sdims = style_dims_cache.get(style)
-        if not sdims:
-            skipped += 1
-            if len(failure_samples) < 3:
-                failure_samples.append((f"{char}/{style}", "no style_dims"))
-            continue
-
-        if style not in style_bytes_cache:
-            skipped += 1
-            if len(failure_samples) < 3:
-                failure_samples.append((f"{char}/{style}", "no style_bytes"))
-            continue
-
-        chars.append(char)
-        styles.append(style)
-        fonts.append(batch_fonts[i])
-        content_infos.append(ci)
-        target_infos.append(ti)
-        style_dim_list.append(sdims)
-
-    if not chars:
-        if skipped and failure_samples:
-            logger.warning(
-                "Batch skipped %d/%d items. Examples: %s",
-                batch_size, batch_size, failure_samples,
-            )
-        return {k: [] for k in (
-            "character", "style", "font",
-            "content_image", "style_image", "target_image",
-            "comparison_image", "content_hash", "target_hash",
-        )}
-
-    n = len(chars)
-
-    # ------------------------------------------------------------------
-    # 2. Vectorised resize-dimension computation (numpy, no Python loop)
-    # ------------------------------------------------------------------
-    c_h = np.array([ci["height"] for ci in content_infos], dtype=np.float32)
-    c_w = (np.array([ci["width"] for ci in content_infos], dtype=np.float32)
-           * (rh / c_h)).astype(np.int32)
-
-    t_h = np.array([ti["height"] for ti in target_infos], dtype=np.float32)
-    t_w = (np.array([ti["width"] for ti in target_infos], dtype=np.float32)
-           * (rh / t_h)).astype(np.int32)
-
-    s_w = np.array(
-        [int(sw * (rh / sh)) for sw, sh in style_dim_list], dtype=np.int32
-    )
-
-    # ------------------------------------------------------------------
-    # 3. Load → resize → encode sequentially within this worker.
-    #    datasets.map(num_proc=N) provides the outer parallelism across
-    #    shards; no manual threads or processes needed here.
-    # ------------------------------------------------------------------
-    content_bytes, target_bytes, comparison_bytes = [], [], []
-
-    for i in range(n):
-        c_arr = _load_resize_bgr(content_infos[i]["path"], int(c_w[i]), rh)
-        t_arr = _load_resize_bgr(target_infos[i]["path"], int(t_w[i]), rh)
-        s_arr = _load_resize_bgr(style_paths_cache[styles[i]], int(s_w[i]), rh)
-
-        content_bytes.append(_encode_bgr(c_arr))
-        target_bytes.append(_encode_bgr(t_arr))
-        comparison_bytes.append(_assemble_and_encode(c_arr, s_arr, t_arr, spacing))
-
-    # ------------------------------------------------------------------
-    # 4. Assemble result columns
-    # ------------------------------------------------------------------
-    if skipped and failure_samples:
-        logger.warning(
-            "Batch skipped %d/%d items. Examples: %s",
-            skipped, batch_size, failure_samples,
-        )
-
-    return {
-        "character": chars,
-        "style": styles,
-        "font": fonts,
-        "content_image":    [{"bytes": b} for b in content_bytes],
-        "style_image":      [{"bytes": style_bytes_cache[styles[i]]} for i in range(n)],
-        "target_image":     [{"bytes": b} for b in target_bytes],
-        "comparison_image": [{"bytes": b} for b in comparison_bytes],
-        "content_hash": [compute_file_hash(chars[i], "", fonts[i]) for i in range(n)],
-        "target_hash":  [compute_file_hash(chars[i], styles[i], fonts[i]) for i in range(n)],
-    }
-
-
-# ---------------------------------------------------------------------------
-# Builder
-# ---------------------------------------------------------------------------
-
 class UltraFastDatasetBuilder:
-    """Builds and uploads font style transfer datasets using datasets parallelism."""
-
     REQUIRED_DIRS = ["ContentImage", "TargetImage"]
     CHECKPOINT_FILE = "results_checkpoint.json"
-
+    
     def __init__(self, config: DatasetConfig):
         self.config = config
         self.data_dir = config.data_dir
         self.style_images_dir = config.style_images_dir
         self.resize_height = config.resize_height
         self.spacing = config.spacing
-
-        # Use all CPUs; datasets.map() manages the worker pool entirely
-        self.num_proc = config.num_proc
-        # Large batches amortise Python/IPC overhead per map() worker
-        self.process_batch_size = 2000
-
-        self.style_paths: dict[str, Path] = {}
+        self.jpeg_quality = config.jpeg_quality
+        
+        self.cpu_count = os.cpu_count() or 4
+        self.num_proc = min(self.cpu_count, 8)
+        self.process_batch_size = 1000
+        
+        self.style_cache: dict[str, Image.Image] = {}
         self.path_cache: dict[str, dict] = {}
-        self.style_bytes_cache: dict[str, bytes] = {}
-
+        
         self._validate_structure()
-        self._build_style_path_index()
+        self._preload_style_images_mmap()
         self._build_path_cache_with_dims()
-        self._preload_style_bytes()
         self.generations = self._load_checkpoint()
-
-        logger.info("Ultra-fast pipeline initialized:")
-        logger.info("  Total generations : %d", len(self.generations))
-        logger.info("  CPU workers       : %d processes", self.num_proc)
-        logger.info("  Batch size        : %d", self.process_batch_size)
-        logger.info("  Style images      : %d", len(self.style_paths))
-
-    # ------------------------------------------------------------------
-    # Setup helpers
-    # ------------------------------------------------------------------
+        
+        logger.info(f"Ultra-fast pipeline initialized:")
+        logger.info(f"  Total generations: {len(self.generations)}")
+        logger.info(f"  CPU workers: {self.num_proc} processes")
+        logger.info(f"  Process batch size: {self.process_batch_size}")
+        logger.info(f"  JPEG quality: {self.jpeg_quality}")
 
     def _validate_structure(self) -> None:
-        for d in self.REQUIRED_DIRS:
-            p = self.data_dir / d
-            if not p.exists():
-                raise ValueError(f"Required directory not found: {p}")
-        cp = self.data_dir / self.CHECKPOINT_FILE
-        if not cp.exists():
-            raise ValueError(f"Checkpoint file not found: {cp}")
+        for dir_name in self.REQUIRED_DIRS:
+            dir_path = self.data_dir / dir_name
+            if not dir_path.exists():
+                raise ValueError(f"Required directory not found: {dir_path}")
+        checkpoint_path = self.data_dir / self.CHECKPOINT_FILE
+        if not checkpoint_path.exists():
+            raise ValueError(f"Checkpoint file not found: {checkpoint_path}")
         if not self.style_images_dir.exists():
-            raise ValueError(
-                f"Style images directory not found: {self.style_images_dir}"
-            )
+            raise ValueError(f"Style images directory not found: {self.style_images_dir}")
         logger.info("Directory structure validated")
 
-    def _build_style_path_index(self) -> None:
-        logger.info("Building style image path index...")
-        self.style_paths = {
-            f.stem: f
-            for ext in (".png", ".jpg", ".jpeg")
-            for f in self.style_images_dir.glob(f"*{ext}")
-        }
-        logger.info("Indexed %d style images", len(self.style_paths))
-
-    def _build_path_cache_with_dims(self) -> None:
-        """Build path + dimension cache for content, target, and style images."""
-        logger.info("Building path cache with dimensions...")
-
-        content_paths: dict = {}
-        content_dir = self.data_dir / "ContentImage"
-        if content_dir.exists():
-            for f in content_dir.glob("*"):
-                if f.suffix.lower() not in (".png", ".jpg", ".jpeg"):
-                    continue
+    def _preload_style_images_mmap(self):
+        cache_path = self.style_images_dir / ".style_cache.mmap"
+        if cache_path.exists():
+            try:
+                with open(cache_path, 'rb') as f:
+                    with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as m:
+                        self.style_cache = pickle.loads(m.read())
+                logger.info(f"Loaded {len(self.style_cache)} styles from mmap cache (instant)")
+                return
+            except Exception as e:
+                logger.warning(f"Failed to load mmap cache: {e}, rebuilding...")
+        
+        logger.info("Building style cache (first run)...")
+        self.style_cache = {}
+        for ext in [".png", ".jpg", ".jpeg"]:
+            for style_file in self.style_images_dir.glob(f"*{ext}"):
+                style_name = style_file.stem
                 try:
-                    with Image.open(f) as img:
-                        w, h = img.size
-                    content_paths[f.stem] = {"path": str(f), "width": w, "height": h}
+                    self.style_cache[style_name] = Image.open(style_file).convert("RGB")
                 except Exception as e:
-                    logger.debug("Failed to read %s: %s", f, e)
+                    logger.warning(f"Failed to load {style_file}: {e}")
+        try:
+            with open(cache_path, 'wb') as f:
+                f.write(pickle.dumps(self.style_cache))
+            logger.info(f"Created mmap cache with {len(self.style_cache)} styles")
+        except Exception as e:
+            logger.warning(f"Failed to save mmap cache: {e}")
 
-        target_paths: dict = {}
+    def _build_path_cache_with_dims(self):
+        logger.info("Building path cache with dimensions...")
+        content_dir = self.data_dir / "ContentImage"
+        content_paths = {}
+        if content_dir.exists():
+            for img_file in content_dir.glob("*"):
+                if img_file.suffix.lower() in ['.png', '.jpg', '.jpeg']:
+                    char = img_file.stem
+                    try:
+                        with Image.open(img_file) as img:
+                            width, height = img.size
+                        content_paths[char] = {
+                            'path': str(img_file),
+                            'width': width,
+                            'height': height,
+                        }
+                    except Exception as e:
+                        logger.debug(f"Failed to read dimensions for {img_file}: {e}")
+        
+        target_paths = {}
         target_dir = self.data_dir / "TargetImage"
         if target_dir.exists():
             for style_dir in target_dir.iterdir():
-                if not style_dir.is_dir():
-                    continue
-                style_char_paths: dict = {}
-                for f in style_dir.glob("*"):
-                    if f.suffix.lower() not in (".png", ".jpg", ".jpeg"):
-                        continue
-                    parts = f.stem.split("+")
-                    if len(parts) < 2:
-                        continue
-                    try:
-                        with Image.open(f) as img:
-                            w, h = img.size
-                        style_char_paths[parts[1]] = {
-                            "path": str(f), "width": w, "height": h,
-                        }
-                    except Exception as e:
-                        logger.debug("Failed to read %s: %s", f, e)
-                target_paths[style_dir.name] = style_char_paths
-
-        style_dims: dict = {}
-        for name, path in self.style_paths.items():
-            try:
-                with Image.open(path) as img:
-                    style_dims[name] = img.size
-            except Exception as e:
-                logger.debug("Failed style dims for %s: %s", path, e)
-
+                if style_dir.is_dir():
+                    style = style_dir.name
+                    style_paths = {}
+                    for img_file in style_dir.glob("*"):
+                        if img_file.suffix.lower() in ['.png', '.jpg', '.jpeg']:
+                            filename_parts = img_file.stem.split('+')
+                            if len(filename_parts) >= 2:
+                                char = filename_parts[1]
+                                try:
+                                    with Image.open(img_file) as img:
+                                        width, height = img.size
+                                    style_paths[char] = {
+                                        'path': str(img_file),
+                                        'width': width,
+                                        'height': height,
+                                    }
+                                except Exception as e:
+                                    logger.debug(f"Failed to read dimensions for {img_file}: {e}")
+                    target_paths[style] = style_paths
+        
+        style_dims = {}
+        for style_name, style_img in self.style_cache.items():
+            style_dims[style_name] = style_img.size
+        
         self.path_cache = {
-            "content":     content_paths,
-            "target":      target_paths,
-            "style_dims":  style_dims,
-            "style_paths": {k: str(v) for k, v in self.style_paths.items()},
+            'content': content_paths,
+            'target': target_paths,
+            'style_dims': style_dims,
         }
         total_targets = sum(len(v) for v in target_paths.values())
-        logger.info(
-            "Path cache built: %d content, %d target paths",
-            len(content_paths), total_targets,
-        )
-
-    def _preload_style_bytes(self) -> None:
-        """Load all style images into memory once — reused across all batches."""
-        logger.info("Pre-loading style image bytes...")
-        for name, path in self.style_paths.items():
-            try:
-                self.style_bytes_cache[name] = path.read_bytes()
-            except Exception as e:
-                logger.warning("Failed to pre-load style image %s: %s", name, e)
-        logger.info("Pre-loaded %d style images", len(self.style_bytes_cache))
+        logger.info(f"Path cache built: {len(content_paths)} content, {total_targets} target paths")
 
     def _load_checkpoint(self) -> list[dict]:
-        cp = self.data_dir / self.CHECKPOINT_FILE
-        with open(cp, "r", encoding="utf-8") as f:
+        checkpoint_path = self.data_dir / self.CHECKPOINT_FILE
+        with open(checkpoint_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
         generations = data.get("generations", [])
         if not generations:
             raise ValueError("No generations found in checkpoint")
-        logger.info("Loaded %d generations from checkpoint", len(generations))
+        logger.info(f"Loaded {len(generations)} generations from checkpoint")
         return generations
 
-    # ------------------------------------------------------------------
-    # Build & upload
-    # ------------------------------------------------------------------
+    @staticmethod
+    def _resize_image_opencv(img: Image.Image, new_width: int, new_height: int) -> Image.Image:
+        img_array = np.asarray(img)
+        resized = cv2.resize(img_array, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+        return Image.fromarray(resized)
 
+    @staticmethod
+    def _encode_image_to_bytes(img: Image.Image, quality: int = 90) -> bytes:
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=quality, optimize=True)
+        return buf.getvalue()
+
+    def _process_sample(self, gen: dict) -> Optional[dict]:
+        char = gen.get("character", "")
+        style = gen.get("style", "")
+        font = gen.get("font", "unknown")
+        content_info = self.path_cache['content'].get(char)
+        target_info = self.path_cache['target'].get(style, {}).get(char)
+        style_dims = self.path_cache['style_dims'].get(style)
+        if not all([content_info, target_info, style in self.style_cache]):
+            return None
+        
+        try:
+            content_img = Image.open(content_info['path']).convert("RGB")
+            target_img = Image.open(target_info['path']).convert("RGB")
+            style_img = self.style_cache[style]
+            
+            c_width, c_height = content_info['width'], content_info['height']
+            t_width, t_height = target_info['width'], target_info['height']
+            s_width, s_height = style_dims
+            
+            c_new_width = int(c_width * (self.resize_height / c_height))
+            s_new_width = int(s_width * (self.resize_height / s_height))
+            t_new_width = int(t_width * (self.resize_height / t_height))
+            
+            content_resized = self._resize_image_opencv(content_img, c_new_width, self.resize_height)
+            style_resized = self._resize_image_opencv(style_img, s_new_width, self.resize_height)
+            target_resized = self._resize_image_opencv(target_img, t_new_width, self.resize_height)
+            
+            total_width = c_new_width + s_new_width + t_new_width + 2 * self.spacing
+            comparison = Image.new("RGB", (total_width, self.resize_height), color=(255, 255, 255))
+            comparison.paste(content_resized, (0, 0))
+            comparison.paste(style_resized, (c_new_width + self.spacing, 0))
+            comparison.paste(target_resized, (c_new_width + s_new_width + 2 * self.spacing, 0))
+            
+            return {
+                "character": char,
+                "style": style,
+                "font": font,
+                "content_image": {"bytes": self._encode_image_to_bytes(content_img, self.jpeg_quality)},
+                "style_image": {"bytes": self._encode_image_to_bytes(style_img, self.jpeg_quality)},
+                "target_image": {"bytes": self._encode_image_to_bytes(target_img, self.jpeg_quality)},
+                "comparison_image": {"bytes": self._encode_image_to_bytes(comparison, self.jpeg_quality)},
+                "content_hash": compute_file_hash(char, "", font),
+                "target_hash": compute_file_hash(char, style, font),
+            }
+        except Exception as e:
+            logger.debug(f"Failed to process {char}/{style}: {e}")
+            return None
+
+    @staticmethod
+    def _process_batch_parallel(batch: dict, path_cache: dict, style_cache: dict, 
+                                resize_height: int, spacing: int, jpeg_quality: int) -> dict:
+        batch_size = len(batch["character"])
+        results = {
+            "character": [],
+            "style": [],
+            "font": [],
+            "content_image": [],
+            "style_image": [],
+            "target_image": [],
+            "comparison_image": [],
+            "content_hash": [],
+            "target_hash": [],
+        }
+        for i in range(batch_size):
+            char = batch["character"][i]
+            style = batch["style"][i]
+            font = batch["font"][i]
+            content_info = path_cache['content'].get(char)
+            target_info = path_cache['target'].get(style, {}).get(char)
+            style_dims = path_cache['style_dims'].get(style)
+            if not all([content_info, target_info, style in style_cache]):
+                continue
+            
+            try:
+                content_img = Image.open(content_info['path']).convert("RGB")
+                target_img = Image.open(target_info['path']).convert("RGB")
+                style_img = style_cache[style]
+                
+                c_width, c_height = content_info['width'], content_info['height']
+                t_width, t_height = target_info['width'], target_info['height']
+                s_width, s_height = style_dims
+                
+                c_new_width = int(c_width * (resize_height / c_height))
+                s_new_width = int(s_width * (resize_height / s_height))
+                t_new_width = int(t_width * (resize_height / t_height))
+                
+                content_resized = UltraFastDatasetBuilder._resize_image_opencv(
+                    content_img, c_new_width, resize_height
+                )
+                style_resized = UltraFastDatasetBuilder._resize_image_opencv(
+                    style_img, s_new_width, resize_height
+                )
+                target_resized = UltraFastDatasetBuilder._resize_image_opencv(
+                    target_img, t_new_width, resize_height
+                )
+                
+                total_width = c_new_width + s_new_width + t_new_width + 2 * spacing
+                comparison = Image.new("RGB", (total_width, resize_height), color=(255, 255, 255))
+                comparison.paste(content_resized, (0, 0))
+                comparison.paste(style_resized, (c_new_width + spacing, 0))
+                comparison.paste(target_resized, (c_new_width + s_new_width + 2 * spacing, 0))
+                
+                results["character"].append(char)
+                results["style"].append(style)
+                results["font"].append(font)
+                results["content_image"].append({
+                    "bytes": UltraFastDatasetBuilder._encode_image_to_bytes(content_img, jpeg_quality)
+                })
+                results["style_image"].append({
+                    "bytes": UltraFastDatasetBuilder._encode_image_to_bytes(style_img, jpeg_quality)
+                })
+                results["target_image"].append({
+                    "bytes": UltraFastDatasetBuilder._encode_image_to_bytes(target_img, jpeg_quality)
+                })
+                results["comparison_image"].append({
+                    "bytes": UltraFastDatasetBuilder._encode_image_to_bytes(comparison, jpeg_quality)
+                })
+                results["content_hash"].append(compute_file_hash(char, "", font))
+                results["target_hash"].append(compute_file_hash(char, style, font))
+            except Exception as e:
+                logger.debug(f"Failed to process {char}/{style}: {e}")
+                continue
+        return results
+    
     def build(self) -> Dataset:
-        """Build the dataset via datasets.map() parallelism.
-
-        Returns
-        -------
-        Dataset
-            HuggingFace Dataset with all image columns populated.
-        """
         logger.info("Building dataset with batched map() pipeline...")
-        start = time.time()
-
-        gens = self.generations
-        thin = Dataset.from_dict({
-            "character": [g.get("character", "")      for g in gens],
-            "style":     [g.get("style", "")          for g in gens],
-            "font":      [g.get("font", "unknown")    for g in gens],
-        })
-
+        start_time = time.time()
+        metadata = {
+            "character": [g.get("character", "") for g in self.generations],
+            "style": [g.get("style", "") for g in self.generations],
+            "font": [g.get("font", "unknown") for g in self.generations],
+        }
+        thin_dataset = Dataset.from_dict(metadata)
         features = Features({
-            "character":        Value("string"),
-            "style":            Value("string"),
-            "font":             Value("string"),
-            "content_image":    HFImage(),
-            "style_image":      HFImage(),
-            "target_image":     HFImage(),
+            "character": Value("string"),
+            "style": Value("string"),
+            "font": Value("string"),
+            "content_image": HFImage(),
+            "style_image": HFImage(),
+            "target_image": HFImage(),
             "comparison_image": HFImage(),
-            "content_hash":     Value("string"),
-            "target_hash":      Value("string"),
+            "content_hash": Value("string"),
+            "target_hash": Value("string"),
         })
-
-        logger.info(
-            "Processing with %d workers (batch_size=%d)...",
-            self.num_proc, self.process_batch_size,
-        )
-
-        dataset = thin.map(
-            _process_batch,
+        logger.info(f"Processing with {self.num_proc} workers (batch_size={self.process_batch_size})...")
+        dataset = thin_dataset.map(
+            self._process_batch_parallel,
             batched=True,
             batch_size=self.process_batch_size,
             num_proc=self.num_proc,
             features=features,
-            remove_columns=thin.column_names,
+            remove_columns=thin_dataset.column_names,
             desc="Processing images",
             fn_kwargs={
-                "path_cache":        self.path_cache,
-                "style_bytes_cache": self.style_bytes_cache,
-                "resize_height":     self.resize_height,
-                "spacing":           self.spacing,
+                "path_cache": self.path_cache,
+                "style_cache": self.style_cache,
+                "resize_height": self.resize_height,
+                "spacing": self.spacing,
+                "jpeg_quality": self.jpeg_quality,
             },
         )
-
-        elapsed = time.time() - start
-        n = len(dataset)
-        logger.info(
-            "Dataset built: %d samples in %.2fs (%.1f samples/s)",
-            n, elapsed, n / elapsed if elapsed else 0,
-        )
+        build_time = time.time() - start_time
+        logger.info(f"Dataset built: {len(dataset)} samples in {build_time:.2f}s")
+        logger.info(f"Processing speed: {len(dataset)/build_time:.1f} samples/s")
         return dataset
-
+        
     def push_to_hub_streaming(self, dataset: Dataset) -> None:
-        """Push dataset to HuggingFace Hub.
-
-        Parameters
-        ----------
-        dataset : Dataset
-            The built dataset to upload.
-        """
         if not self.config.push_to_hub:
             logger.info("Skipping push to Hub")
             return
-        if len(dataset) == 0:
-            logger.error(
-                "Dataset is empty — skipping upload. "
-                "Check path_cache alignment with checkpoint."
-            )
-            return
-
-        logger.info("Uploading to %s...", self.config.repo_id)
-        start = time.time()
+        logger.info(f"Streaming dataset to {self.config.repo_id}...")
+        start_time = time.time()
         try:
             dataset.push_to_hub(
                 repo_id=self.config.repo_id,
@@ -493,87 +374,39 @@ class UltraFastDatasetBuilder:
                 private=self.config.private,
                 token=self.config.token,
                 embed_external_files=False,
-                commit_message="Dataset upload",
+                num_shards=self.config.num_shards,
+                num_proc=1,
+                commit_message="Ultra-fast dataset upload with pre-encoded bytes",
             )
-            elapsed = time.time() - start
-            n = len(dataset)
-            logger.info(
-                "Upload completed in %.2fs (%.1f samples/s)",
-                elapsed, n / elapsed if elapsed else 0,
-            )
-            logger.info(
-                "Dataset: https://huggingface.co/datasets/%s", self.config.repo_id
-            )
+            upload_time = time.time() - start_time
+            logger.info(f"Upload completed in {upload_time:.2f}s ({len(dataset)/upload_time:.1f} samples/s)")
+            logger.info(f"Dataset: https://huggingface.co/datasets/{self.config.repo_id}")
         except Exception as e:
-            logger.error("Upload failed: %s", e)
+            logger.error(f"Upload failed: {e}")
             raise
 
     def save_local(self, dataset: Dataset, output_path: Path) -> None:
-        """Save dataset to local disk.
-
-        Parameters
-        ----------
-        dataset : Dataset
-            The built dataset.
-        output_path : Path
-            Destination directory.
-        """
-        logger.info("Saving dataset to %s...", output_path)
-        start = time.time()
+        logger.info(f"Saving dataset to {output_path}...")
+        start_time = time.time()
         dataset.save_to_disk(str(output_path))
-        logger.info("Dataset saved in %.2fs", time.time() - start)
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
+        save_time = time.time() - start_time
+        logger.info(f"Dataset saved in {save_time:.2f}s")
 
 def create_dataset_ultra(
-    data_dir: "str | Path",
-    style_images_dir: "str | Path",
+    data_dir: str | Path,
+    style_images_dir: str | Path,
     repo_id: str,
     split: str = "train",
     config_name: Optional[str] = None,
     push_to_hub: bool = True,
     private: bool = False,
     token: Optional[str] = None,
-    local_save_path: "Optional[str | Path]" = None,
+    local_save_path: Optional[str | Path] = None,
     resize_height: int = 256,
     spacing: int = 10,
-    num_proc: int = 1,
+    jpeg_quality: int = 90,
+    num_shards: int = 8,
 ) -> Dataset:
-    """Create and optionally upload a font style transfer dataset.
-
-    Parameters
-    ----------
-    data_dir : str or Path
-        Root directory containing ContentImage/ and TargetImage/.
-    style_images_dir : str or Path
-        Directory containing style reference images.
-    repo_id : str
-        HuggingFace repository ID (username/dataset-name).
-    split : str
-        Dataset split name.
-    config_name : str, optional
-        Dataset configuration name for multi-config repos.
-    push_to_hub : bool
-        Whether to upload to HuggingFace Hub.
-    private : bool
-        Whether the Hub repo should be private.
-    token : str, optional
-        HuggingFace API token.
-    local_save_path : str or Path, optional
-        Path to save dataset locally.
-    resize_height : int
-        Target height for resized/comparison images.
-    spacing : int
-        Pixel spacing between panels in comparison images.
-
-    Returns
-    -------
-    Dataset
-        The built HuggingFace Dataset.
-    """
     config = DatasetConfig(
         data_dir=Path(data_dir),
         style_images_dir=Path(style_images_dir),
@@ -585,27 +418,20 @@ def create_dataset_ultra(
         token=token,
         resize_height=resize_height,
         spacing=spacing,
-        num_proc=num_proc,
+        jpeg_quality=jpeg_quality,
+        num_shards=num_shards
     )
     builder = UltraFastDatasetBuilder(config)
     dataset = builder.build()
-
     if local_save_path:
         builder.save_local(dataset, Path(local_save_path))
     if push_to_hub:
         builder.push_to_hub_streaming(dataset)
-
     return dataset
 
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-
 def main():
-    """CLI entry point for ultra-fast dataset creation."""
     parser = argparse.ArgumentParser(
-        description="Ultra-fast HuggingFace dataset creator with map() pipeline",
+        description="Ultra-fast HuggingFace dataset creator with map() and pre-encoded bytes",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -615,38 +441,85 @@ Examples:
     --repo-id username/fontdiffusion-dataset
         """,
     )
-    parser.add_argument("--data-dir", required=True,
-        help="Path to data directory (must contain ContentImage/ and TargetImage/)")
-    parser.add_argument("--style-images-dir", required=True,
-        help="Path to style images directory")
-    parser.add_argument("--repo-id", required=True,
-        help="HuggingFace repository ID (username/dataset-name)")
-    parser.add_argument("--split", default="train",
-        help="Dataset split name (default: train)")
-    parser.add_argument("--config-name", help="Dataset configuration name")
-    parser.add_argument("--no-push", action="store_true",
-        help="Skip pushing to HuggingFace Hub")
-    parser.add_argument("--private", action="store_true",
-        help="Make repository private")
-    parser.add_argument("--local-save", help="Save dataset locally to this path")
-    parser.add_argument("--token", help="HuggingFace API token")
-    parser.add_argument("--resize-height", type=int, default=256,
-        help="Height for comparison images (default: 256)")
-    parser.add_argument("--spacing", type=int, default=10,
-        help="Spacing between images in comparison (default: 10)")
-    parser.add_argument("--verbose", action="store_true",
-        help="Enable verbose logging")
-    parser.add_argument("--num-proc", type=int, default=1,
-        help="Number of processes to use for parallel processing (default: 1)")
-    
-    args = parser.parse_args()
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    parser.add_argument(
+        "--data-dir",
+        required=True,
+        help="Path to data directory (must contain ContentImage/ and TargetImage/)"
     )
-
+    parser.add_argument(
+        "--style-images-dir",
+        required=True,
+        help="Path to style images directory"
+    )
+    parser.add_argument(
+        "--repo-id",
+        required=True,
+        help="HuggingFace repository ID (username/dataset-name)"
+    )
+    parser.add_argument(
+        "--split",
+        default="train",
+        help="Dataset split name (default: train)"
+    )
+    parser.add_argument(
+        "--config-name",
+        help="Dataset configuration name"
+    )
+    parser.add_argument(
+        "--no-push",
+        action="store_true",
+        help="Skip pushing to HuggingFace Hub"
+    )
+    parser.add_argument(
+        "--private",
+        action="store_true",
+        help="Make repository private"
+    )
+    parser.add_argument(
+        "--local-save",
+        help="Save dataset locally to this path"
+    )
+    parser.add_argument(
+        "--token",
+        help="HuggingFace API token"
+    )
+    parser.add_argument(
+        "--resize-height",
+        type=int,
+        default=256,
+        help="Height for comparison images (default: 256)"
+    )
+    parser.add_argument(
+        "--spacing",
+        type=int,
+        default=10,
+        help="Spacing between images in comparison (default: 10)"
+    )
+    parser.add_argument(
+        "--jpeg-quality",
+        type=int,
+        default=90,
+        help="JPEG quality for pre-encoding (85-95, default: 90)"
+    )
+    parser.add_argument(
+        "--num-shards",
+        type=int,
+        default=8,
+        help="Number of shards for dataset upload (default: 8)"
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose logging"
+    )
+    args = parser.parse_args()
+    log_level = logging.DEBUG if args.verbose else logging.INFO
+    logging.basicConfig(
+        level=log_level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
     try:
-        start = time.time()
+        start_time = time.time()
         dataset = create_dataset_ultra(
             data_dir=args.data_dir,
             style_images_dir=args.style_images_dir,
@@ -659,26 +532,25 @@ Examples:
             local_save_path=args.local_save,
             resize_height=args.resize_height,
             spacing=args.spacing,
-            num_proc=args.num_proc,
+            jpeg_quality=args.jpeg_quality,
+            num_shards=args.num_shards,
         )
-        total = time.time() - start
-        n = len(dataset)
-        print(f"\nDataset creation completed in {total:.2f}s")
-        print(f"Samples : {n}")
-        print(f"Speed   : {n / total if total else 0:.1f} samples/second")
-        print(f"Unique characters : {len(set(dataset['character']))}")
-        print(f"Unique styles     : {len(set(dataset['style']))}")
+        total_time = time.time() - start_time
+        print(f"\n✅ Ultra-fast dataset creation completed in {total_time:.2f}s!")
+        print(f"📊 Samples: {len(dataset)}")
+        print(f"⚡ Speed: {len(dataset)/total_time:.1f} samples/second")
+        print(f"🔤 Unique characters: {len(set(dataset['character']))}")
+        print(f"🎨 Unique styles: {len(set(dataset['style']))}")
         if not args.no_push:
-            print(f"Uploaded to: https://huggingface.co/datasets/{args.repo_id}")
+            print(f"🌐 Uploaded to: https://huggingface.co/datasets/{args.repo_id}")
         if args.local_save:
-            print(f"Local copy saved to: {args.local_save}")
+            print(f"💾 Local copy saved to: {args.local_save}")
     except KeyboardInterrupt:
-        logger.warning("Interrupted by user")
+        logger.warning("Dataset creation interrupted by user")
         raise SystemExit(130)
     except Exception as e:
-        logger.exception("Dataset creation failed: %s", e)
+        logger.exception(f"Dataset creation failed: {e}")
         raise SystemExit(1)
-
 
 if __name__ == "__main__":
     main()
