@@ -57,7 +57,7 @@ class DatasetConfig:
     token: Optional[str] = None
     resize_height: int = 256
     spacing: int = 10
-
+    num_proc: int = 1
     def __post_init__(self):
         if isinstance(self.data_dir, str):
             self.data_dir = Path(self.data_dir)
@@ -275,7 +275,7 @@ class UltraFastDatasetBuilder:
         self.spacing = config.spacing
 
         # Use all CPUs; datasets.map() manages the worker pool entirely
-        self.num_proc = os.cpu_count() or 4
+        self.num_proc = config.num_proc
         # Large batches amortise Python/IPC overhead per map() worker
         self.process_batch_size = 2000
 
@@ -540,6 +540,7 @@ def create_dataset_ultra(
     local_save_path: "Optional[str | Path]" = None,
     resize_height: int = 256,
     spacing: int = 10,
+    num_proc: int = 1,
 ) -> Dataset:
     """Create and optionally upload a font style transfer dataset.
 
@@ -584,6 +585,7 @@ def create_dataset_ultra(
         token=token,
         resize_height=resize_height,
         spacing=spacing,
+        num_proc=num_proc,
     )
     builder = UltraFastDatasetBuilder(config)
     dataset = builder.build()
@@ -634,7 +636,9 @@ Examples:
         help="Spacing between images in comparison (default: 10)")
     parser.add_argument("--verbose", action="store_true",
         help="Enable verbose logging")
-
+    parser.add_argument("--num-proc", type=int, default=1,
+        help="Number of processes to use for parallel processing (default: 1)")
+    
     args = parser.parse_args()
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -655,6 +659,7 @@ Examples:
             local_save_path=args.local_save,
             resize_height=args.resize_height,
             spacing=args.spacing,
+            num_proc=args.num_proc,
         )
         total = time.time() - start
         n = len(dataset)
