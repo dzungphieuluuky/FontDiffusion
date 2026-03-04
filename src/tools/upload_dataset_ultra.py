@@ -5,9 +5,10 @@ import os
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Iterator, Dict, List, Any
+import gc
 
-from datasets import Dataset, Features, Image as HFImage, Value
+from datasets import Dataset, Features, Image as HFImage, Value, concatenate_datasets
 from PIL import Image, ImageFile
 import cv2
 import numpy as np
@@ -42,6 +43,7 @@ class DatasetConfig:
     jpeg_quality: int = 90
     num_shards: int = 8
     num_proc: int = 1
+    chunk_size: int = 5000  # Process this many samples at a time
 
     def __post_init__(self):
         if isinstance(self.data_dir, str):
@@ -70,248 +72,167 @@ def _encode_jpeg(arr: np.ndarray, quality: int) -> bytes:
     return encoded.tobytes()
 
 
-# Module-level style cache — populated once per process, never pickled.
-# Workers load style images directly from disk paths on first access.
-_STYLE_BYTES_CACHE: dict[str, bytes] = {}
-_STYLE_DIMS_CACHE: dict[str, tuple[int, int]] = {}
-
-
-def _ensure_style_loaded(style_name: str, style_paths: dict[str, str]) -> bool:
-    """Load a style image into the module-level cache if not already present.
-
-    Parameters
-    ----------
-    style_name : str
-        Name of the style (stem of the image file).
-    style_paths : dict[str, str]
-        Mapping from style name to absolute file path string.
-
-    Returns
-    -------
-    bool
-        True if the style is available in cache after this call.
-    """
-    if style_name in _STYLE_BYTES_CACHE:
-        return True
-    path = style_paths.get(style_name)
-    if not path:
-        return False
+def _process_single_item(
+    char: str,
+    style: str,
+    font: str,
+    content_info: dict,
+    target_info: dict,
+    style_paths: dict,
+    resize_height: int,
+    spacing: int,
+    jpeg_quality: int,
+) -> Optional[dict]:
+    """Process a single generation item. Returns None if processing fails."""
     try:
-        raw = Path(path).read_bytes()
-        arr = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR)
-        if arr is None:
-            return False
-        h, w = arr.shape[:2]
-        _STYLE_BYTES_CACHE[style_name] = raw
-        _STYLE_DIMS_CACHE[style_name] = (w, h)
-        return True
-    except Exception:
-        return False
+        # Load style image
+        style_path = style_paths.get(style)
+        if not style_path:
+            return None
+        
+        # Read style image
+        style_raw = Path(style_path).read_bytes()
+        style_arr = cv2.imdecode(np.frombuffer(style_raw, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if style_arr is None:
+            return None
+        style_arr = cv2.cvtColor(style_arr, cv2.COLOR_BGR2RGB)
+        sh, sw = style_arr.shape[:2]
+
+        # Calculate resize widths
+        rh = resize_height
+        c_width = max(1, int(content_info["width"] * (rh / content_info["height"])))
+        s_width = max(1, int(sw * (rh / sh)))
+        t_width = max(1, int(target_info["width"] * (rh / target_info["height"])))
+
+        # Load and resize images
+        content_arr = _load_cv2_resize(content_info["path"], c_width, rh)
+        target_arr = _load_cv2_resize(target_info["path"], t_width, rh)
+        style_arr = cv2.resize(style_arr, (s_width, rh), interpolation=cv2.INTER_LINEAR)
+
+        # Build comparison
+        spacer = np.full((rh, spacing, 3), 255, dtype=np.uint8)
+        comparison = np.concatenate(
+            [content_arr, spacer, style_arr, spacer, target_arr], axis=1
+        )
+
+        # Encode images
+        content_bytes = _encode_jpeg(content_arr, jpeg_quality)
+        style_bytes = style_raw  # Use original bytes to avoid re-encoding
+        target_bytes = _encode_jpeg(target_arr, jpeg_quality)
+        comparison_bytes = _encode_jpeg(comparison, jpeg_quality)
+
+        return {
+            "character": char,
+            "style": style,
+            "font": font,
+            "content_image": {"bytes": content_bytes},
+            "style_image": {"bytes": style_bytes},
+            "target_image": {"bytes": target_bytes},
+            "comparison_image": {"bytes": comparison_bytes},
+            "content_hash": compute_file_hash(char, "", font),
+            "target_hash": compute_file_hash(char, style, font),
+        }
+    except Exception as e:
+        logger.debug(f"Failed to process {char}/{style}: {e}")
+        return None
 
 
-def _process_batch(
-    batch: dict,
+def _process_chunk(
+    chunk_data: List[Dict[str, str]],
     path_cache: dict,
     style_paths: dict,
     resize_height: int,
     spacing: int,
     jpeg_quality: int,
-) -> dict:
-    """Process a batch of generation records into dataset rows.
-
-    Style images are loaded lazily into a module-level cache on first access
-    rather than being passed through fn_kwargs. This avoids pickling large
-    byte buffers across subprocess IPC pipes, which causes worker OOM crashes.
-
-    Parameters
-    ----------
-    batch : dict
-        Columnar batch from datasets.map() with character/style/font lists.
-    path_cache : dict
-        Pre-built cache: content paths+dims, target paths+dims.
-    style_paths : dict[str, str]
-        Mapping from style name to absolute file path string.
-        Only paths (strings) are passed — cheap to pickle.
-    resize_height : int
-        Target height for all output images.
-    spacing : int
-        Pixel gap between panels in the comparison image.
-    jpeg_quality : int
-        JPEG quality for encoding (1-100).
-
-    Returns
-    -------
-    dict
-        Columnar results matching the dataset features schema.
-    """
-    batch_size = len(batch["character"])
+) -> Dataset:
+    """Process a chunk of generations into a dataset."""
     content_cache = path_cache["content"]
     target_cache = path_cache["target"]
-
-    empty_result: dict = {
-        "character": [], "style": [], "font": [],
-        "content_image": [], "style_image": [], "target_image": [],
-        "comparison_image": [], "content_hash": [], "target_hash": [],
-    }
-
-    chars, styles, fonts = [], [], []
-    content_infos, target_infos = [], []
+    
+    results = []
     skipped = 0
-    failure_samples: list[tuple[str, str]] = []
-
-    # Single validation pass — collect valid items only
-    for i in range(batch_size):
-        char = batch["character"][i]
-        style = batch["style"][i]
-        font = batch["font"][i]
-
+    failure_samples = []
+    
+    for item in chunk_data:
+        char = item.get("character", "")
+        style = item.get("style", "")
+        font = item.get("font", "unknown")
+        
+        # Validate paths exist
         content_info = content_cache.get(char)
         if not content_info:
-            if len(failure_samples) < 3:
-                failure_samples.append((f"{char}/{style}", "no content_info"))
             skipped += 1
+            if len(failure_samples) < 3:
+                failure_samples.append(f"{char}/{style} - missing content")
             continue
-
+            
         target_info = target_cache.get(style, {}).get(char)
         if not target_info:
-            if len(failure_samples) < 3:
-                failure_samples.append((f"{char}/{style}", "no target_info"))
             skipped += 1
+            if len(failure_samples) < 3:
+                failure_samples.append(f"{char}/{style} - missing target")
             continue
-
+            
         if style not in style_paths:
+            skipped += 1
             if len(failure_samples) < 3:
-                failure_samples.append((f"{char}/{style}", "no style_path"))
-            skipped += 1
+                failure_samples.append(f"{char}/{style} - missing style")
             continue
-
-        chars.append(char)
-        styles.append(style)
-        fonts.append(font)
-        content_infos.append(content_info)
-        target_infos.append(target_info)
-
-    if not chars:
-        if skipped > 0 and failure_samples:
-            logger.warning(
-                f"Batch skipped {batch_size}/{batch_size} items. "
-                f"Examples: {failure_samples}"
-            )
-        return empty_result
-
-    num_valid = len(chars)
-    rh = resize_height
-
-    # Ensure all unique styles in this batch are loaded into module-level cache
-    unique_styles = list(dict.fromkeys(styles))
-    for uname in unique_styles:
-        _ensure_style_loaded(uname, style_paths)
-
-    # Pre-compute resize widths for all valid items
-    c_widths, s_widths, t_widths = [], [], []
-    for idx in range(num_valid):
-        ci = content_infos[idx]
-        ti = target_infos[idx]
-        style_name = styles[idx]
-        dims = _STYLE_DIMS_CACHE.get(style_name)
-        if dims is None:
-            # Fallback: mark as invalid below in the processing loop
-            c_widths.append(1)
-            s_widths.append(1)
-            t_widths.append(1)
+        
+        # Process the item
+        result = _process_single_item(
+            char, style, font,
+            content_info, target_info,
+            style_paths,
+            resize_height, spacing, jpeg_quality
+        )
+        
+        if result:
+            results.append(result)
         else:
-            sw, sh = dims
-            c_widths.append(max(1, int(ci["width"] * (rh / ci["height"]))))
-            s_widths.append(max(1, int(sw * (rh / sh))))
-            t_widths.append(max(1, int(ti["width"] * (rh / ti["height"]))))
-
-    # Decode unique style images into numpy arrays once per batch
-    style_arr_cache: dict[str, np.ndarray] = {}
-    for uname in unique_styles:
-        raw = _STYLE_BYTES_CACHE.get(uname)
-        if raw is None:
-            continue
-        arr = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR)
-        if arr is not None:
-            style_arr_cache[uname] = cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)
-
-    content_image_bytes: list[dict] = []
-    style_image_bytes: list[dict] = []
-    target_image_bytes: list[dict] = []
-    comparison_bytes: list[dict] = []
-    content_hashes: list[str] = []
-    target_hashes: list[str] = []
-    valid_chars: list[str] = []
-    valid_styles: list[str] = []
-    valid_fonts: list[str] = []
-
-    for idx in range(num_valid):
-        char = chars[idx]
-        style = styles[idx]
-        font = fonts[idx]
-
-        try:
-            style_full = style_arr_cache.get(style)
-            if style_full is None:
-                if len(failure_samples) < 3:
-                    failure_samples.append((f"{char}/{style}", "style decode failed"))
-                skipped += 1
-                continue
-
-            content_arr = _load_cv2_resize(
-                content_infos[idx]["path"], c_widths[idx], rh
-            )
-            target_arr = _load_cv2_resize(
-                target_infos[idx]["path"], t_widths[idx], rh
-            )
-            style_arr = cv2.resize(
-                style_full, (s_widths[idx], rh), interpolation=cv2.INTER_LINEAR
-            )
-
-            # Build comparison with numpy concatenation (faster than PIL paste)
-            spacer = np.full((rh, spacing, 3), 255, dtype=np.uint8)
-            comparison = np.concatenate(
-                [content_arr, spacer, style_arr, spacer, target_arr], axis=1
-            )
-
-            content_image_bytes.append({"bytes": _encode_jpeg(content_arr, jpeg_quality)})
-            # Use original raw style bytes for style_image column (no re-encoding loss)
-            style_image_bytes.append({"bytes": _STYLE_BYTES_CACHE[style]})
-            target_image_bytes.append({"bytes": _encode_jpeg(target_arr, jpeg_quality)})
-            comparison_bytes.append({"bytes": _encode_jpeg(comparison, jpeg_quality)})
-            content_hashes.append(compute_file_hash(char, "", font))
-            target_hashes.append(compute_file_hash(char, style, font))
-            valid_chars.append(char)
-            valid_styles.append(style)
-            valid_fonts.append(font)
-
-        except Exception as exc:
-            logger.debug(f"Failed to process {char}/{style}: {exc}")
             skipped += 1
-            continue
-
+    
     if skipped > 0 and failure_samples:
         logger.warning(
-            f"Batch skipped {skipped}/{batch_size} items. "
+            f"Chunk skipped {skipped}/{len(chunk_data)} items. "
             f"Examples: {failure_samples}"
         )
-
-    return {
-        "character": valid_chars,
-        "style": valid_styles,
-        "font": valid_fonts,
-        "content_image": content_image_bytes,
-        "style_image": style_image_bytes,
-        "target_image": target_image_bytes,
-        "comparison_image": comparison_bytes,
-        "content_hash": content_hashes,
-        "target_hash": target_hashes,
+    
+    if not results:
+        return None
+    
+    # Convert results to dataset
+    features = Features({
+        "character": Value("string"),
+        "style": Value("string"),
+        "font": Value("string"),
+        "content_image": HFImage(),
+        "style_image": HFImage(),
+        "target_image": HFImage(),
+        "comparison_image": HFImage(),
+        "content_hash": Value("string"),
+        "target_hash": Value("string"),
+    })
+    
+    # Prepare columnar data
+    columnar_data = {
+        "character": [r["character"] for r in results],
+        "style": [r["style"] for r in results],
+        "font": [r["font"] for r in results],
+        "content_image": [r["content_image"] for r in results],
+        "style_image": [r["style_image"] for r in results],
+        "target_image": [r["target_image"] for r in results],
+        "comparison_image": [r["comparison_image"] for r in results],
+        "content_hash": [r["content_hash"] for r in results],
+        "target_hash": [r["target_hash"] for r in results],
     }
+    
+    return Dataset.from_dict(columnar_data, features=features)
 
 
-class UltraFastDatasetBuilder:
-    """Builds and uploads font style transfer datasets using datasets.map() parallelism."""
-
+class StreamingDatasetBuilder:
+    """Builds and uploads font style transfer datasets using streaming/chunking to avoid OOM."""
+    
     REQUIRED_DIRS = ["ContentImage", "TargetImage"]
     CHECKPOINT_FILE = "results_checkpoint.json"
 
@@ -322,23 +243,19 @@ class UltraFastDatasetBuilder:
         self.resize_height = config.resize_height
         self.spacing = config.spacing
         self.jpeg_quality = config.jpeg_quality
-        self.num_proc = config.num_proc
-        self.process_batch_size = 1000
-
-        # style_paths maps style name -> absolute path string.
-        # Only paths are pickled to workers; bytes are loaded inside the worker.
+        self.chunk_size = config.chunk_size
+        
         self.style_paths: dict[str, str] = {}
         self.path_cache: dict[str, dict] = {}
-
+        
         self._validate_structure()
         self._build_style_path_index()
         self._build_path_cache_with_dims()
         self.generations = self._load_checkpoint()
-
-        logger.info("Ultra-fast pipeline initialized:")
+        
+        logger.info("Streaming pipeline initialized:")
         logger.info(f"  Total generations: {len(self.generations)}")
-        logger.info(f"  CPU workers: {self.num_proc} processes")
-        logger.info(f"  Process batch size: {self.process_batch_size}")
+        logger.info(f"  Chunk size: {self.chunk_size} samples")
         logger.info(f"  JPEG quality: {self.jpeg_quality}")
         logger.info(f"  Style images indexed: {len(self.style_paths)}")
 
@@ -358,12 +275,7 @@ class UltraFastDatasetBuilder:
         logger.info("Directory structure validated")
 
     def _build_style_path_index(self) -> None:
-        """Index style image file paths (strings only — no bytes loaded here).
-
-        Storing only paths keeps fn_kwargs lightweight for pickling when
-        num_proc > 1. Each worker loads style bytes on first access via
-        _ensure_style_loaded() into the module-level _STYLE_BYTES_CACHE.
-        """
+        """Index style image file paths."""
         logger.info("Indexing style image paths...")
         for ext in [".png", ".jpg", ".jpeg"]:
             for style_file in sorted(self.style_images_dir.glob(f"*{ext}")):
@@ -443,83 +355,60 @@ class UltraFastDatasetBuilder:
         logger.info(f"Loaded {len(generations)} generations from checkpoint")
         return generations
 
-    def build(self) -> Dataset:
-        """Build the dataset using datasets.map() for parallelism.
+    def _chunk_generations(self) -> Iterator[List[Dict[str, str]]]:
+        """Yield generations in chunks."""
+        for i in range(0, len(self.generations), self.chunk_size):
+            yield self.generations[i:i + self.chunk_size]
 
-        Returns
-        -------
-        Dataset
-            HuggingFace Dataset with all image columns populated.
-        """
-        logger.info("Building dataset with batched map() pipeline...")
+    def build_streaming(self) -> Dataset:
+        """Build the dataset by processing chunks sequentially to avoid OOM."""
+        logger.info("Building dataset with streaming chunk processing...")
         start_time = time.time()
-
-        metadata = {
-            "character": [g.get("character", "") for g in self.generations],
-            "style": [g.get("style", "") for g in self.generations],
-            "font": [g.get("font", "unknown") for g in self.generations],
-        }
-        thin_dataset = Dataset.from_dict(metadata)
-
-        features = Features({
-            "character": Value("string"),
-            "style": Value("string"),
-            "font": Value("string"),
-            "content_image": HFImage(),
-            "style_image": HFImage(),
-            "target_image": HFImage(),
-            "comparison_image": HFImage(),
-            "content_hash": Value("string"),
-            "target_hash": Value("string"),
-        })
-
-        logger.info(
-            f"Processing with {self.num_proc} workers "
-            f"(batch_size={self.process_batch_size})..."
-        )
-
-        dataset = thin_dataset.map(
-            _process_batch,
-            batched=True,
-            batch_size=self.process_batch_size,
-            num_proc=self.num_proc,
-            features=features,
-            remove_columns=thin_dataset.column_names,
-            desc="Processing images",
-            fn_kwargs={
-                # path_cache contains only strings and ints — cheap to pickle
-                "path_cache": self.path_cache,
-                # style_paths contains only strings — cheap to pickle
-                # actual bytes are loaded lazily inside _ensure_style_loaded()
-                "style_paths": self.style_paths,
-                "resize_height": self.resize_height,
-                "spacing": self.spacing,
-                "jpeg_quality": self.jpeg_quality,
-            },
-        )
-
-        build_time = time.time() - start_time
-        num_samples = len(dataset)
-        speed = num_samples / build_time if build_time > 0 else 0.0
-        logger.info(f"Dataset built: {num_samples} samples in {build_time:.2f}s")
-        logger.info(f"Processing speed: {speed:.1f} samples/s")
-
-        if num_samples == 0:
-            logger.error(
-                "Dataset is empty. Verify that style names in the checkpoint "
-                "match the style image filenames in style_images_dir."
+        
+        chunk_datasets = []
+        total_processed = 0
+        total_valid = 0
+        
+        for chunk_idx, chunk in enumerate(self._chunk_generations()):
+            logger.info(f"Processing chunk {chunk_idx + 1}/{(len(self.generations)-1)//self.chunk_size + 1}")
+            
+            # Process chunk
+            chunk_dataset = _process_chunk(
+                chunk,
+                self.path_cache,
+                self.style_paths,
+                self.resize_height,
+                self.spacing,
+                self.jpeg_quality,
             )
-
-        return dataset
+            
+            if chunk_dataset is not None:
+                chunk_datasets.append(chunk_dataset)
+                total_valid += len(chunk_dataset)
+                logger.info(f"Chunk {chunk_idx + 1}: {len(chunk_dataset)} valid samples")
+            
+            total_processed += len(chunk)
+            
+            # Force garbage collection after each chunk
+            gc.collect()
+        
+        if not chunk_datasets:
+            logger.error("No valid samples found in any chunk")
+            return Dataset.from_dict({})
+        
+        # Concatenate all chunks
+        logger.info(f"Concatenating {len(chunk_datasets)} chunks...")
+        final_dataset = concatenate_datasets(chunk_datasets)
+        
+        build_time = time.time() - start_time
+        speed = total_valid / build_time if build_time > 0 else 0.0
+        logger.info(f"Dataset built: {total_valid} valid samples from {total_processed} total")
+        logger.info(f"Processing speed: {speed:.1f} samples/s")
+        
+        return final_dataset
 
     def push_to_hub_streaming(self, dataset: Dataset) -> None:
-        """Push dataset to HuggingFace Hub.
-
-        Parameters
-        ----------
-        dataset : Dataset
-            The built dataset to upload.
-        """
+        """Push dataset to HuggingFace Hub with memory-efficient streaming."""
         if not self.config.push_to_hub:
             logger.info("Skipping push to Hub")
             return
@@ -530,7 +419,9 @@ class UltraFastDatasetBuilder:
 
         logger.info(f"Streaming dataset to {self.config.repo_id}...")
         start_time = time.time()
+        
         try:
+            # Use low-cpu memory mode for upload
             dataset.push_to_hub(
                 repo_id=self.config.repo_id,
                 split=self.config.split,
@@ -539,8 +430,8 @@ class UltraFastDatasetBuilder:
                 token=self.config.token,
                 embed_external_files=False,
                 num_shards=self.config.num_shards,
-                num_proc=1,
-                commit_message="Dataset upload via upload_dataset_ultra",
+                num_proc=1,  # Keep at 1 for memory efficiency
+                commit_message="Dataset upload via streaming builder",
             )
             upload_time = time.time() - start_time
             speed = len(dataset) / upload_time if upload_time > 0 else 0.0
@@ -554,23 +445,21 @@ class UltraFastDatasetBuilder:
             logger.error(f"Upload failed: {exc}")
             raise
 
-    def save_local(self, dataset: Dataset, output_path: Path) -> None:
-        """Save dataset to local disk.
-
-        Parameters
-        ----------
-        dataset : Dataset
-            The built dataset.
-        output_path : Path
-            Destination directory.
-        """
+    def save_local_streaming(self, dataset: Dataset, output_path: Path) -> None:
+        """Save dataset to local disk with memory-efficient streaming."""
         logger.info(f"Saving dataset to {output_path}...")
         start_time = time.time()
-        dataset.save_to_disk(str(output_path))
+        
+        # Save in streaming mode
+        dataset.save_to_disk(
+            str(output_path),
+            num_proc=1,  # Single process for memory efficiency
+        )
+        
         logger.info(f"Dataset saved in {time.time() - start_time:.2f}s")
 
 
-def create_dataset_ultra(
+def create_dataset_streaming(
     data_dir: str | Path,
     style_images_dir: str | Path,
     repo_id: str,
@@ -585,9 +474,10 @@ def create_dataset_ultra(
     jpeg_quality: int = 90,
     num_shards: int = 8,
     num_proc: int = 1,
+    chunk_size: int = 5000,
 ) -> Dataset:
-    """Create and optionally upload a font style transfer dataset.
-
+    """Create and optionally upload a font style transfer dataset using streaming.
+    
     Parameters
     ----------
     data_dir : str or Path
@@ -617,9 +507,10 @@ def create_dataset_ultra(
     num_shards : int
         Number of Parquet shards for Hub upload.
     num_proc : int
-        Number of worker processes for datasets.map().
-        Use 1 to disable multiprocessing (safest on Colab).
-
+        Number of worker processes (kept at 1 for memory efficiency).
+    chunk_size : int
+        Number of samples to process in each chunk.
+    
     Returns
     -------
     Dataset
@@ -638,25 +529,30 @@ def create_dataset_ultra(
         spacing=spacing,
         jpeg_quality=jpeg_quality,
         num_shards=num_shards,
-        num_proc=num_proc,
+        num_proc=1,  # Force single process for memory efficiency
+        chunk_size=chunk_size,
     )
-    builder = UltraFastDatasetBuilder(config)
-    dataset = builder.build()
+    
+    builder = StreamingDatasetBuilder(config)
+    dataset = builder.build_streaming()
+    
     if local_save_path:
-        builder.save_local(dataset, Path(local_save_path))
+        builder.save_local_streaming(dataset, Path(local_save_path))
+    
     if push_to_hub:
         builder.push_to_hub_streaming(dataset)
+    
     return dataset
 
 
 def main():
-    """CLI entry point for ultra-fast dataset creation."""
+    """CLI entry point for streaming dataset creation."""
     parser = argparse.ArgumentParser(
-        description="Ultra-fast HuggingFace dataset creator with map() pipeline",
+        description="Memory-efficient HuggingFace dataset creator with streaming",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python tools/upload_dataset_ultra.py \\
+  python tools/upload_dataset_streaming.py \\
     --data-dir my_dataset \\
     --style-images-dir style_images \\
     --repo-id username/fontdiffusion-dataset
@@ -712,11 +608,10 @@ Examples:
         help="Number of shards for dataset upload (default: 8)",
     )
     parser.add_argument(
-        "--num-proc",
+        "--chunk-size",
         type=int,
-        default=1,
-        help="Number of worker processes for map() (default: 1). "
-             "Increase only if running outside Colab with sufficient RAM.",
+        default=5000,
+        help="Number of samples to process in each chunk (default: 5000)",
     )
     parser.add_argument(
         "--verbose", action="store_true", help="Enable verbose logging"
@@ -730,7 +625,7 @@ Examples:
 
     try:
         start_time = time.time()
-        dataset = create_dataset_ultra(
+        dataset = create_dataset_streaming(
             data_dir=args.data_dir,
             style_images_dir=args.style_images_dir,
             repo_id=args.repo_id,
@@ -744,7 +639,8 @@ Examples:
             spacing=args.spacing,
             jpeg_quality=args.jpeg_quality,
             num_shards=args.num_shards,
-            num_proc=args.num_proc,
+            num_proc=1,  # Force single process
+            chunk_size=args.chunk_size,
         )
         total_time = time.time() - start_time
         print(f"\nDataset creation completed in {total_time:.2f}s")
