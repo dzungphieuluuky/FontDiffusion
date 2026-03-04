@@ -214,6 +214,8 @@ class UltraFastDatasetBuilder:
         }
 
         style_paths = path_cache.get("style_paths", {})
+        skipped = 0
+        failure_reasons = {}
 
         for i in range(batch_size):
             char = batch["character"][i]
@@ -225,7 +227,22 @@ class UltraFastDatasetBuilder:
             style_dims = path_cache["style_dims"].get(style)
             style_path = style_paths.get(style)
 
-            if not all([content_info, target_info, style_dims, style_path]):
+            # Debug: track why items are skipped
+            if not content_info:
+                failure_reasons[f"{char}/{style}"] = "no content_info"
+                skipped += 1
+                continue
+            if not target_info:
+                failure_reasons[f"{char}/{style}"] = "no target_info"
+                skipped += 1
+                continue
+            if not style_dims:
+                failure_reasons[f"{char}/{style}"] = "no style_dims"
+                skipped += 1
+                continue
+            if not style_path:
+                failure_reasons[f"{char}/{style}"] = "no style_path"
+                skipped += 1
                 continue
 
             try:
@@ -291,11 +308,18 @@ class UltraFastDatasetBuilder:
                 results["content_hash"].append(compute_file_hash(char, "", font))
                 results["target_hash"].append(compute_file_hash(char, style, font))
             except Exception as e:
-                logger.debug(f"Failed to process {char}/{style}: {e}")
+                failure_reasons[f"{char}/{style}"] = str(e)
+                skipped += 1
                 continue
 
-        return results
+        # Log summary if batch had failures
+        if skipped > 0 and failure_reasons:
+            sample_failures = list(failure_reasons.items())[:3]
+            logger.warning(
+                f"Batch skipped {skipped}/{batch_size} items. Examples: {sample_failures}"
+            )
 
+        return results
     def build(self) -> Dataset:
         logger.info("Building dataset with batched map() pipeline...")
         start_time = time.time()
