@@ -213,106 +213,168 @@ class UltraFastDatasetBuilder:
             "target_hash": [],
         }
 
+        content_cache = path_cache["content"]
+        target_cache = path_cache["target"]
+        style_dims_cache = path_cache["style_dims"]
         style_paths = path_cache.get("style_paths", {})
-        skipped = 0
+        
+        # Pre-allocate lists for valid indices and their data
+        valid_indices = []
+        valid_chars = []
+        valid_styles = []
+        valid_fonts = []
+        valid_content_info = []
+        valid_target_info = []
+        valid_style_dims = []
+        valid_style_paths = []
+        
         failure_reasons = {}
-
+        
+        # Single pass: validate and collect all valid items
         for i in range(batch_size):
             char = batch["character"][i]
             style = batch["style"][i]
             font = batch["font"][i]
 
-            content_info = path_cache["content"].get(char)
-            target_info = path_cache["target"].get(style, {}).get(char)
-            style_dims = path_cache["style_dims"].get(style)
+            content_info = content_cache.get(char)
+            target_info = target_cache.get(style, {}).get(char)
+            style_dims = style_dims_cache.get(style)
             style_path = style_paths.get(style)
 
-            # Debug: track why items are skipped
             if not content_info:
                 failure_reasons[f"{char}/{style}"] = "no content_info"
-                skipped += 1
                 continue
             if not target_info:
                 failure_reasons[f"{char}/{style}"] = "no target_info"
-                skipped += 1
                 continue
             if not style_dims:
                 failure_reasons[f"{char}/{style}"] = "no style_dims"
-                skipped += 1
                 continue
             if not style_path:
                 failure_reasons[f"{char}/{style}"] = "no style_path"
-                skipped += 1
                 continue
 
-            try:
-                content_img = Image.open(content_info["path"]).convert("RGB")
-                target_img = Image.open(target_info["path"]).convert("RGB")
-                style_img = Image.open(style_path).convert("RGB")
+            # Item is valid, collect it
+            valid_indices.append(i)
+            valid_chars.append(char)
+            valid_styles.append(style)
+            valid_fonts.append(font)
+            valid_content_info.append(content_info)
+            valid_target_info.append(target_info)
+            valid_style_dims.append(style_dims)
+            valid_style_paths.append(style_path)
 
-                c_width, c_height = content_info["width"], content_info["height"]
-                t_width, t_height = target_info["width"], target_info["height"]
-                s_width, s_height = style_dims
+        # Early exit if no valid items
+        if not valid_indices:
+            if failure_reasons:
+                sample_failures = list(failure_reasons.items())[:3]
+                logger.warning(
+                    f"Batch skipped {batch_size}/{batch_size} items. Examples: {sample_failures}"
+                )
+            return results
 
-                c_new_width = int(c_width * (resize_height / c_height))
-                s_new_width = int(s_width * (resize_height / s_height))
-                t_new_width = int(t_width * (resize_height / t_height))
+        # Batch load all images at once
+        try:
+            content_imgs = [
+                Image.open(info["path"]).convert("RGB") for info in valid_content_info
+            ]
+            target_imgs = [
+                Image.open(info["path"]).convert("RGB") for info in valid_target_info
+            ]
+            style_imgs = [
+                Image.open(path).convert("RGB") for path in valid_style_paths
+            ]
+        except Exception as e:
+            logger.error(f"Batch image loading failed: {e}")
+            return results
 
-                content_resized = UltraFastDatasetBuilder._resize_image_opencv(
-                    content_img, c_new_width, resize_height
-                )
-                style_resized = UltraFastDatasetBuilder._resize_image_opencv(
-                    style_img, s_new_width, resize_height
-                )
-                target_resized = UltraFastDatasetBuilder._resize_image_opencv(
-                    target_img, t_new_width, resize_height
-                )
+        # Process all valid items in parallel with vectorized operations
+        num_valid = len(valid_indices)
+        
+        # Pre-compute all resize dimensions
+        resize_data = []
+        for idx in range(num_valid):
+            c_width, c_height = valid_content_info[idx]["width"], valid_content_info[idx]["height"]
+            t_width, t_height = valid_target_info[idx]["width"], valid_target_info[idx]["height"]
+            s_width, s_height = valid_style_dims[idx]
 
-                total_width = c_new_width + s_new_width + t_new_width + 2 * spacing
-                comparison = Image.new(
-                    "RGB", (total_width, resize_height), color=(255, 255, 255)
-                )
-                comparison.paste(content_resized, (0, 0))
-                comparison.paste(style_resized, (c_new_width + spacing, 0))
-                comparison.paste(
-                    target_resized, (c_new_width + s_new_width + 2 * spacing, 0)
-                )
+            c_new_width = int(c_width * (resize_height / c_height))
+            s_new_width = int(s_width * (resize_height / s_height))
+            t_new_width = int(t_width * (resize_height / t_height))
 
-                results["character"].append(char)
-                results["style"].append(style)
-                results["font"].append(font)
-                results["content_image"].append(
-                    {
-                        "bytes": UltraFastDatasetBuilder._encode_image_to_bytes(
-                            content_img
-                        )
-                    }
-                )
-                results["style_image"].append(
-                    {"bytes": UltraFastDatasetBuilder._encode_image_to_bytes(style_img)}
-                )
-                results["target_image"].append(
-                    {
-                        "bytes": UltraFastDatasetBuilder._encode_image_to_bytes(
-                            target_img
-                        )
-                    }
-                )
-                results["comparison_image"].append(
-                    {
-                        "bytes": UltraFastDatasetBuilder._encode_image_to_bytes(
-                            comparison
-                        )
-                    }
-                )
-                results["content_hash"].append(compute_file_hash(char, "", font))
-                results["target_hash"].append(compute_file_hash(char, style, font))
-            except Exception as e:
-                failure_reasons[f"{char}/{style}"] = str(e)
-                skipped += 1
-                continue
+            resize_data.append((c_new_width, s_new_width, t_new_width))
 
-        # Log summary if batch had failures
+        # Resize all images
+        content_resized = [
+            UltraFastDatasetBuilder._resize_image_opencv(
+                content_imgs[i], resize_data[i][0], resize_height
+            )
+            for i in range(num_valid)
+        ]
+        style_resized = [
+            UltraFastDatasetBuilder._resize_image_opencv(
+                style_imgs[i], resize_data[i][1], resize_height
+            )
+            for i in range(num_valid)
+        ]
+        target_resized = [
+            UltraFastDatasetBuilder._resize_image_opencv(
+                target_imgs[i], resize_data[i][2], resize_height
+            )
+            for i in range(num_valid)
+        ]
+
+        # Build comparison images and encode all at once
+        comparison_imgs = []
+        for i in range(num_valid):
+            c_new_width, s_new_width, t_new_width = resize_data[i]
+            total_width = c_new_width + s_new_width + t_new_width + 2 * spacing
+            
+            comparison = Image.new(
+                "RGB", (total_width, resize_height), color=(255, 255, 255)
+            )
+            comparison.paste(content_resized[i], (0, 0))
+            comparison.paste(style_resized[i], (c_new_width + spacing, 0))
+            comparison.paste(
+                target_resized[i], (c_new_width + s_new_width + 2 * spacing, 0)
+            )
+            comparison_imgs.append(comparison)
+
+        # Bulk encode all images
+        content_bytes = [
+            UltraFastDatasetBuilder._encode_image_to_bytes(content_imgs[i])
+            for i in range(num_valid)
+        ]
+        style_bytes = [
+            UltraFastDatasetBuilder._encode_image_to_bytes(style_imgs[i])
+            for i in range(num_valid)
+        ]
+        target_bytes = [
+            UltraFastDatasetBuilder._encode_image_to_bytes(target_imgs[i])
+            for i in range(num_valid)
+        ]
+        comparison_bytes = [
+            UltraFastDatasetBuilder._encode_image_to_bytes(comparison_imgs[i])
+            for i in range(num_valid)
+        ]
+
+        # Populate results with all valid items
+        results["character"] = valid_chars
+        results["style"] = valid_styles
+        results["font"] = valid_fonts
+        results["content_image"] = [{"bytes": b} for b in content_bytes]
+        results["style_image"] = [{"bytes": b} for b in style_bytes]
+        results["target_image"] = [{"bytes": b} for b in target_bytes]
+        results["comparison_image"] = [{"bytes": b} for b in comparison_bytes]
+        results["content_hash"] = [
+            compute_file_hash(valid_chars[i], "", valid_fonts[i]) for i in range(num_valid)
+        ]
+        results["target_hash"] = [
+            compute_file_hash(valid_chars[i], valid_styles[i], valid_fonts[i]) for i in range(num_valid)
+        ]
+
+        # Log skipped items
+        skipped = batch_size - num_valid
         if skipped > 0 and failure_reasons:
             sample_failures = list(failure_reasons.items())[:3]
             logger.warning(
@@ -320,6 +382,9 @@ class UltraFastDatasetBuilder:
             )
 
         return results
+    
+    
+    
     def build(self) -> Dataset:
         logger.info("Building dataset with batched map() pipeline...")
         start_time = time.time()
