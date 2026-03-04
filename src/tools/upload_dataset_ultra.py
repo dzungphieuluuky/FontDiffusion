@@ -447,7 +447,7 @@ class UltraFastDatasetBuilder:
             _process_batch,
             batched=True,
             batch_size=self.process_batch_size,
-            num_proc=self.num_proc,
+            num_proc=1,  # Set to 1 to avoid multiprocessing issues with OpenCV/PIL
             features=features,
             remove_columns=thin_dataset.column_names,
             desc="Processing images",
