@@ -42,6 +42,7 @@ class DatasetConfig:
     spacing: int = 10
     jpeg_quality: int = 90
     num_shards: int = 8
+    num_proc: int = 8
 
     def __post_init__(self):
         if isinstance(self.data_dir, str):
@@ -272,7 +273,7 @@ class UltraFastDatasetBuilder:
         self.jpeg_quality = config.jpeg_quality
 
         self.cpu_count = os.cpu_count() or 4
-        self.num_proc = min(self.cpu_count, 8)
+        self.num_proc = config.num_proc
         self.process_batch_size = 1000
 
         # Stores raw bytes — safe to pickle across processes
@@ -546,6 +547,7 @@ def create_dataset_ultra(
     spacing: int = 10,
     jpeg_quality: int = 90,
     num_shards: int = 8,
+    num_proc: int = 8,
 ) -> Dataset:
     """Create and optionally upload a font style transfer dataset.
 
@@ -596,6 +598,8 @@ def create_dataset_ultra(
         spacing=spacing,
         jpeg_quality=jpeg_quality,
         num_shards=num_shards,
+        num_proc=num_proc,
+
     )
     builder = UltraFastDatasetBuilder(config)
     dataset = builder.build()
@@ -669,6 +673,12 @@ Examples:
         help="Number of shards for dataset upload (default: 8)",
     )
     parser.add_argument(
+        "--num-proc",
+        type=int,
+        default=1,
+        help="Number of processes for map() (default: 8, max: CPU count)",
+    )
+    parser.add_argument(
         "--verbose", action="store_true", help="Enable verbose logging"
     )
     args = parser.parse_args()
@@ -694,7 +704,9 @@ Examples:
             spacing=args.spacing,
             jpeg_quality=args.jpeg_quality,
             num_shards=args.num_shards,
+            num_proc=args.num_proc,
         )
+
         total_time = time.time() - start_time
         print(f"\nDataset creation completed in {total_time:.2f}s")
         print(f"Samples: {len(dataset)}")
