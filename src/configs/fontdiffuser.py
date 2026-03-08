@@ -768,8 +768,8 @@ def get_parser():
     dro_group.add_argument(
         "--dro_lpips_weight",
         type=float,
-        default=1.0,
-        help="Weight for LPIPS style-similarity penalty inside DRO (default: 1.0).",
+        default=0.5,
+        help="Weight for LPIPS style-similarity penalty inside DRO (default: 0.5).",
     )
     dro_group.add_argument(
         "--dro_reward_scale",
@@ -794,14 +794,14 @@ def get_parser():
     dro_group.add_argument(
         "--dro_sharp_weight",
         type=float,
-        default=0.0,
-        help="Weight for sharpness reward inside DRO (default: 0.0, disabled).",
+        default=0.1,
+        help="Weight for sharpness reward inside DRO (default: 0.1).",
     )
     dro_group.add_argument(
         "--dro_div_weight",
         type=float,
-        default=0.0,
-        help="Weight for diversity penalty inside DRO (default: 0.0, disabled).",
+        default=0.1,
+        help="Weight for diversity penalty inside DRO (default: 0.1).",
     )
     dro_group.add_argument(
         "--dro_normalise_reward",

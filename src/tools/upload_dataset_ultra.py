@@ -522,8 +522,8 @@ Examples:
     parser.add_argument(
         "--num-shards",
         type=int,
-        default=8,
-        help="Number of shards for dataset upload (default: 8)",
+        default=4,
+        help="Number of shards for dataset upload (default: 4)",
     )
     parser.add_argument(
         "--verbose", action="store_true", help="Enable verbose logging"
