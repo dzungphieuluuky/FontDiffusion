@@ -327,7 +327,7 @@ class FontDiffuserFSTTrainerEnhanced(FontDiffuserFSTTrainer):
         if self.use_aux_losses:
             # Reconstruct pred_x0 for auxiliary losses
             pred_x0 = x0_from_epsilon(
-                noisy_targets, timesteps, noise_pred, self.noise_scheduler
+                self.noise_scheduler, noise_pred, noisy_targets, timesteps
             )
             pred_x0 = torch.clamp(pred_x0, -1, 1)
             pred_x0_norm = (pred_x0 + 1) / 2  # Map to [0, 1]
