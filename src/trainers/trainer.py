@@ -99,6 +99,9 @@ class FontDiffuserTrainer:
             phase_2=args.phase_2,
             drop_prob=getattr(args, "drop_prob", 0.1),
             enable_style_transform=getattr(args, "enable_style_transform", False),
+            log_interval=getattr(args, "log_interval", 100),
+            ckpt_interval=getattr(args, "ckpt_interval", 40000),
+            val_interval=getattr(args, "val_interval", 100),
         )
 
     def setup(self):
