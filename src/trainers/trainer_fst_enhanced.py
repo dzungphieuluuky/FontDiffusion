@@ -472,7 +472,7 @@ class FontDiffuserFSTTrainerEnhanced(FontDiffuserFSTTrainer):
         self.accelerator.end_training()
 
     def save_checkpoint(self, is_final: bool = False):
-        """Save checkpoint including auxiliary loss state."""
+        """Save checkpoint including auxiliary loss state using safetensors format."""
         unwrapped = self.accelerator.unwrap_model(self.model)
         if not self.accelerator.is_main_process:
             return
@@ -483,40 +483,33 @@ class FontDiffuserFSTTrainerEnhanced(FontDiffuserFSTTrainer):
         save_dir.mkdir(parents=True, exist_ok=True)
 
         if self.use_fst:
-            save_model_checkpoint(
-                unwrapped.unet,
-                save_dir / "unet.pth",
-            )
-            save_model_checkpoint(unwrapped.style_encoder, save_dir / "style_encoder.pth")
-            save_model_checkpoint(
-                unwrapped.content_encoder,
-                save_dir / "content_encoder.pth",
-            )
-            save_model_checkpoint(unwrapped.mss_encoder, save_dir / "mss_encoder.pth")
-            save_model_checkpoint(unwrapped.fst_module, save_dir / "fst_module.pth")
-            save_model_checkpoint(
-                unwrapped.fst_projection,
-                save_dir / "fst_projection.pth",
-            )
-            save_model_checkpoint(
-                unwrapped.original_style_projection,
-                save_dir / "original_style_projection.pth",
-            )
+            components = {
+                "unet": unwrapped.diffusion_unet,
+                "style_encoder": unwrapped.style_encoder,
+                "content_encoder": unwrapped.content_encoder,
+                "mss_encoder": unwrapped.mss_encoder,
+                "fst_module": unwrapped.fst_module,
+                "fst_projection": unwrapped.fst_projection,
+                "original_style_projection": unwrapped.original_style_projection,
+            }
+            for name, mod in components.items():
+                save_model_checkpoint(
+                    mod.state_dict(), save_dir / f"{name}.safetensors"
+                )
             if unwrapped.skeleton_transform is not None:
                 save_model_checkpoint(
-                    unwrapped.skeleton_transform,
-                    save_dir / "skeleton_transform.pth",
+                    unwrapped.skeleton_transform.state_dict(),
+                    save_dir / "skeleton_transform.safetensors",
                 )
         else:
-            save_model_checkpoint(unwrapped.unet, save_dir / "unet.pth")
-            save_model_checkpoint(unwrapped.style_encoder, save_dir / "style_encoder.pth")
             save_model_checkpoint(
-                unwrapped.content_encoder,
-                save_dir / "content_encoder.pth",
+                unwrapped.state_dict(), save_dir / "model.safetensors"
             )
 
         if self.config.phase_2 and self.scr:
-            save_model_checkpoint(self.scr, save_dir / "scr.pth")
+            save_model_checkpoint(
+                self.scr.state_dict(), save_dir / "scr.safetensors"
+            )
 
         # Save auxiliary loss configuration
         if self.use_aux_losses:
