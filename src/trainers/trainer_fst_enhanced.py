@@ -528,9 +528,45 @@ class FontDiffuserFSTTrainerEnhanced(FontDiffuserFSTTrainer):
         # Save training state
         state = {
             "global_step": self.global_step,
-            "current_epoch": self.current_epoch,
+            "epoch": self.current_epoch,
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "lr_scheduler_state_dict": self.lr_scheduler.state_dict(),
+            "config": asdict(self.config),
+            "fst_config": {
+                k: getattr(self, k)
+                for k in [
+                    "use_fst",
+                    "style_source_same_prob",
+                    "fst_num_queries",
+                    "fst_query_dim",
+                    "num_consistency_pairs",
+                    "num_identity_pairs",
+                ]
+            },
+            **(
+                {
+                    "skeleton_config": {
+                        k: getattr(self, k)
+                        for k in ["use_skeleton_content", "skeleton_method"]
+                    }
+                }
+                if self.use_skeleton_content
+                else {}
+            ),
+            **(
+                {
+                    "frequency_config": {
+                        k: getattr(self, k)
+                        for k in ["use_frequency_decomp", "frequency_low_cutoff"]
+                    }
+                }
+                if self.use_frequency_decomp
+                else {}
+            ),
         }
-        torch.save(state, save_dir / "training_state.pth")
+        if self.use_aux_losses:
+            state["aux_loss_config"] = self.aux_config
+        torch.save(state, save_dir / "training_state.pt")
 
         save_args_to_yaml(self.args, save_dir / "args.yaml")
         logger.info(f"✓ Checkpoint saved to {save_dir}")
