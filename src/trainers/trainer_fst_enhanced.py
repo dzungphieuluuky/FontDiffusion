@@ -436,6 +436,9 @@ class FontDiffuserFSTTrainerEnhanced(FontDiffuserFSTTrainer):
                     self.optimizer.zero_grad()
 
                 if self.accelerator.sync_gradients:
+                    grad_norm = torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(), self.config.max_grad_norm
+                    )
                     progress_bar.update(1)
                     self.global_step += 1
 
@@ -445,9 +448,11 @@ class FontDiffuserFSTTrainerEnhanced(FontDiffuserFSTTrainer):
 
                         if self.global_step % self.config.log_interval == 0:
                             logs = {
-                                "loss": loss_avg,
-                                "lr": self.lr_scheduler.get_last_lr()[0],
-                                **{k: v for k, v in loss_dict.items()},
+                                "loss/avg_train_loss": loss_avg,
+                                "train/lr": self.lr_scheduler.get_last_lr()[0],
+                                "train/epoch": epoch + step / len(self.train_dataloader),
+                                "train/grad_norm": grad_norm.item(),
+                                **{f"loss/{k}": v for k, v in loss_dict.items()},
                             }
                             progress_bar.set_postfix(logs)
                             self.accelerator.log(logs, step=self.global_step)
