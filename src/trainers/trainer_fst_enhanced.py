@@ -405,11 +405,7 @@ class FontDiffuserFSTTrainerEnhanced(FontDiffuserFSTTrainer):
         )
         num_epochs = math.ceil(self.config.max_train_steps / num_update_steps)
         if getattr(self.args, "resume_from_checkpoint", None):
-            resume_step = (
-                int(self.args.resume_from_checkpoint.split("_")[-1]) // self.config.gradient_accumulation_steps
-            )
-        else:
-            resume_step = 0
+            self.load_checkpoint(self.args.resume_from_checkpoint)
 
         progress_bar = HFTqdm(
             range(self.config.max_train_steps),
@@ -501,6 +497,11 @@ class FontDiffuserFSTTrainerEnhanced(FontDiffuserFSTTrainer):
                 save_model_checkpoint(
                     mod.state_dict(), save_dir / f"{name}.safetensors"
                 )
+            if self.identity_loss_module:
+                save_model_checkpoint(
+                    self.identity_loss_module.state_dict(),
+                    save_dir / "identity_loss_module.safetensors",
+                )
             if unwrapped.skeleton_transform is not None:
                 save_model_checkpoint(
                     unwrapped.skeleton_transform.state_dict(),
@@ -570,3 +571,38 @@ class FontDiffuserFSTTrainerEnhanced(FontDiffuserFSTTrainer):
 
         save_args_to_yaml(self.args, save_dir / "args.yaml")
         logger.info(f"✓ Checkpoint saved to {save_dir}")
+
+    def load_checkpoint(self, path):
+        """Load checkpoint including auxiliary loss configuration.
+        
+        Calls parent's load_checkpoint and additionally restores
+        aux_loss_config if auxiliary losses are enabled.
+        """
+        # Call parent's load_checkpoint to handle all FST checkpoint loading
+        success = super().load_checkpoint(path)
+        if not success:
+            return False
+
+        # Load auxiliary loss configuration if present
+        if self.use_aux_losses:
+            ckpt_dir = Path(path)
+            state_file = next(
+                (
+                    ckpt_dir / f
+                    for f in ["training_state.pt", "training_state.pth"]
+                    if (ckpt_dir / f).exists()
+                ),
+                None,
+            )
+            if state_file:
+                try:
+                    state = torch.load(state_file, map_location="cpu")
+                    if "aux_loss_config" in state:
+                        # Update auxiliary loss configuration from checkpoint
+                        self.aux_config = state["aux_loss_config"]
+                        logger.info(f"✓ Loaded auxiliary loss config from checkpoint")
+                except Exception as e:
+                    logger.warning(f"Failed to load aux_loss_config: {e}")
+                    # Continue anyway - aux losses will use default config
+
+        return True
