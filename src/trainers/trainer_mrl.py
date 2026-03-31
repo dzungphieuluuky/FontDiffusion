@@ -454,7 +454,10 @@ class FontDiffuserMRLTrainer(FontDiffuserFSTTrainer):
             try:
                 # Get predicted x0 for MRL loss
                 pred_x0 = x0_from_epsilon(
-                    noisy_targets, noise_pred, timesteps, self.noise_scheduler.alphas_cumprod
+                    scheduler=self.noise_scheduler,
+                    noise_pred=noise_pred,
+                    x_t=noisy_targets,
+                    timesteps=timesteps,
                 )
                 pred_x0_01 = normalize_mean_std(pred_x0)
 
