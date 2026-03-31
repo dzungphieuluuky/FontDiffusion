@@ -84,7 +84,7 @@ class FontDiffuserMRLTrainer(FontDiffuserFSTTrainer):
             getattr(args, "mrl_nesting_dims", "64,128,256,512")
         )
         self.mrl_freq_radii = self._parse_mrl_freq_radii(
-            getattr(args, "mrl_freq_radii", "0.1,0.3")
+            getattr(args, "mrl_freq_radii", "0.1,0.3,0.5")
         )
         self.mrl_content_weight = getattr(args, "mrl_content_weight", 1.0)
         self.mrl_fourier_weight = getattr(args, "mrl_fourier_weight", 0.3)
@@ -182,6 +182,22 @@ class FontDiffuserMRLTrainer(FontDiffuserFSTTrainer):
             # Build MRL components
             if self.use_mrl:
                 logger.info("Building MRL components...")
+                
+                # Validate MRL dimensions
+                if len(self.mrl_freq_radii) != len(self.mrl_nesting_dims) - 1:
+                    raise ValueError(
+                        f"MRL dimension mismatch! "
+                        f"nesting_dims={self.mrl_nesting_dims} (len={len(self.mrl_nesting_dims)}), "
+                        f"freq_radii={self.mrl_freq_radii} (len={len(self.mrl_freq_radii)}). "
+                        f"Required: len(freq_radii) == len(nesting_dims) - 1, "
+                        f"i.e., {len(self.mrl_nesting_dims) - 1} freq_radii values."
+                    )
+                
+                logger.info(
+                    f"MRL Config: nesting_dims={self.mrl_nesting_dims}, "
+                    f"freq_radii={self.mrl_freq_radii}"
+                )
+                
                 self.mrl_encoder, self.mrl_loss_module = build_mrl_components(
                     content_encoder=self.model.content_encoder,
                     embedding_dim=getattr(
