@@ -187,7 +187,7 @@ class FontDiffuserMRLTrainer(FontDiffuserFSTTrainer):
                     embedding_dim=getattr(
                         self.args, "content_encoder_dim", 512
                     ),
-                    nesting_dims=tuple(self.mrl_nesting_dims),
+                    nesting_dims=self.mrl_nesting_dims,
                     freq_radii=tuple(self.mrl_freq_radii),
                     spatial_size=(64, 64),
                     use_fourier_alignment=self.use_mrl_fourier_alignment,
