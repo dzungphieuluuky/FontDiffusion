@@ -41,8 +41,8 @@ def get_args():
     parser.add_argument(
         "--mrl_freq_radii",
         type=str,
-        default="0.1,0.3",
-        help="MRL frequency band radii (comma-separated)",
+        default="0.1,0.3,0.5",
+        help="MRL frequency band radii (comma-separated); must have len(nesting_dims)-1 values",
     )
     parser.add_argument(
         "--mrl_content_weight",
@@ -204,6 +204,7 @@ accelerate launch train_mrl.py \
     --fst_query_dim=128 \
     --fst_num_scales=5 \
     --mrl_nesting_dims="64,128,256,512" \
+    --mrl_freq_radii="0.1,0.3,0.5" \
     --mrl_content_weight=1.0 \
     --mrl_fourier_weight=0.3 \
     --mrl_warmup_steps=500 \
@@ -243,7 +244,7 @@ accelerate launch train_mrl.py \
     --fst_feature_channels="128,256,512,1024" \
     --fst_num_queries=128 \
     --mrl_nesting_dims="128,256,512" \
-    --mrl_freq_radii="0.15,0.35" \
+    --mrl_freq_radii="0.2,0.6" \
     --mrl_content_weight=0.8 \
     --mrl_fourier_weight=0.2 \
     --mrl_temperature=0.05 \
@@ -263,7 +264,8 @@ accelerate launch --multi_gpu --num_processes=4 train_mrl.py \
     --learning_rate=5e-5 \
     --output_dir="outputs/mrl_multigpu" \
     --mixed_precision="fp16" \
-    --mrl_nesting_dims="64,128,256,512"
+    --mrl_nesting_dims="64,128,256,512" \
+    --mrl_freq_radii="0.1,0.3,0.5"
 
 # ============================================================================
 # DEBUGGING: Quick test run
@@ -291,6 +293,7 @@ accelerate launch train_mrl.py \
     --train_batch_size=8 \
     --max_train_steps=100000 \
     --output_dir="outputs/mrl_no_fourier" \
+    --mrl_freq_radii="0.1,0.3,0.5" \
     --learning_rate=5e-5
 
 # ============================================================================
