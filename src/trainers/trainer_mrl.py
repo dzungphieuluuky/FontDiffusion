@@ -491,7 +491,7 @@ class FontDiffuserMRLTrainer(FontDiffuserFSTTrainer):
                     )
 
             except Exception as e:
-                logger.warning(f"MRL loss computation failed: {e}")
+                logger.error(f"MRL loss computation failed: {e}", exc_info=True)
                 # Continue training without MRL loss in this step
                 pass
 

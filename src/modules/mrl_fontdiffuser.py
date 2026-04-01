@@ -495,7 +495,13 @@ class MatryoshkaContentEncoder(nn.Module):
               projected_prefixes:  List of L2-normalised prefix projections,
                                    one per nesting_dim, smallest first.
         """
-        embedding = self.content_encoder(x, **kwargs)
+        output = self.content_encoder(x, **kwargs)
+        
+        # Handle the case where content_encoder returns a tuple (e.g., h, residual_features)
+        if isinstance(output, tuple):
+            embedding = output[0]
+        else:
+            embedding = output
 
         # Pool spatial dims if embedding is (B, C, H, W)
         if embedding.dim() == 4:
@@ -506,7 +512,7 @@ class MatryoshkaContentEncoder(nn.Module):
             flat = embedding                           # (B, C) already flat
 
         projected = self.mrl_head(flat)
-        return embedding, projected
+        return output, projected
 
 
 # ─────────────────────────────────────────────────────────────────────────────
