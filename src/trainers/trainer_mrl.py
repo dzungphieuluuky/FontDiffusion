@@ -183,28 +183,38 @@ class FontDiffuserMRLTrainer(FontDiffuserFSTTrainer):
             if self.use_mrl:
                 logger.info("Building MRL components...")
                 
+                # Dynamically determine the maximum actual embedding dimension based on resolution architecture
+                actual_embedding_dim = self.model.content_encoder.arch["out_channels"][-1] if hasattr(self.model.content_encoder, "arch") else getattr(self.args, "content_encoder_dim", 512)
+
+                # Filter out nesting dims that are larger than the actual model embedding size
+                valid_nesting_dims = [d for d in self.mrl_nesting_dims if d <= actual_embedding_dim]
+                
+                # Adjust freq_radii to match the new nesting_dims length
+                if len(valid_nesting_dims) < len(self.mrl_nesting_dims):
+                    logger.warning(f"Truncated MRL nesting dims to {valid_nesting_dims} to fit model's embedding size ({actual_embedding_dim})")
+                    valid_freq_radii = list(self.mrl_freq_radii)[:len(valid_nesting_dims) - 1]
+                else:
+                    valid_freq_radii = tuple(self.mrl_freq_radii)
+
                 # Validate MRL dimensions
-                if len(self.mrl_freq_radii) != len(self.mrl_nesting_dims) - 1:
+                if len(valid_freq_radii) != len(valid_nesting_dims) - 1:
                     raise ValueError(
                         f"MRL dimension mismatch! "
-                        f"nesting_dims={self.mrl_nesting_dims} (len={len(self.mrl_nesting_dims)}), "
-                        f"freq_radii={self.mrl_freq_radii} (len={len(self.mrl_freq_radii)}). "
-                        f"Required: len(freq_radii) == len(nesting_dims) - 1, "
-                        f"i.e., {len(self.mrl_nesting_dims) - 1} freq_radii values."
+                        f"nesting_dims={valid_nesting_dims} (len={len(valid_nesting_dims)}), "
+                        f"freq_radii={valid_freq_radii} (len={len(valid_freq_radii)}). "
+                        f"Required: len(freq_radii) == len(nesting_dims) - 1"
                     )
                 
                 logger.info(
-                    f"MRL Config: nesting_dims={self.mrl_nesting_dims}, "
-                    f"freq_radii={self.mrl_freq_radii}"
+                    f"MRL Config: nesting_dims={valid_nesting_dims}, "
+                    f"freq_radii={valid_freq_radii}"
                 )
                 
                 self.mrl_encoder, self.mrl_loss_module = build_mrl_components(
                     content_encoder=self.model.content_encoder,
-                    embedding_dim=getattr(
-                        self.args, "content_encoder_dim", 512
-                    ),
-                    nesting_dims=self.mrl_nesting_dims,
-                    freq_radii=tuple(self.mrl_freq_radii),
+                    embedding_dim=actual_embedding_dim,
+                    nesting_dims=valid_nesting_dims,
+                    freq_radii=valid_freq_radii,
                     spatial_size=(64, 64),
                     use_fourier_alignment=self.use_mrl_fourier_alignment,
                 )
