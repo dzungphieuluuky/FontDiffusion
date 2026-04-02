@@ -21,5 +21,5 @@ from .builders.build import (
     build_identity_loss_module,
     build_dual_channel_content_encoder,
     build_skeleton_transform,
-    build_frequency_decomposition
+    build_frequency_decomposition,
 )

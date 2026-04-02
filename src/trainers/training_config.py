@@ -37,6 +37,11 @@ class TrainingConfig:
     # Style transformation
     enable_style_transform: bool = False
 
+    # Training intervals
+    log_interval: int = 100
+    ckpt_interval: int = 40000
+    val_interval: int = 100
+
     def validate(self):
         """Validate configuration values."""
         assert self.learning_rate > 0, "Learning rate must be positive"

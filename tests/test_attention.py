@@ -1,8 +1,9 @@
 """
 Pytest suite for attention modules.
-Tests all attention mechanisms: SpatialTransformer, CrossAttention, 
+Tests all attention mechanisms: SpatialTransformer, CrossAttention,
 OffsetRefStrucInter, SELayer, and ChannelAttnBlock.
 """
+
 import pytest
 import torch
 import torch.nn as nn
@@ -88,9 +89,7 @@ class TestSpatialTransformer:
         assert not torch.isnan(output).any()
         assert not torch.isinf(output).any()
 
-    def test_gradient_flow(
-        self, spatial_transformer, batch_size, spatial_size, device
-    ):
+    def test_gradient_flow(self, spatial_transformer, batch_size, spatial_size, device):
         """Test gradient backpropagation."""
         h, w = spatial_size
         x = torch.randn(batch_size, 128, h, w, device=device, requires_grad=True)
@@ -175,9 +174,9 @@ class TestCrossAttention:
         attention_scores_captured = []
 
         def capture_attention(query, key, value):
-            attention_scores = torch.matmul(
-                query, key.transpose(-1, -2)
-            ) * cross_attention.scale
+            attention_scores = (
+                torch.matmul(query, key.transpose(-1, -2)) * cross_attention.scale
+            )
             attention_probs = attention_scores.softmax(dim=-1)
             attention_scores_captured.append(attention_probs)
             return original_attention(query, key, value)
@@ -188,7 +187,9 @@ class TestCrossAttention:
 
         # Check attention weights sum to 1
         attn_probs = attention_scores_captured[0]
-        assert torch.allclose(attn_probs.sum(dim=-1), torch.ones_like(attn_probs.sum(dim=-1)), atol=1e-5)
+        assert torch.allclose(
+            attn_probs.sum(dim=-1), torch.ones_like(attn_probs.sum(dim=-1)), atol=1e-5
+        )
 
     def test_gradient_flow(self, cross_attention, batch_size, device):
         """Test gradient backpropagation."""
@@ -263,8 +264,12 @@ class TestOffsetRefStrucInter:
     def test_gradient_flow(self, offset_module, batch_size, device):
         """Test gradient backpropagation."""
         h, w = 32, 32
-        res_hidden = torch.randn(batch_size, 256, h, w, device=device, requires_grad=True)
-        style_hidden = torch.randn(batch_size, 512, h, w, device=device, requires_grad=True)
+        res_hidden = torch.randn(
+            batch_size, 256, h, w, device=device, requires_grad=True
+        )
+        style_hidden = torch.randn(
+            batch_size, 512, h, w, device=device, requires_grad=True
+        )
 
         output = offset_module(res_hidden, style_hidden)
         loss = output.mean()
@@ -365,8 +370,12 @@ class TestChannelAttnBlock:
 
     def test_gradient_flow(self, channel_attn_block, batch_size, device):
         """Test gradient backpropagation."""
-        input_feat = torch.randn(batch_size, 256, 32, 32, device=device, requires_grad=True)
-        content_feat = torch.randn(batch_size, 256, 32, 32, device=device, requires_grad=True)
+        input_feat = torch.randn(
+            batch_size, 256, 32, 32, device=device, requires_grad=True
+        )
+        content_feat = torch.randn(
+            batch_size, 256, 32, 32, device=device, requires_grad=True
+        )
 
         output = channel_attn_block(input_feat, content_feat)
         loss = output.mean()

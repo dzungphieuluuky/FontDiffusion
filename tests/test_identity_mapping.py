@@ -2,6 +2,7 @@
 Pytest suite for Identity Mapping Loss module.
 Tests all loss variants: IdentityMappingLoss, PooledIdentityMappingLoss, AdaptiveIdentityMappingLoss.
 """
+
 import pytest
 import torch
 import torch.nn as nn
@@ -67,7 +68,9 @@ class TestIdentityMappingLoss:
 
     def test_extract_features_4d(self, identity_loss, batch_size, matrix_size, device):
         """Test feature extraction from 4D tensor (flattening batch dims)."""
-        features = torch.randn(2, batch_size // 2, matrix_size + 50, 1024, device=device)
+        features = torch.randn(
+            2, batch_size // 2, matrix_size + 50, 1024, device=device
+        )
 
         extracted = identity_loss._extract_features(features)
 
@@ -86,9 +89,7 @@ class TestIdentityMappingLoss:
         assert not torch.isnan(T).any()
         assert not torch.isinf(T).any()
 
-    def test_identity_distance_loss_frobenius(
-        self, batch_size, matrix_size, device
-    ):
+    def test_identity_distance_loss_frobenius(self, batch_size, matrix_size, device):
         """Test Frobenius norm distance from identity."""
         loss_module = IdentityMappingLoss(
             matrix_size=matrix_size,
@@ -97,7 +98,9 @@ class TestIdentityMappingLoss:
 
         # Create near-identity matrix
         T = (
-            torch.eye(matrix_size, device=device).unsqueeze(0).expand(batch_size, -1, -1)
+            torch.eye(matrix_size, device=device)
+            .unsqueeze(0)
+            .expand(batch_size, -1, -1)
         )
         T = T + torch.randn_like(T) * 0.01
 
@@ -202,7 +205,9 @@ class TestIdentityMappingLoss:
         assert target.grad is not None
         assert not torch.isnan(source.grad).any()
 
-    def test_perfect_identity_matrix(self, identity_loss, batch_size, matrix_size, device):
+    def test_perfect_identity_matrix(
+        self, identity_loss, batch_size, matrix_size, device
+    ):
         """Test loss is zero for perfect identity transformation."""
         # Create identical features
         features = torch.randn(batch_size, matrix_size, 1024, device=device)

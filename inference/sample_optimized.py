@@ -58,7 +58,7 @@ from src.builders.build import (
     build_identity_loss_module,
     build_mss_encoder,
     build_scr,
-    load_components
+    load_components,
 )
 
 import logging
@@ -257,7 +257,7 @@ def load_fontdiffuser_pipeline(
     unet: UNet = build_unet(args=args)
     style_encoder: StyleEncoder = build_style_encoder(args=args)
     content_encoder: ContentEncoder = build_content_encoder(args=args)
-    
+
     # Load base component weights
     unet_ckpt_path = (
         f"{args.ckpt_dir}/unet.safetensors"
@@ -279,15 +279,15 @@ def load_fontdiffuser_pipeline(
         if os.path.exists(f"{args.ckpt_dir}/content_encoder.safetensors")
         else f"{args.ckpt_dir}/content_encoder.pth"
     )
-    
+
     content_encoder_state = load_state_dict_auto(content_encoder_ckpt_path)
-    
+
     # Check if checkpoint is from skeleton-wrapped encoder
     is_wrapped_checkpoint = any(
         k.startswith("original_encoder.") or k.startswith("fusion_conv.")
         for k in content_encoder_state.keys()
     )
-    
+
     # Build skeleton transform if enabled
     skeleton_transform = None
     if is_wrapped_checkpoint:
@@ -297,10 +297,14 @@ def load_fontdiffuser_pipeline(
             skeleton_transform = build_skeleton_transform(args=args)
             content_encoder = build_dual_channel_content_encoder(
                 content_encoder=content_encoder,
-                skeleton_fusion_method=getattr(args, "skeleton_fusion_method", "concat"),
+                skeleton_fusion_method=getattr(
+                    args, "skeleton_fusion_method", "concat"
+                ),
             )
             content_encoder.load_state_dict(content_encoder_state)
-            logger.info("✓ Wrapped ContentEncoder with DualChannelContentEncoder for skeleton transform")
+            logger.info(
+                "✓ Wrapped ContentEncoder with DualChannelContentEncoder for skeleton transform"
+            )
         else:
             # Extract original encoder keys from wrapped checkpoint
             original_state = {}
@@ -308,10 +312,12 @@ def load_fontdiffuser_pipeline(
                 if k.startswith("original_encoder."):
                     new_k = k.replace("original_encoder.", "")
                     original_state[new_k] = v
-            
+
             if original_state:
                 content_encoder.load_state_dict(original_state)
-                logger.info("✓ Extracted and loaded original encoder from wrapped checkpoint")
+                logger.info(
+                    "✓ Extracted and loaded original encoder from wrapped checkpoint"
+                )
             else:
                 raise RuntimeError(
                     "Could not extract original encoder state from wrapped checkpoint"
@@ -327,7 +333,7 @@ def load_fontdiffuser_pipeline(
     frequency_decomp = None
     if getattr(args, "use_frequency_decomp", False):
         from src.builders.build import build_frequency_decomposition
-        
+
         frequency_decomp = build_frequency_decomposition(args=args)
         logger.info(
             f"✓ Frequency decomposition enabled "
@@ -338,6 +344,7 @@ def load_fontdiffuser_pipeline(
 
     if use_fst:
         from src.model import FontDiffuserModelDPMWithFST
+
         logger.info("Building FST modules...")
 
         # Build FST modules
@@ -374,7 +381,7 @@ def load_fontdiffuser_pipeline(
             load_components(fst_components, args)
         else:
             logger.warning("No FST checkpoint path provided - using random weights")
-        
+
         # Create FST-enhanced model with frequency decomposition
         model: FontDiffuserModelDPMWithFST = FontDiffuserModelDPMWithFST(
             unet=unet,
@@ -397,11 +404,9 @@ def load_fontdiffuser_pipeline(
                 "⚠️  Frequency decomposition and skeleton transform require --use_fst flag. "
                 "Creating standard model without these features."
             )
-        
+
         model: FontDiffuserModelDPM = FontDiffuserModelDPM(
-            unet=unet, 
-            style_encoder=style_encoder, 
-            content_encoder=content_encoder
+            unet=unet, style_encoder=style_encoder, content_encoder=content_encoder
         )
         logger.info("✓ Created standard FontDiffuserModelDPM")
 

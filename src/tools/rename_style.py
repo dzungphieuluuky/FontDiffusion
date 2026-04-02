@@ -13,7 +13,9 @@ import logging
 import sys
 from pathlib import Path
 
-logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=logging.INFO)
+logging.basicConfig(
+    format="%(asctime)s | %(levelname)s | %(message)s", level=logging.INFO
+)
 logger = logging.getLogger("rename_style_images")
 
 IMAGE_EXTENSIONS: frozenset[str] = frozenset({".png", ".jpg", ".jpeg", ".webp"})
@@ -27,14 +29,18 @@ def build_rename_plan(style_dir: Path) -> list[tuple[Path, Path]]:
     plan: list[tuple[Path, Path]] = []
     seen: set[Path] = set()
 
-    for src in sorted(p for p in style_dir.iterdir() if p.suffix.lower() in IMAGE_EXTENSIONS):
+    for src in sorted(
+        p for p in style_dir.iterdir() if p.suffix.lower() in IMAGE_EXTENSIONS
+    ):
         if "_" not in src.stem:
             continue
         dst = src.with_stem(src.stem.split("_", maxsplit=1)[0])
         if dst == src:
             continue
         if dst in seen or dst.exists():
-            logger.warning("Skipping '%s' — destination '%s' already taken.", src.name, dst.name)
+            logger.warning(
+                "Skipping '%s' — destination '%s' already taken.", src.name, dst.name
+            )
             continue
         plan.append((src, dst))
         seen.add(dst)
@@ -43,9 +49,17 @@ def build_rename_plan(style_dir: Path) -> list[tuple[Path, Path]]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Rename style images by stripping underscore suffix.")
-    parser.add_argument("--style_dir", type=Path, default=Path("style_images/cleaned_handwritten_enhanced"))
-    parser.add_argument("--apply", action="store_true", help="Apply renames (default: dry-run).")
+    parser = argparse.ArgumentParser(
+        description="Rename style images by stripping underscore suffix."
+    )
+    parser.add_argument(
+        "--style_dir",
+        type=Path,
+        default=Path("style_images/cleaned_handwritten_enhanced"),
+    )
+    parser.add_argument(
+        "--apply", action="store_true", help="Apply renames (default: dry-run)."
+    )
     args = parser.parse_args()
 
     if not args.style_dir.exists():

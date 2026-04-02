@@ -2,6 +2,7 @@
 Pytest suite for ContentEncoder module.
 Tests all components: ContentEncoder, DBlock, GBlock, GBlock2, Attention, and utility layers.
 """
+
 import pytest
 import torch
 import torch.nn as nn
@@ -420,9 +421,7 @@ class TestLinearBlock:
 
     def test_without_norm(self, batch_size, device):
         """Test LinearBlock without normalization."""
-        block = LinearBlock(in_dim=256, out_dim=512, norm="none", act="relu").to(
-            device
-        )
+        block = LinearBlock(in_dim=256, out_dim=512, norm="none", act="relu").to(device)
         x = torch.randn(batch_size, 256, device=device)
 
         output = block(x)

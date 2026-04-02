@@ -18,5 +18,5 @@ from .adversarial import (
     MultiScaleStyleDiscriminator,
     GradientReversalLayer,
     StyleLabelExtractor,
-    AdversarialContentStyleLoss
+    AdversarialContentStyleLoss,
 )

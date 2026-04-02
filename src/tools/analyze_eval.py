@@ -185,6 +185,7 @@ def compute_composite_scores(
         Same list with ``composite_score`` and ``rank`` keys added,
         sorted descending by composite score.
     """
+
     def _minmax_norm(values: np.ndarray) -> np.ndarray:
         lo, hi = values.min(), values.max()
         if np.isclose(lo, hi):
@@ -234,7 +235,9 @@ def compute_composite_scores(
 # ---------------------------------------------------------------------------
 
 
-def print_report(ranked: list[dict], w_ssim: float, w_lpips: float, w_fid: float) -> None:
+def print_report(
+    ranked: list[dict], w_ssim: float, w_lpips: float, w_fid: float
+) -> None:
     """Pretty-print the ranking table and recommendation.
 
     Args:
@@ -306,13 +309,25 @@ def print_report(ranked: list[dict], w_ssim: float, w_lpips: float, w_fid: float
 
     if valid_ssim:
         best_ssim = max(valid_ssim, key=lambda s: s["ssim_mean"])
-        logger.info("\n📐  Best SSIM  (content fidelity) : %s  (%.4f)", best_ssim["checkpoint"], best_ssim["ssim_mean"])
+        logger.info(
+            "\n📐  Best SSIM  (content fidelity) : %s  (%.4f)",
+            best_ssim["checkpoint"],
+            best_ssim["ssim_mean"],
+        )
     if valid_lpips:
         best_lpips = min(valid_lpips, key=lambda s: s["lpips_mean"])
-        logger.info("🎨  Best LPIPS (style match)       : %s  (%.4f)", best_lpips["checkpoint"], best_lpips["lpips_mean"])
+        logger.info(
+            "🎨  Best LPIPS (style match)       : %s  (%.4f)",
+            best_lpips["checkpoint"],
+            best_lpips["lpips_mean"],
+        )
     if valid_fid:
         best_fid = min(valid_fid, key=lambda s: s["fid"])
-        logger.info("📊  Best FID   (realism)           : %s  (%.4f)", best_fid["checkpoint"], best_fid["fid"])
+        logger.info(
+            "📊  Best FID   (realism)           : %s  (%.4f)",
+            best_fid["checkpoint"],
+            best_fid["fid"],
+        )
 
     logger.info("%s\n", sep)
 
@@ -445,7 +460,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=float,
         default=DEFAULT_W_FID,
         help="Weight for FID in the composite score (lower FID = more realistic output). "
-             "Set to 0 to ignore FID.",
+        "Set to 0 to ignore FID.",
     )
     parser.add_argument(
         "--style_breakdown",
@@ -520,8 +535,7 @@ def main() -> None:
     # Aggregate & score
     # ------------------------------------------------------------------
     stats = [
-        aggregate_checkpoint(name, rows)
-        for name, rows in all_rows_by_ckpt.items()
+        aggregate_checkpoint(name, rows) for name, rows in all_rows_by_ckpt.items()
     ]
 
     ranked = compute_composite_scores(stats, args.w_ssim, args.w_lpips, args.w_fid)

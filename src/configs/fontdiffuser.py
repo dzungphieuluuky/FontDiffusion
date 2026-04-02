@@ -649,9 +649,9 @@ def get_parser():
         default="medial_axis",
         choices=["skeletonize", "medial_axis", "zhang_suen"],
         help="Skeletonization algorithm: "
-            "'skeletonize' (morphological thinning), "
-            "'medial_axis' (distance-based, robust for fonts), "
-            "'zhang_suen' (Zhang-Suen algorithm)",
+        "'skeletonize' (morphological thinning), "
+        "'medial_axis' (distance-based, robust for fonts), "
+        "'zhang_suen' (Zhang-Suen algorithm)",
     )
 
     skeleton_group.add_argument(
@@ -660,9 +660,9 @@ def get_parser():
         default="hybrid",
         choices=["edt", "gaussian", "hybrid"],
         help="Distance field generation method: "
-            "'edt' (Euclidean Distance Transform), "
-            "'gaussian' (Gaussian blur of skeleton), "
-            "'hybrid' (EDT + Gaussian smoothing)",
+        "'edt' (Euclidean Distance Transform), "
+        "'gaussian' (Gaussian blur of skeleton), "
+        "'hybrid' (EDT + Gaussian smoothing)",
     )
 
     skeleton_group.add_argument(
@@ -670,7 +670,7 @@ def get_parser():
         type=float,
         default=12.0,
         help="Maximum influence radius for skeleton distance field (in pixels). "
-            "Smaller values = tighter guidance, larger values = more diffuse influence.",
+        "Smaller values = tighter guidance, larger values = more diffuse influence.",
     )
 
     skeleton_group.add_argument(
@@ -686,9 +686,9 @@ def get_parser():
         default="dual_channel",
         choices=["skeleton_only", "distance_only", "dual_channel"],
         help="Output mode: "
-            "'skeleton_only' (binary 1-channel), "
-            "'distance_only' (smooth 1-channel), "
-            "'dual_channel' (skeleton + distance, 2-channel)",
+        "'skeleton_only' (binary 1-channel), "
+        "'distance_only' (smooth 1-channel), "
+        "'dual_channel' (skeleton + distance, 2-channel)",
     )
 
     skeleton_group.add_argument(
@@ -697,9 +697,9 @@ def get_parser():
         default="concat",
         choices=["concat", "add", "weighted"],
         help="How to fuse skeleton and distance channels in content encoder: "
-            "'concat' (1x1 conv to merge), "
-            "'add' (simple addition), "
-            "'weighted' (learnable weighted sum)",
+        "'concat' (1x1 conv to merge), "
+        "'add' (simple addition), "
+        "'weighted' (learnable weighted sum)",
     )
     # ==================== Fourier-Based Frequency Decomposition ====================
     frequency_group = parser.add_argument_group("Frequency Decomposition")
@@ -746,121 +746,6 @@ def get_parser():
         choices=["content", "style", "both"],
         help="Where to send mid-frequency band",
     )
-    # ==================== Direct Reward Optimization (DRO) ====================
-    dro_group = parser.add_argument_group("DRO — Direct Reward Optimization")
-    dro_group.add_argument(
-        "--use_dro",
-        action="store_true",
-        help="Enable Direct Reward Optimization on top of FST diffusion loss.",
-    )
-    dro_group.add_argument(
-        "--dro_weight",
-        type=float,
-        default=0.1,
-        help="Weight applied to the DRO reward loss term (default: 0.1).",
-    )
-    dro_group.add_argument(
-        "--dro_ssim_weight",
-        type=float,
-        default=1.0,
-        help="Weight for SSIM content-fidelity reward inside DRO (default: 1.0).",
-    )
-    dro_group.add_argument(
-        "--dro_lpips_weight",
-        type=float,
-        default=1.0,
-        help="Weight for LPIPS style-similarity penalty inside DRO (default: 1.0).",
-    )
-    dro_group.add_argument(
-        "--dro_reward_scale",
-        type=float,
-        default=1.0,
-        help="Global scale applied to the composite reward (default: 1.0).",
-    )
-    dro_group.add_argument(
-        "--dro_warmup_steps",
-        type=int,
-        default=0,
-        help="Number of steps before DRO reward is activated (default: 0).",
-    )
-    # --- missing args below ---
-    dro_group.add_argument(
-        "--dro_max_timestep_frac",
-        type=float,
-        default=0.3,
-        help="Only evaluate DRO reward at timesteps below this fraction of "
-             "num_train_timesteps. Lower = more reliable pred_x0 (default: 0.3).",
-    )
-    dro_group.add_argument(
-        "--dro_sharp_weight",
-        type=float,
-        default=0.0,
-        help="Weight for sharpness reward inside DRO (default: 0.0, disabled).",
-    )
-    dro_group.add_argument(
-        "--dro_div_weight",
-        type=float,
-        default=0.0,
-        help="Weight for diversity penalty inside DRO (default: 0.0, disabled).",
-    )
-    dro_group.add_argument(
-        "--dro_normalise_reward",
-        action="store_true",
-        default=False,
-        help="Normalise composite reward to unit variance before scaling (default: False).",
-    )
-
-    # ==================== GRPO ====================
-    grpo_group = parser.add_argument_group("GRPO Policy Optimization")
-    grpo_group.add_argument(
-        "--use_grpo",
-        action="store_true",
-        default=False,
-        help="Enable GRPO policy gradient on top of DRO losses",
-    )
-    grpo_group.add_argument(
-        "--grpo_group_size",
-        type=int,
-        default=4,
-        help="Number of rollouts per prompt for group-relative baseline",
-    )
-    grpo_group.add_argument(
-        "--grpo_clip_eps",
-        type=float,
-        default=0.2,
-        help="PPO-style clipping epsilon for importance ratio",
-    )
-    grpo_group.add_argument(
-        "--grpo_pg_weight",
-        type=float,
-        default=0.01,
-        help="Weight of GRPO policy gradient loss",
-    )
-    grpo_group.add_argument(
-        "--grpo_sample_steps",
-        type=int,
-        default=5,
-        help="Denoising steps per rollout (shorter = faster, noisier signal)",
-    )
-    grpo_group.add_argument(
-        "--grpo_warmup_steps",
-        type=int,
-        default=1000,
-        help="Steps before GRPO activates",
-    )
-    grpo_group.add_argument(
-        "--grpo_kl_coeff",
-        type=float,
-        default=0.01,
-        help="KL penalty coefficient against frozen reference policy",
-    )
-    grpo_group.add_argument(
-        "--grpo_reward_clip",
-        type=float,
-        default=5.0,
-        help="Clip reward to [-clip, clip] before normalization",
-    )
-
     # ==================== Optimization Flags ====================
     optimization_group = parser.add_argument_group("Performance Optimization")
     optimization_group.add_argument(

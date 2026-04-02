@@ -2,6 +2,7 @@
 Pytest suite for Multi-Scale Style Encoder (MSSE).
 Tests feature extraction at multiple scales with proper channel dimensions.
 """
+
 import pytest
 import torch
 import torch.nn as nn
@@ -72,7 +73,9 @@ class TestResidualBlock:
         assert output.shape == (batch_size, 128, 16, 16)
         assert not torch.isnan(output).any()
 
-    def test_residual_connection(self, residual_block_no_downsample, batch_size, device):
+    def test_residual_connection(
+        self, residual_block_no_downsample, batch_size, device
+    ):
         """Test that residual connection works."""
         x = torch.randn(batch_size, 64, 32, 32, device=device)
 
@@ -105,9 +108,9 @@ class TestMultiScaleStyleEncoder:
     @pytest.fixture
     def msse(self, device):
         """Create MultiScaleStyleEncoder instance."""
-        return MultiScaleStyleEncoder(
-            in_channels=1, base_channels=64, num_scales=5
-        ).to(device)
+        return MultiScaleStyleEncoder(in_channels=1, base_channels=64, num_scales=5).to(
+            device
+        )
 
     def test_initialization(self, msse):
         """Test model initialization."""
@@ -145,9 +148,9 @@ class TestMultiScaleStyleEncoder:
         ]
 
         for i, (feat, expected_shape) in enumerate(zip(features, expected_shapes)):
-            assert (
-                feat.shape == expected_shape
-            ), f"Scale {i}: got {feat.shape}, expected {expected_shape}"
+            assert feat.shape == expected_shape, (
+                f"Scale {i}: got {feat.shape}, expected {expected_shape}"
+            )
 
     def test_forward_no_nan(self, msse, batch_size, device):
         """Test that outputs have no NaN values."""
