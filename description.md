@@ -1,235 +1,66 @@
----
-layout: post
-title: Dự Án Font Diffusion Sino Nom
-subtitle: Tổng kết những gì đã thực hiện trong module FontDiffusion trong dự án Tạo sinh Tự Điển Hán Nôm Tự Động
-cover-img:
-thumbnail-img:
-share-img:
-tags: [learning-journey, diffusion]
-author: dzungphieuluuky
----
-
-# Báo Cáo Tóm Tắt Dự Án FontDiffusion
+# Báo Cáo Tóm Tắt Đồ Án FontDiffusion
 
 ## Giới Thiệu
-Dự án FontDiffusion là một bộ công cụ toàn diện để tạo và quản lý dữ liệu hình ảnh font chữ sử dụng mô hình khuếch tán (diffusion models). Dự án này tập trung vào việc tạo ra các hình ảnh font chữ với các kiểu dáng khác nhau, đào tạo mô hình, và quản lý tập dữ liệu. Các file được cung cấp là các module Python chính, hỗ trợ từ việc tạo dữ liệu hàng loạt, đào tạo mô hình, đến xuất/nhập tập dữ liệu từ Hugging Face.
+FontDiffusion dùng để tạo 1 ảnh mới từ 2 ảnh đầu vào, gọi là ảnh 1 và ảnh 2, sao cho ảnh được tạo ra có content (chữ) của ảnh 1 nhưng với style viết/vẽ của ảnh 2. Ảnh 1 gọi là ảnh content, ảnh 2 gọi là ảnh reference. Cốt lõi cần trích xuất content features từ ảnh 1 và style features từ ảnh 2 và merge chúng lại để tạo ra ảnh mới.
 
-Dự án này được xây dựng dựa trên các thư viện như PyTorch, Hugging Face Transformers, và Accelerate để hỗ trợ đa GPU. Nó bao gồm các tính năng như tạo hình ảnh batch, đánh giá chất lượng, chia tập dữ liệu, và tích hợp với Hugging Face Hub để upload/download dataset được nhanh hơn so với việc xử lý upload/download trên file thô.
-
-## Những Gì Đã Được Thực Hiện
-Dự án đã triển khai một pipeline hoàn chỉnh cho việc xử lý font chữ với mô hình khuếch tán:
-- **Pipeline tạo dataset**: Tạo hình ảnh font chữ với nhiều ảnh content và ảnh style, cụ thể là các ảnh content từ dữ liệu Hán Nôm Tự Tạo do thầy Điền cung cấp và 15 ảnh style tự sưu tầm trên Internet.
-- **Module FST từ bài báo FSTDiff**: Có code tích hợp module Style Transformation Module từ bài báo FSTDiff mặc dù chưa train chưa thành công với module này vì còn gặp nhiều lỗi về tensor dimension và cần phải tích hợp vào pipeline đang có của FontDiffuser nên gặp vài khó khăn về input output số chiều của các tensor.
-- **Quản lý Dataset**: Quản lý download/upload dataset từ Hugging Face về máy và ngược lại với tốc độ rất nhanh (xử lý bằng định dạng parquet được phát triển bởi Apache Arrow nên nhanh hơn hẳn so với việc download/upload file thô, có hướng dẫn sử dụng bên dưới), chia tập train/val.
-- **Đánh giá**: Có tích hợp module tính toán các chỉ số chất lượng như LPIPS, SSIM, FID.
-- **Hỗ trợ đa GPU**: Sử dụng Accelerate library để hỗ trợ inference và training phân tán trên nhiều GPU cùng lúc, điển hình như tận dụng cả 2 GPU của Kaggle.
-- **Tích hợp checkpoint**: Sử dụng `results_checkpoint.json` trong mỗi thư mục train_original, train và val để quản lý các data đã sinh.
-
-Các module chính được triển khai bao gồm:
-- Quản lý font chữ (FontManager).
-- Theo dõi quá trình tạo (GenerationTracker).
-- Đánh giá chất lượng (QualityEvaluator).
-- Tích hợp với WandB cho logging.
-- File orchestrator chính: font_diffusion.ipynb.
-
-Các file dùng để inference gồm có:
-- `sample_batch.py`: Đây là file dùng để inference trên 1 GPU.
-- `sample_distributed.py`: Đây là file dùng để inference phân tán trên nhiều GPU cùng lúc để tận dụng tối đa quota của Kaggle. Hiện file này đang được dùng chính vì có thể tự động inference bình thường trong trường hợp 1 GPU (Google Colab).
-
-## Cách Sử Dung Chung
-Từ file `font_diffusion.ipynb` bên dưới, chỉ cần khởi chạy các cell đầu dùng để install package và setup repository từ github, sau đó chỉ cần chạy các cell còn lại theo mong muốn là được. Notebook sẽ git clone toàn bộ repo về kho lưu trữ tạm thời trên nền tảng Cloud (Kaggle, Colab) và dùng các file trong đó để chạy.
-
-### Ví Dụ Sử Dung Cơ Bản:
-- Sinh dataset:
-```python
-accelerate launch FontDiffusion/sample_distributed.py \
-    --characters "NomTuTao/Ds_10k_ChuNom_TuTao.txt" \
-    --style_images "FontDiffusion/style_images" \
-    --ckpt_dir "ckpt/" \
-    --ttf_path "FontDiffusion/fonts/NomNaTong-Regular.otf" \
-    --output_dir "my_dataset/train_original" \
-    --num_inference_steps 20 \
-    --guidance_scale 7.5 \
-    --start_line 3001 \
-    --end_line 3200 \
-    --batch_size 35 \
-    --save_interval 1 \
-    --channels_last \
-    --seed 42 \
-    --compile \
-    --enable_xformers
-```
-- Chia train/val dataset:
-```python
-python FontDiffusion/create_validation_split.py \
-  --data_root my_dataset \
-  --val_ratio 0.2 \
-  --seed 42
-```
-
-- Training:
-```python
-MAX_TRAIN_STEPS = 1500
-accelerate launch FontDiffusion/finetune.py \
-    --seed=123 \
-    --experience_name="FontDiffuser_training_phase_1" \
-    --data_root="my_dataset" \
-    --output_dir="outputs/FontDiffuser" \
-    --phase_1_ckpt_dir="ckpt" \
-    --report_to="wandb" \
-      \
-    --resolution=96 \
-    --style_image_size=96 \
-    --content_image_size=96 \
-    --content_encoder_downsample_size=3 \
-    --channel_attn=True \
-    --content_start_channel=64 \
-    --style_start_channel=64 \
-      \
-    --train_batch_size=16 \
-    --gradient_accumulation_steps=2 \
-    --perceptual_coefficient=0.07 \
-    --offset_coefficient=0.6 \
-    --max_train_steps={MAX_TRAIN_STEPS} \
-    --ckpt_interval={MAX_TRAIN_STEPS // 4} \
-    --log_interval=50 \
-      \
-    --learning_rate=1e-4 \
-    --lr_scheduler="cosine" \
-    --lr_warmup_steps=200 \
-    --drop_prob=0.1 \
-    --mixed_precision="fp16"
-```
-- Upload dataset lên HF:
-```python
-# Original Split
-python FontDiffusion/create_hf_dataset.py \
-  --data-dir "my_dataset/train_original" \
-  --repo-id dzungpham/font-diffusion-generated-data \
-  --split "train_original" \
-  --token {HF_TOKEN}
-
-# Train Split
-python FontDiffusion/create_hf_dataset.py \
-  --data-dir "my_dataset/train" \
-  --repo-id dzungpham/font-diffusion-generated-data \
-  --split "train" \
-  --token {HF_TOKEN}
-
-# Val Split
-python FontDiffusion/create_hf_dataset.py \
-  --data-dir "my_dataset/val" \
-  --repo-id dzungpham/font-diffusion-generated-data \
-  --split "val" \
-  --token {HF_TOKEN}
-```
-- Download dataset từ HF:
-```python
-python FontDiffusion/export_hf_dataset_to_disk.py \
-  --output-dir "my_dataset/train_original" \
-  --repo-id {HF_USERNAME}/font-diffusion-generated-data \
-  --split "train_original" \
-  --token HF_TOKEN
-
-python FontDiffusion/export_hf_dataset_to_disk.py \
-  --output-dir "my_dataset/train" \
-  --repo-id {HF_USERNAME}/font-diffusion-generated-data \
-  --split "train" \
-  --token HF_TOKEN
-
-python FontDiffusion/export_hf_dataset_to_disk.py \
-  --output-dir "my_dataset/val" \
-  --repo-id {HF_USERNAME}/font-diffusion-generated-data \
-  --split "val" \
-  --token HF_TOKEN
-```
+Dưới đây là mô tả chi tiết về các thành phần cốt lõi của hệ thống: inference_pipeline, kiến trúc mã nguồn trong `src/`, cũng như các entrypoint chính cho training và testing.
 
 ## Chi tiết các module
 
-### 1. `sample_batch.py`
-**Mục đích**: Script chính để tạo hình ảnh font chữ hàng loạt và đánh giá chất lượng. Có hash (content, style, font) của character để đánh dấu chữ nào đã generate tránh trùng lặp và hỗ trợ resume từ checkpoint.
+### 1. `inference/`
+Thư mục chứa toàn bộ quy trình sinh ảnh (inference) sử dụng pre-trained diffusion.
+- Nơi đây có chứa nhiều mode sampling khác nhau: `sample_optimized.py` (tối ưu hóa tốc độ trên 1 GPU), `sample_batch.py` (xử lý lượng lớn ảnh/batch), và `sample_distributed.py` (hỗ trợ phân tán tải ra nhiều GPU dùng Accelerate, tối đa throughput khi tạo bộ dataset).
+- Các script trong thư mục này chịu trách nhiệm khởi tạo class `DPM_Solver`, truyền inputs qua UNet để giảm nhiễu từng bước, decode bằng VAE và lưu thẳng xuống đĩa cứng hoặc JSON file meta (`results_checkpoint.json`).
+> Chỉ cần dùng sample_distributed là đủ (các file là legacy code)
 
-**Chức năng chính**:
-- Tải danh sách ký tự từ file hoặc list [a, b, c, d].
-- Tải hình ảnh style từ thư mục hoặc file: ảnh png, jpg hoặc thư mục chứa styles ví dụ như style_images/.
-- Tạo hình ảnh content (ký tự) và target (font với style).
-- Đánh giá với LPIPS, SSIM, FID nếu có ground truth.
-- Lưu checkpoint đã generate vào `results_checkpoint.json`.
+### 2. Các subfolders trong thư mục hệ thống `src/`
+Đây là mã nguồn lưu trữ toàn bộ các class về kiến trúc mô hình, dữ liệu, loss cũng như các tool utils phục vụ training và validation:
+- **`src/ablation/`**: Các thí nghiệm, phân tích ablation study để bóc tách tính năng đánh giá sự ảnh hưởng của từng thành phần lên cả bộ model.
+- **`src/builders/`**: Factory functions đảm nhiệm việc khởi tạo linh hoạt các model block, bộ loss function, optimizers/schedulers và metric đánh giá dựa trên `configs/`. Các module được build bởi các function trong folder này trước kh truyền chúng vô các class để khởi tạo.
+- **`src/configs/`**: Phụ trách định nghĩa Hyperparameters và các argument parser (như trong `fontdiffuser.py`). File cấu hình là nơi mọi scripts sẽ gọi để duy trì single truth of source cho config.
+- **`src/dataset/`**: Các object liên quan đến xử lý dữ liệu đầu vào. Gồm Pytorch Dataset classes (FontDataset) cũng như các `CollateFN` có nhiệm vụ pack batch dữ liệu (images + captions) để chuẩn bị cho dataloaders. Đảm bảo hỗ trợ load multi-scale hay condition linh hoạt.
+- **`src/dpm_solver/`**: Chứa thuật toán sample (Diffusion Probabilistic Models Solver). Thường không chạm vào code trong folder này.
+- **`src/losses/`**: Tổng hợp các hàm Loss tuỳ chỉnh, đặc thù cho bài toán chuyển phong và diffusion: hàm perceptual loss (LPIPS), content preservation (Offset loss), SC (Style Consistency loss) và Identity loss.
+- **`src/modules/`**: Lưu trữ network architectures cốt lõi: UNet 2D cải tiến, Content Encoder, Style Encoder (Attention-based), Font Style Transformation modules. Có thêm 1 số cải tiến từ UniCalli và Matryoshka nhưng chưa integrate vào.
+- **`src/tools/`**: Một bộ các scripts hỗ trợ I/O, download/upload HuggingFace, metadata conversion, tạo bộ chia splits (`create_hf_dataset.py`, `export_dataset_ultra.py`) và caching/hashing tên file ảnh output (`filename_utils.py`) để tránh duplicate generations.
+- **`src/trainers/`**: Các class quản lý vòng lặp huấn luyện (Training Loops). Lớp Trainer này encapsulate quá trình forward-pass, tính loss tổng hợp, log kết quả lên Wandb, và tự động lưu checkpoints sau các epoch đã định (e.g. `trainer.py`, `trainer_fst.py`).
 
-### 2. `export_hf_dataset_to_disk.py`
-**Mục đích**: Xuất tập dữ liệu từ Hugging Face Hub hoặc local cache về cấu trúc thư mục FontDiffuser được reccommend trong bài báo FontDiffuser để training.
+### 3. `run_inference.py`
+Là point-of-entry chính giúp người dùng chạy dễ dàng các script trong `inference/`. Script này parse các target arguments quan trọng như `--characters`, `--style_images`, `--ckpt_dir` rồi mapping linh hoạt vào các mode (`sample_batch` hoặc `sample_distributed`).
 
-**Chức năng chính**:
-- Tải dataset từ HF Hub hoặc disk.
-- Tạo cấu trúc folder cho mỗi train, val có 2 subfolder là `ContentImage/` và `TargetImage/`.
-- Lưu `results_checkpoint.json`.
+### 4. `train_fst.py`
+Là file orchestrator để Train cho module FST (Font Style Transfer). Script này chịu trách nhiệm: 
+- Bootstrapping các thiết lập thư viện Accelerate.
+- Khởi tạo Logging (W&B).
+- Load params từ config `configs/fontdiffuser.py`.
+- Build Dataset và Models từ các build functions. Sau đó truyền tham số khởi tạo đối tượng `FontDiffuserFSTTrainer` lưu ở `src/trainers/`.
 
-**Khi git clone**: Sử dụng để tải dataset từ HF và chuyển về format theo hướng dẫn để file train đọc được folder và train được.
+### 5. `src/trainers/trainer_fst.py`
+Một subclass của hệ thống Trainer tuỳ chỉnh chuyên xử lý kịch bản cho module FST. Chịu trách nhiệm cho quá trình Forward logic bao gồm: 
+- Lên lịch trình Phase 1 và Phase 2 của bài toán (VD dùng auxiliary losses, perceptual losses, tính gradient clip). 
+- Mapping các tensors embedding giữa Content và Style, tính độ chênh lệch feature sau các block CNN.
+- Cập nhật trọng số của `unet`, `style_encoder` thông qua Optimizer.
 
-### 3. `create_validation_split.py`
-**Mục đích**: Chia tập dữ liệu training thành train và val set.
+### 6. `font_diffusion.ipynb`
+**Orchestrator** để gọi train và inference, đã install các library version phù hợp ở các cell tuỳ  môi trường Kaggle hay Google Colab.
+- Auto-setup môi trường: Chứa cell cài cắm library (diffusers, accelerate, torch), login HuggingFace, Wandb tự động bằng secret key / tokens.
+- Workflow chạy đồng bộ: Dùng shell magics (`!accelerate launch`) thực hiện pull dataset từ Hub (`download_from_hf`), load các module checkpoint, push dữ liệu lại lên cloud.
+- Post-processing: Thu gom, nén ảnh kết quả (`zip_folder`).
 
-**Chức năng chính**:
-- Chia tập train original thành train và val.
-- Cho điều chỉnh val ratio từ command line để tạo.
-- Lấy ngẫu nhiên 1 số font và 1 số style làm val và phần còn lại làm train => val gồm có unseen character và unseen style.
+### 7. Cải tiến so với FontDiffuser
+- Thêm module Font Style Transformations và Consistency Loss từ paper FSTDiff. Paper này không có code nên code này được vibe bằng Claude.
+- Thêm Frequency Decomposition bằng biến đổi Fourier để chia ra 2 miền tần số cao (style) và tần số thấp (content), dùng để disentangle giữa content features và style features giữa ảnh content và ảnh reference để chống lại problem khi style của ảnh content bị leak vào ảnh kết quả, còn content của ảnh reference không leak vào được do đã được diffusion noise loss khống chế. Có thêm Multi Scale Style Encoder để áp dụng multi scale cho cả style features. Content đã được multi-scale (Multi Scale Content Aggregation thừa kế từ FontDiffuser) Bổ sung thêm 1 số loss liên quan đến Fourier.
+- Dự định apply Matryoshka Representation Learning để dùng ý tưởng nested embeddings của nó để tăng sức represent cho model nhưng xem kỹ hơn về kỹ thuật này thì Matryoshka thường dùng để tối ưu inference-time cho các model lớn chứ usecase không phải để style transfer nên chưa khảo sát tác dụng của phương pháp này (còn bị 1 vài bug dimension).
+- Paper UniCalli đề xuất framework phối hợp giữa generation và recognition và train đồng thời 2 module này với nhau dành cho chữ Trung. Tiềm năng để thừa kế vào đồ án này.
 
-**Khi git clone**: Chạy sau khi tạo dữ liệu để chuẩn bị cho đào tạo. Đảm bảo có `results_checkpoint.json` trong thư mục train.
+### 8. Unsuccessful attempts
+- Skeleton distance transform: đã thử mà không thành công khi ảnh generate ra bị lỗi chưa denoise được hết điểm ảnh nhiễu. Cần setup cái này cả trong training và inference như 1 module tiền xử lý cho tấm ảnh.
+- Đổi dấu SSIM và LPIPS làm loss function: generate ra ảnh có style rất giống với ảnh reference, gần như là hoàn hảo, nhưng nhiều chữ có nét phức tạp bị mất nhiều nét quan trọng và gần như khác khá nhiều (40-50%) so với ảnh content ban đầu. Nói cách khác, model đã sacrifice nét chữ để có style rất giống với ảnh reference.
+- Thêm 1 vài loss mới để giữ lại content features không bị mất mát như dùng SSIM và LPIPS nhưng ra kết quả tệ, mô hình không tạo ảnh bình thường được mà toàn đen => mode collapse.
 
-### 4. `create_hf_dataset.py`
-**Mục đích**: Tạo tập dữ liệu Hugging Face từ hình ảnh FontDiffusion đã tạo.
-
-**Chức năng chính**:
-- Tải metadata từ `results_checkpoint.json`.
-- Chuyển đổi hình ảnh thành format HF Dataset ở dạng parquet để upload và download nhanh.
-- Push lên HF Hub nếu cần.
-
-**Khi git clone**: Sử dụng để publish dataset lên HF sau khi tạo xong.
-
-### 5. `finetune.py`
-**Mục đích**: Script train FontDiffuser gồm 2 phase, có cố gắng tích hợp Style Transformation Module từ paper FSTDiff nhưng còn lỗi tensor dimension.
-
-**Chức năng chính**:
-- Hỗ trợ Style Transformation Module.
-- Train với loss như diffusion, perceptual, offset, và SC (Phase 2).
-- Sử dụng Accelerate cho distributed training.
-- Log lên WandB.
-
-**Khi git clone**: Sử dụng để train model. Cần có dataset đã chuẩn bị và checkpoint từ Phase 1 nếu cần.
-
-### 6. `sample_distributed.py`
-**Mục đích**: Phiên bản đa GPU của `sample_batch.py` sử dụng Accelerate để training hoặc inference phân tán để tăng tốc.
-
-**Chức năng chính**:
-- Tương tự `sample_batch.py` nhưng hỗ trợ multi-GPU.
-- Thời gian có thể giảm hơn gấp đôi so với chạy `sample_batch.py` đơn GPU.
-- Có thể tạo được khoảng 400 mẫu mới trong khoảng 12p. Trung bình khoảng 1.7 1.8s cho 1 sample.
-
-**Khi git clone**: Sử dụng khi có nhiều GPU để tăng tốc tạo dữ liệu.
-
-# Dataset
-Dataset đang dược host tại https://huggingface.co/datasets/dzungpham/font-diffusion-generated-data.
-- Train original: tổng lượng data đã generate.
-- Train: split train sẽ được dùng để train được split từ train original.
-- Val: split val được dùng để validation được split từ train original.
-
-# Models
-Các file model như content encoder, style encoder và unet đang được host ở https://huggingface.co/dzungpham/font-diffusion-weights. Các file đã được convert từ định dạng .pth cũ của tác giả thành file .safetensors để hoà hợp sinh thái của HF và xử lý nhanh hơn.
-
-# Source code
-Code đang lưu ở github repository: https://github.com/dzungphieuluuky/FontDiffusion.git
-
-# Notebook
-Link notebook Kaggle: https://www.kaggle.com/code/dzung271828/font-diffusion
-
-# Weights and Biases
-Dữ liệu training và inference được lưu ở Weights and Biases.
-Một số hình ảnh khi train phase 1 từ pretrained model với perceptual loss và offset loss coefficient đã tăng lên so với training script gốc.
-![train loss](image-1.png)
-![percept loss](image-2.png)
-![offset loss](image-3.png)
-![diffusion loss](image-4.png)
-
-# Hướng tiếp theo
-- Model gần như đã bão hoà với architecture hiện tại. Nếu tích hợp Style Transformation Module từ FSTDiff thì có thể làm tăng capacity khiến model tốt hơn nhưng cần nhiều thời gian debug các lỗi dimension mismatch giữa các module từ codebase hiện tại của FontDiffuser.
-- Có thể kết hợp cả 2 paper lại để áp dụng multi scale extraction cho cả ảnh content và ảnh style. Debug module style transformation và thêm hàm loss consistency và có thể các hàm loss hỗ trợ khác vô hàm loss tổng.
+### 9. Một số paper liên quan:
+- [ ]  https://www.alphaxiv.org/abs/2510.13745
+- [ ]  https://www.alphaxiv.org/abs/2602.18874
+- [ ]  https://www.alphaxiv.org/abs/2509.16632
+- [ ]  https://www.alphaxiv.org/abs/2404.06779
+- [ ]  https://www.alphaxiv.org/abs/2501.08062
