@@ -259,6 +259,7 @@ class FontDiffuserWithFST(ModelMixin, ConfigMixin):
         """Log model parameter information including skeleton and frequency decomposition."""
         logger.info("=" * 80)
         logger.info("FontDiffuserWithFST Model Information")
+        logger.info(self)
         logger.info("=" * 80)
 
         # Log skeleton configuration
