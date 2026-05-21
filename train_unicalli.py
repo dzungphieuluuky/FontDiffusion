@@ -20,31 +20,42 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
 def get_args():
     """Parse command line arguments with FST and UniCalli specific options."""
     parser: argparse.ArgumentParser = get_parser()
-    
+
     # UniCalli Arguments Integration
     unicalli_group = parser.add_argument_group("UniCalli Improvements")
     unicalli_group.add_argument(
-        "--style_noise_fraction", type=float, default=0.0,
-        help="Maximum fraction of full noise applied to style images. 0.0 = completely clean."
+        "--style_noise_fraction",
+        type=float,
+        default=0.0,
+        help="Maximum fraction of full noise applied to style images. 0.0 = completely clean.",
     )
     unicalli_group.add_argument(
-        "--p_drop_content", type=float, default=0.1,
-        help="Probability of dropping content condition."
+        "--p_drop_content",
+        type=float,
+        default=0.1,
+        help="Probability of dropping content condition.",
     )
     unicalli_group.add_argument(
-        "--p_drop_style", type=float, default=0.05,
-        help="Probability of dropping style condition."
+        "--p_drop_style",
+        type=float,
+        default=0.05,
+        help="Probability of dropping style condition.",
     )
     unicalli_group.add_argument(
-        "--use_hard_negative", action="store_true", default=True,
-        help="If True, replace with a shuffled batch sample instead of pure noise."
+        "--use_hard_negative",
+        action="store_true",
+        default=True,
+        help="If True, replace with a shuffled batch sample instead of pure noise.",
     )
     unicalli_group.add_argument(
-        "--curriculum_steps", type=int, default=1000,
-        help="If > 0, p_drop ramps from 0 to target over this many steps."
+        "--curriculum_steps",
+        type=int,
+        default=1000,
+        help="If > 0, p_drop ramps from 0 to target over this many steps.",
     )
 
     args: argparse.Namespace = parser.parse_args()
@@ -82,14 +93,14 @@ def main():
             logger.info(f"  Query dim: {args.fst_query_dim}")
             logger.info(f"  Num scales: {args.fst_num_scales}")
             logger.info(f"  Style source same prob: {args.style_source_same_prob}")
-            
+
         logger.info("UniCalli Improvements:")
         logger.info(f"  Style noise fraction: {args.style_noise_fraction}")
         logger.info(f"  P_drop Content: {args.p_drop_content}")
         logger.info(f"  P_drop Style: {args.p_drop_style}")
         logger.info(f"  Use hard negative: {args.use_hard_negative}")
         logger.info(f"  Curriculum steps: {args.curriculum_steps}")
-            
+
         logger.info(f"Phase 2 (SCR): {args.phase_2}")
         logger.info(f"Batch size: {args.train_batch_size}")
         logger.info(f"Max steps: {args.max_train_steps}")

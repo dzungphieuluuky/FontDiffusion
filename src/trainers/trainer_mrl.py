@@ -182,17 +182,27 @@ class FontDiffuserMRLTrainer(FontDiffuserFSTTrainer):
             # Build MRL components
             if self.use_mrl:
                 logger.info("Building MRL components...")
-                
+
                 # Dynamically determine the maximum actual embedding dimension based on resolution architecture
-                actual_embedding_dim = self.model.content_encoder.arch["out_channels"][-1] if hasattr(self.model.content_encoder, "arch") else getattr(self.args, "content_encoder_dim", 512)
+                actual_embedding_dim = (
+                    self.model.content_encoder.arch["out_channels"][-1]
+                    if hasattr(self.model.content_encoder, "arch")
+                    else getattr(self.args, "content_encoder_dim", 512)
+                )
 
                 # Filter out nesting dims that are larger than the actual model embedding size
-                valid_nesting_dims = [d for d in self.mrl_nesting_dims if d <= actual_embedding_dim]
-                
+                valid_nesting_dims = [
+                    d for d in self.mrl_nesting_dims if d <= actual_embedding_dim
+                ]
+
                 # Adjust freq_radii to match the new nesting_dims length
                 if len(valid_nesting_dims) < len(self.mrl_nesting_dims):
-                    logger.warning(f"Truncated MRL nesting dims to {valid_nesting_dims} to fit model's embedding size ({actual_embedding_dim})")
-                    valid_freq_radii = list(self.mrl_freq_radii)[:len(valid_nesting_dims) - 1]
+                    logger.warning(
+                        f"Truncated MRL nesting dims to {valid_nesting_dims} to fit model's embedding size ({actual_embedding_dim})"
+                    )
+                    valid_freq_radii = list(self.mrl_freq_radii)[
+                        : len(valid_nesting_dims) - 1
+                    ]
                 else:
                     valid_freq_radii = tuple(self.mrl_freq_radii)
 
@@ -204,12 +214,12 @@ class FontDiffuserMRLTrainer(FontDiffuserFSTTrainer):
                         f"freq_radii={valid_freq_radii} (len={len(valid_freq_radii)}). "
                         f"Required: len(freq_radii) == len(nesting_dims) - 1"
                     )
-                
+
                 logger.info(
                     f"MRL Config: nesting_dims={valid_nesting_dims}, "
                     f"freq_radii={valid_freq_radii}"
                 )
-                
+
                 self.mrl_encoder, self.mrl_loss_module = build_mrl_components(
                     content_encoder=self.model.content_encoder,
                     embedding_dim=actual_embedding_dim,
@@ -367,10 +377,7 @@ class FontDiffuserMRLTrainer(FontDiffuserFSTTrainer):
         if steps_into_rampdown < self.mrl_rampdown_steps:
             # Linear interpolation
             alpha = steps_into_rampdown / self.mrl_rampdown_steps
-            return (
-                self.mrl_start_weight * (1.0 - alpha)
-                + self.mrl_final_weight * alpha
-            )
+            return self.mrl_start_weight * (1.0 - alpha) + self.mrl_final_weight * alpha
 
         return self.mrl_final_weight
 
@@ -496,9 +503,7 @@ class FontDiffuserMRLTrainer(FontDiffuserFSTTrainer):
                     loss_dict["mrl_loss"] = mrl_loss.item()
                     loss_dict["mrl_loss_weighted"] = weighted_mrl_loss.item()
                     loss_dict["mrl_weight"] = mrl_weight
-                    loss_dict.update(
-                        {f"mrl_{k}": v for k, v in mrl_metrics.items()}
-                    )
+                    loss_dict.update({f"mrl_{k}": v for k, v in mrl_metrics.items()})
 
             except Exception as e:
                 logger.error(f"MRL loss computation failed: {e}", exc_info=True)

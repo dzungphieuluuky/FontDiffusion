@@ -20,8 +20,10 @@ Image.MAX_IMAGE_PIXELS = None
 try:
     from filename_utils import compute_file_hash
 except ImportError:
+
     def compute_file_hash(char: str, style: str, font: str) -> str:
         return hashlib.md5(f"{char}_{style}_{font}".encode()).hexdigest()
+
 
 logger = logging.getLogger(__name__)
 
@@ -62,9 +64,7 @@ def _load_cv2_resize(path: str, new_width: int, new_height: int) -> np.ndarray:
 def _encode_jpeg(arr: np.ndarray, quality: int) -> bytes:
     """Encode a numpy RGB array to JPEG bytes via OpenCV."""
     bgr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
-    success, encoded = cv2.imencode(
-        ".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, quality]
-    )
+    success, encoded = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, quality])
     if not success:
         raise RuntimeError("cv2.imencode failed")
     return encoded.tobytes()
@@ -72,7 +72,7 @@ def _encode_jpeg(arr: np.ndarray, quality: int) -> bytes:
 
 class GeneratorDatasetBuilder:
     """Builds and uploads font style transfer datasets using a generator for true streaming."""
-    
+
     REQUIRED_DIRS = ["ContentImage", "TargetImage"]
     CHECKPOINT_FILE = "results_checkpoint.json"
 
@@ -83,33 +83,37 @@ class GeneratorDatasetBuilder:
         self.resize_height = config.resize_height
         self.spacing = config.spacing
         self.jpeg_quality = config.jpeg_quality
-        
+
         self.style_paths: dict[str, str] = {}
         self.content_paths: dict[str, dict] = {}
         self.target_paths: dict[str, dict[str, dict]] = {}
         self.generations = self._load_checkpoint()
-        
+
         self._validate_structure()
         self._build_style_path_index()
         self._build_path_caches()
-        
-        self.features = Features({
-            "character": Value("string"),
-            "style": Value("string"),
-            "font": Value("string"),
-            "content_image": HFImage(),
-            "style_image": HFImage(),
-            "target_image": HFImage(),
-            "comparison_image": HFImage(),
-            "content_hash": Value("string"),
-            "target_hash": Value("string"),
-        })
-        
+
+        self.features = Features(
+            {
+                "character": Value("string"),
+                "style": Value("string"),
+                "font": Value("string"),
+                "content_image": HFImage(),
+                "style_image": HFImage(),
+                "target_image": HFImage(),
+                "comparison_image": HFImage(),
+                "content_hash": Value("string"),
+                "target_hash": Value("string"),
+            }
+        )
+
         logger.info("Generator pipeline initialized:")
         logger.info(f"  Total generations: {len(self.generations)}")
         logger.info(f"  Style images indexed: {len(self.style_paths)}")
         logger.info(f"  Content images: {len(self.content_paths)}")
-        logger.info(f"  Target images: {sum(len(v) for v in self.target_paths.values())}")
+        logger.info(
+            f"  Target images: {sum(len(v) for v in self.target_paths.values())}"
+        )
 
     def _validate_structure(self) -> None:
         """Validate that required directories and checkpoint file exist."""
@@ -137,7 +141,7 @@ class GeneratorDatasetBuilder:
     def _build_path_caches(self) -> None:
         """Build file path caches with pre-read image dimensions."""
         logger.info("Building path caches with dimensions...")
-        
+
         # Content images
         content_dir = self.data_dir / "ContentImage"
         if content_dir.exists():
@@ -204,32 +208,36 @@ class GeneratorDatasetBuilder:
         """Validate if an item can be processed. Returns (is_valid, char, style)."""
         char = item.get("character", "")
         style = item.get("style", "")
-        
+
         if not char or not style:
             return False, char, style
-            
+
         if char not in self.content_paths:
             return False, char, style
-            
+
         if style not in self.target_paths or char not in self.target_paths[style]:
             return False, char, style
-            
+
         if style not in self.style_paths:
             return False, char, style
-            
+
         return True, char, style
 
-    def _process_item(self, char: str, style: str, font: str) -> Optional[Dict[str, Any]]:
+    def _process_item(
+        self, char: str, style: str, font: str
+    ) -> Optional[Dict[str, Any]]:
         """Process a single generation item. Returns None if processing fails."""
         try:
             # Get paths and info
             content_info = self.content_paths[char]
             target_info = self.target_paths[style][char]
             style_path = self.style_paths[style]
-            
+
             # Load style image
             style_raw = Path(style_path).read_bytes()
-            style_arr = cv2.imdecode(np.frombuffer(style_raw, dtype=np.uint8), cv2.IMREAD_COLOR)
+            style_arr = cv2.imdecode(
+                np.frombuffer(style_raw, dtype=np.uint8), cv2.IMREAD_COLOR
+            )
             if style_arr is None:
                 return None
             style_arr = cv2.cvtColor(style_arr, cv2.COLOR_BGR2RGB)
@@ -244,7 +252,9 @@ class GeneratorDatasetBuilder:
             # Load and resize images
             content_arr = _load_cv2_resize(content_info["path"], c_width, rh)
             target_arr = _load_cv2_resize(target_info["path"], t_width, rh)
-            style_arr = cv2.resize(style_arr, (s_width, rh), interpolation=cv2.INTER_LINEAR)
+            style_arr = cv2.resize(
+                style_arr, (s_width, rh), interpolation=cv2.INTER_LINEAR
+            )
 
             # Build comparison
             spacer = np.full((rh, self.spacing, 3), 255, dtype=np.uint8)
@@ -280,19 +290,21 @@ class GeneratorDatasetBuilder:
         skipped = 0
         last_log_time = time.time()
         failure_samples = []
-        
+
         for idx, item in enumerate(self.generations):
             is_valid, char, style = self._validate_item(item)
-            
+
             if not is_valid:
                 skipped += 1
                 if len(failure_samples) < 10:
-                    failure_samples.append(f"{item.get('character', '')}/{item.get('style', '')}")
+                    failure_samples.append(
+                        f"{item.get('character', '')}/{item.get('style', '')}"
+                    )
                 continue
-            
+
             font = item.get("font", "unknown")
             result = self._process_item(char, style, font)
-            
+
             if result:
                 yield result
                 processed += 1
@@ -300,16 +312,18 @@ class GeneratorDatasetBuilder:
                 skipped += 1
                 if len(failure_samples) < 10:
                     failure_samples.append(f"{char}/{style}")
-            
+
             # Log progress periodically
             if time.time() - last_log_time > 5:  # Every 5 seconds
-                logger.info(f"Progress: {idx+1}/{total} items processed ({processed} valid, {skipped} skipped)")
+                logger.info(
+                    f"Progress: {idx + 1}/{total} items processed ({processed} valid, {skipped} skipped)"
+                )
                 last_log_time = time.time()
-            
+
             # Force garbage collection periodically
             if idx % 1000 == 0:
                 gc.collect()
-        
+
         logger.info(f"Generator completed: {processed} valid, {skipped} skipped")
         if skipped > 0 and failure_samples:
             logger.warning(f"Sample failures: {failure_samples[:5]}")
@@ -325,18 +339,20 @@ class GeneratorDatasetBuilder:
             dataset = Dataset.from_generator(
                 self._generator_fn,
                 features=self.features,
-                cache_dir=None  # Don't cache to disk
+                cache_dir=None,  # Don't cache to disk
             )
-            
+
             build_time = time.time() - start_time
-            logger.info(f"Dataset generated: {len(dataset)} samples in {build_time:.2f}s")
-            
+            logger.info(
+                f"Dataset generated: {len(dataset)} samples in {build_time:.2f}s"
+            )
+
             # Push to hub if requested
             if self.config.push_to_hub:
                 self._push_to_hub(dataset)
-            
+
             return dataset
-            
+
         except Exception as e:
             logger.error(f"Dataset creation failed: {e}", exc_info=True)
             raise
@@ -349,7 +365,7 @@ class GeneratorDatasetBuilder:
 
         logger.info(f"Uploading dataset to {self.config.repo_id}...")
         upload_start = time.time()
-        
+
         try:
             # Use streaming upload with minimal memory footprint
             dataset.push_to_hub(
@@ -363,11 +379,13 @@ class GeneratorDatasetBuilder:
                 num_proc=1,  # Single process for memory efficiency
                 commit_message="Dataset upload via generator pipeline",
             )
-            
+
             upload_time = time.time() - upload_start
             logger.info(f"Upload completed in {upload_time:.2f}s")
-            logger.info(f"Dataset: https://huggingface.co/datasets/{self.config.repo_id}")
-            
+            logger.info(
+                f"Dataset: https://huggingface.co/datasets/{self.config.repo_id}"
+            )
+
         except Exception as exc:
             logger.error(f"Upload failed: {exc}")
             raise
@@ -376,12 +394,12 @@ class GeneratorDatasetBuilder:
         """Save dataset to local disk with memory-efficient streaming."""
         logger.info(f"Saving dataset to {output_path}...")
         start_time = time.time()
-        
+
         dataset.save_to_disk(
             str(output_path),
             num_proc=1,
         )
-        
+
         logger.info(f"Dataset saved in {time.time() - start_time:.2f}s")
 
 
@@ -401,10 +419,10 @@ def create_dataset_generator(
     num_shards: int = 8,
 ) -> Dataset:
     """Create and optionally upload a font style transfer dataset using generator for true streaming.
-    
+
     This implementation uses a generator function to yield samples one by one,
     minimizing memory usage and allowing true streaming to HuggingFace Hub.
-    
+
     Parameters
     ----------
     data_dir : str or Path
@@ -433,7 +451,7 @@ def create_dataset_generator(
         JPEG encoding quality (1-100).
     num_shards : int
         Number of Parquet shards for Hub upload.
-    
+
     Returns
     -------
     Dataset
@@ -453,13 +471,13 @@ def create_dataset_generator(
         jpeg_quality=jpeg_quality,
         num_shards=num_shards,
     )
-    
+
     builder = GeneratorDatasetBuilder(config)
     dataset = builder.build_and_upload()
-    
+
     if local_save_path and len(dataset) > 0:
         builder.save_local(dataset, Path(local_save_path))
-    
+
     return dataset
 
 
@@ -525,9 +543,7 @@ Examples:
         default=4,
         help="Number of shards for dataset upload (default: 4)",
     )
-    parser.add_argument(
-        "--verbose", action="store_true", help="Enable verbose logging"
-    )
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
     args = parser.parse_args()
 
     logging.basicConfig(

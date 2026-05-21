@@ -56,6 +56,7 @@ logger = logging.getLogger(__name__)
 # 1.  AsymmetricNoisingScheduler
 # =============================================================================
 
+
 class AsymmetricNoisingScheduler:
     """Decoupled noise schedules for content and output branches.
 
@@ -165,6 +166,7 @@ class AsymmetricNoisingScheduler:
 # 2.  StructureRecognitionHead + RecognitionAuxLoss
 # =============================================================================
 
+
 class StructureRecognitionHead(nn.Module):
     """Lightweight character identity classification head.
 
@@ -264,9 +266,10 @@ class RecognitionAuxLoss(nn.Module):
             (scalar loss, metrics dict)
         """
         # Prediction branch — gradients flow through here
-        pred_logits = self.head(pred_coarse)               # (B, n_classes)
+        pred_logits = self.head(pred_coarse)  # (B, n_classes)
         pred_loss = F.cross_entropy(
-            pred_logits, char_labels,
+            pred_logits,
+            char_labels,
             label_smoothing=self.label_smoothing,
         )
 
@@ -284,13 +287,14 @@ class RecognitionAuxLoss(nn.Module):
             "recog/pred_ce_loss": pred_loss.item(),
             "recog/pred_accuracy": pred_acc.item(),
             "recog/content_accuracy": content_acc.item(),  # diagnostic
-            "recog/content_ce": content_loss_val,          # diagnostic
+            "recog/content_ce": content_loss_val,  # diagnostic
         }
 
 
 # =============================================================================
 # 3.  ConditionalDropoutAugmentation
 # =============================================================================
+
 
 class ConditionalDropoutAugmentation:
     """Style-content disentanglement via conditional dropout.
@@ -372,7 +376,7 @@ class ConditionalDropoutAugmentation:
 
         # Per-sample dropout mask
         drop_content_mask = torch.rand(B) < p_c  # (B,)
-        drop_style_mask = torch.rand(B) < p_s    # (B,)
+        drop_style_mask = torch.rand(B) < p_s  # (B,)
 
         if drop_content_mask.any():
             content_dropped = True
@@ -396,17 +400,22 @@ class ConditionalDropoutAugmentation:
                     else:
                         style_out[i] = torch.randn_like(style_images[i])
 
-        return content_out, style_out, {
-            "content_dropped": content_dropped,
-            "style_dropped": style_dropped,
-            "n_content_dropped": int(drop_content_mask.sum()),
-            "n_style_dropped": int(drop_style_mask.sum()),
-        }
+        return (
+            content_out,
+            style_out,
+            {
+                "content_dropped": content_dropped,
+                "style_dropped": style_dropped,
+                "n_content_dropped": int(drop_content_mask.sum()),
+                "n_style_dropped": int(drop_style_mask.sum()),
+            },
+        )
 
 
 # =============================================================================
 # 4.  SpatialBoundingBoxConditioner
 # =============================================================================
+
 
 class SpatialBoundingBoxConditioner(nn.Module):
     """Rasterized spatial prior conditioning channel.
@@ -475,7 +484,7 @@ class SpatialBoundingBoxConditioner(nn.Module):
 
         # Gaussian blob at centroid
         dist_sq = (self.gy.unsqueeze(0) - cy) ** 2 + (self.gx.unsqueeze(0) - cx) ** 2
-        blob = torch.exp(-dist_sq / (2 * self.sigma ** 2))
+        blob = torch.exp(-dist_sq / (2 * self.sigma**2))
         return blob  # (B, H, W)
 
     def _column_density(self, ink: torch.Tensor) -> torch.Tensor:
@@ -495,9 +504,9 @@ class SpatialBoundingBoxConditioner(nn.Module):
               channel 0: ink centroid Gaussian blob
               channel 1: column ink density profile
         """
-        ink = self._ink_mask(content_images)      # (B, H, W)
-        centroid_ch = self._centroid_map(ink)     # (B, H, W)
-        density_ch = self._column_density(ink)    # (B, H, W)
+        ink = self._ink_mask(content_images)  # (B, H, W)
+        centroid_ch = self._centroid_map(ink)  # (B, H, W)
+        density_ch = self._column_density(ink)  # (B, H, W)
 
         spatial_map = torch.stack([centroid_ch, density_ch], dim=1)  # (B, 2, H, W)
         return spatial_map.detach()  # no grad — purely a conditioning signal
@@ -506,6 +515,7 @@ class SpatialBoundingBoxConditioner(nn.Module):
 # =============================================================================
 # 5.  UniCalliImprovementsModule  (unified entry point)
 # =============================================================================
+
 
 class UniCalliImprovementsModule(nn.Module):
     """Unified module bundling all four UniCalli-inspired improvements.
@@ -645,6 +655,7 @@ class UniCalliImprovementsModule(nn.Module):
 # 6.  Complete train_step integration example
 # =============================================================================
 
+
 def unicalli_train_step_template(
     trainer,
     samples: dict,
@@ -667,10 +678,10 @@ def unicalli_train_step_template(
     step = trainer.global_step
     device = trainer.accelerator.device
 
-    content_images = samples["content_image"]       # (B, C, H, W) in [-1, 1]
-    style_images   = samples["style_image"]         # (B, C, H, W) in [-1, 1]
-    target_images  = samples["target_image"]        # (B, C, H, W) in [-1, 1]
-    char_labels    = samples.get("char_label")      # (B,) int — NEW requirement
+    content_images = samples["content_image"]  # (B, C, H, W) in [-1, 1]
+    style_images = samples["style_image"]  # (B, C, H, W) in [-1, 1]
+    target_images = samples["target_image"]  # (B, C, H, W) in [-1, 1]
+    char_labels = samples.get("char_label")  # (B,) int — NEW requirement
 
     # ── Step 1: Prepare inputs (asymmetric noising + dropout + spatial prior) ──
     inputs = trainer.unicalli.prepare_inputs(
@@ -684,22 +695,23 @@ def unicalli_train_step_template(
     noise_pred = trainer.model(
         noisy_latents=inputs["noisy_target"],
         timestep=inputs["timesteps"],
-        content_images=inputs["content_aug"],       # augmented (dropout applied)
-        style_images=inputs["style_aug"],           # augmented
+        content_images=inputs["content_aug"],  # augmented (dropout applied)
+        style_images=inputs["style_aug"],  # augmented
         spatial_prior=inputs.get("spatial_prior"),  # optional extra channel
     )
 
     # ── Step 3: Reconstruct x0 and denormalise ──
     from src.tools.utils import x0_from_epsilon
+
     pred_x0 = x0_from_epsilon(
         scheduler=trainer.unicalli.asymmetric_noiser.scheduler,
         noise_pred=noise_pred,
         x_t=inputs["noisy_target"],
         timesteps=inputs["timesteps"],
     )
-    pred_x0_01   = ((pred_x0 + 1.0) / 2.0).clamp(0, 1)
-    content_01   = ((content_images + 1.0) / 2.0).clamp(0, 1)
-    style_01     = ((style_images + 1.0) / 2.0).clamp(0, 1)
+    pred_x0_01 = ((pred_x0 + 1.0) / 2.0).clamp(0, 1)
+    content_01 = ((content_images + 1.0) / 2.0).clamp(0, 1)
+    style_01 = ((style_images + 1.0) / 2.0).clamp(0, 1)
 
     # ── Step 4: MRL encoding ──
     _, pred_proj = trainer.mrl_encoder.forward_mrl(pred_x0_01)
@@ -718,7 +730,7 @@ def unicalli_train_step_template(
     if char_labels is not None:
         # pred_proj[0] is coarse prefix (64d) — same index as nesting_dims[0]
         recog_loss, recog_metrics = trainer.unicalli.compute_recognition_loss(
-            pred_coarse=pred_proj[0],      # coarse MRL prefix from pred
+            pred_coarse=pred_proj[0],  # coarse MRL prefix from pred
             content_coarse=content_proj[0],
             char_labels=char_labels.to(device),
         )
@@ -744,10 +756,10 @@ def unicalli_train_step_template(
     weights = trainer.loss_schedule.get_weights(step)
 
     total_loss = (
-        weights["mrl"]  * mrl_loss      # encoder: content structure
-      + weights["aux"]  * aux_loss      # decoder: freq/topology/diffusion
-      + 0.5             * recog_loss    # encoder: glyph identity (UniCalli)
-      + trainer.dro_weight * dro_loss   # perceptual quality
+        weights["mrl"] * mrl_loss  # encoder: content structure
+        + weights["aux"] * aux_loss  # decoder: freq/topology/diffusion
+        + 0.5 * recog_loss  # encoder: glyph identity (UniCalli)
+        + trainer.dro_weight * dro_loss  # perceptual quality
     )
 
     # ── Step 9: Single backward ──

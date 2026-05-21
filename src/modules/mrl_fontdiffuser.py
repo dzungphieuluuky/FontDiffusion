@@ -60,6 +60,7 @@ logger = logging.getLogger(__name__)
 # 1.  MRLProjectionHead
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class MRLProjectionHead(nn.Module):
     """One lightweight linear projection per Matryoshka granularity.
 
@@ -97,9 +98,9 @@ class MRLProjectionHead(nn.Module):
 
         # One linear per granularity: d_i → d_i (square, no bottleneck)
         # These are small: 64²+128²+256²+512² = 360,448 params for default dims
-        self.projections = nn.ModuleList([
-            nn.Linear(d, d, bias=False) for d in nesting_dims
-        ])
+        self.projections = nn.ModuleList(
+            [nn.Linear(d, d, bias=False) for d in nesting_dims]
+        )
 
         # Initialise as near-identity so training starts from a valid state
         for proj in self.projections:
@@ -118,8 +119,8 @@ class MRLProjectionHead(nn.Module):
         """
         outputs: list[torch.Tensor] = []
         for d, proj in zip(self.nesting_dims, self.projections):
-            prefix = embedding[..., :d]       # take prefix
-            projected = proj(prefix)           # linear transform
+            prefix = embedding[..., :d]  # take prefix
+            projected = proj(prefix)  # linear transform
             normalised = F.normalize(projected, p=2, dim=-1)
             outputs.append(normalised)
         return outputs
@@ -128,6 +129,7 @@ class MRLProjectionHead(nn.Module):
 # ─────────────────────────────────────────────────────────────────────────────
 # 2.  MRLContentLoss
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class MRLContentLoss(nn.Module):
     """Multi-granularity content preservation loss.
@@ -176,14 +178,11 @@ class MRLContentLoss(nn.Module):
         n = len(nesting_dims)
         # Coarsest level gets highest weight
         self.granularity_weights = [
-            base_weight * (weight_multiplier ** (n - 1 - i))
-            for i in range(n)
+            base_weight * (weight_multiplier ** (n - 1 - i)) for i in range(n)
         ]
         # Normalise so weights sum to n (preserves scale)
         w_sum = sum(self.granularity_weights)
-        self.granularity_weights = [
-            w * n / w_sum for w in self.granularity_weights
-        ]
+        self.granularity_weights = [w * n / w_sum for w in self.granularity_weights]
 
         logger.info(
             "MRLContentLoss granularity weights: "
@@ -246,14 +245,20 @@ class MRLContentLoss(nn.Module):
         Returns:
             (scalar loss, metrics dict)
         """
-        assert len(pred_projections) == len(content_projections) == len(self.nesting_dims)
+        assert (
+            len(pred_projections) == len(content_projections) == len(self.nesting_dims)
+        )
 
         total = torch.zeros(1, device=pred_projections[0].device).squeeze()
         metrics: dict[str, float] = {}
 
         for i, (d, w, pred_p, content_p) in enumerate(
-            zip(self.nesting_dims, self.granularity_weights,
-                pred_projections, content_projections)
+            zip(
+                self.nesting_dims,
+                self.granularity_weights,
+                pred_projections,
+                content_projections,
+            )
         ):
             contrastive = self._infonce_loss(pred_p, content_p)
             recon = self._reconstruction_loss(pred_p, content_p)
@@ -272,6 +277,7 @@ class MRLContentLoss(nn.Module):
 # ─────────────────────────────────────────────────────────────────────────────
 # 3.  MRLFourierAlignment
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class MRLFourierAlignment(nn.Module):
     """Aligns MRL granularity structure with Fourier frequency decomposition.
@@ -335,11 +341,13 @@ class MRLFourierAlignment(nn.Module):
         for i in range(n_supervised):
             d_in = nesting_dims[i]
             # Output: single-channel frequency band amplitude (H*W)
-            self.band_decoders.append(nn.Sequential(
-                nn.Linear(d_in, hidden_dim),
-                nn.GELU(),
-                nn.Linear(hidden_dim, H * W),
-            ))
+            self.band_decoders.append(
+                nn.Sequential(
+                    nn.Linear(d_in, hidden_dim),
+                    nn.GELU(),
+                    nn.Linear(hidden_dim, H * W),
+                )
+            )
 
         # Frequency masks (built lazily, cached)
         self._cached_masks: Optional[list[torch.Tensor]] = None
@@ -413,8 +421,8 @@ class MRLFourierAlignment(nn.Module):
                 target_norm = (target_amplitude - t_mean) / t_std
 
             # Predict band amplitude from prefix projection
-            prefix_proj = content_projections[i]   # (B, d_i) — with grad
-            pred_amplitude = decoder(prefix_proj)   # (B, H*W)
+            prefix_proj = content_projections[i]  # (B, d_i) — with grad
+            pred_amplitude = decoder(prefix_proj)  # (B, H*W)
 
             # Normalise prediction the same way
             p_mean = pred_amplitude.mean(dim=1, keepdim=True)
@@ -433,6 +441,7 @@ class MRLFourierAlignment(nn.Module):
 # ─────────────────────────────────────────────────────────────────────────────
 # 4.  MatryoshkaContentEncoder  (zero-surgery wrapper)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class MatryoshkaContentEncoder(nn.Module):
     """Wraps the existing FontDiffuser content encoder with MRL heads.
@@ -496,7 +505,7 @@ class MatryoshkaContentEncoder(nn.Module):
                                    one per nesting_dim, smallest first.
         """
         output = self.content_encoder(x, **kwargs)
-        
+
         # Handle the case where content_encoder returns a tuple (e.g., h, residual_features)
         if isinstance(output, tuple):
             embedding = output[0]
@@ -505,11 +514,11 @@ class MatryoshkaContentEncoder(nn.Module):
 
         # Pool spatial dims if embedding is (B, C, H, W)
         if embedding.dim() == 4:
-            flat = embedding.flatten(2).mean(dim=2)   # (B, C)
+            flat = embedding.flatten(2).mean(dim=2)  # (B, C)
         elif embedding.dim() == 3:
-            flat = embedding.mean(dim=1)               # (B, C) from seq
+            flat = embedding.mean(dim=1)  # (B, C) from seq
         else:
-            flat = embedding                           # (B, C) already flat
+            flat = embedding  # (B, C) already flat
 
         projected = self.mrl_head(flat)
         return output, projected
@@ -518,6 +527,7 @@ class MatryoshkaContentEncoder(nn.Module):
 # ─────────────────────────────────────────────────────────────────────────────
 # 5.  MRLLossModule  (unified loss entry point)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class MRLLossModule(nn.Module):
     """Unified entry point for all MRL-related losses.
@@ -619,6 +629,7 @@ class MRLLossModule(nn.Module):
 # 6.  Trainer integration helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def build_mrl_components(
     content_encoder: nn.Module,
     embedding_dim: int = 512,
@@ -679,7 +690,8 @@ def build_mrl_components(
     n_mrl_params = sum(p.numel() for p in mrl_encoder.mrl_head.parameters())
     n_fourier_params = (
         sum(p.numel() for p in mrl_loss_module.fourier_alignment.parameters())
-        if use_fourier_alignment else 0
+        if use_fourier_alignment
+        else 0
     )
     logger.info(
         f"MRL components built | "
@@ -693,6 +705,7 @@ def build_mrl_components(
 # ─────────────────────────────────────────────────────────────────────────────
 # 7.  Complete loss weight schedule (combines MRL + proposed losses)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class CombinedLossSchedule:
     """Manages loss weight annealing across training steps.
